@@ -15,6 +15,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
+class UGliderComponent;
 
 UCLASS()
 class ETHERIA_API APlayerCharacter : public ABaseCharacter
@@ -39,11 +40,16 @@ protected:
 	void StartSprint(const FInputActionValue& Value);
 	void StopSprint(const FInputActionValue& Value);
 
+	void ToggleGliding();
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
 	USpringArmComponent* CameraBoom;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
 	UCameraComponent* FollowCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
+	UGliderComponent* GliderComponent;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
 	UInputMappingContext* PlayerContext;
@@ -62,6 +68,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
 	UInputAction* SprintAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInput")
+	UInputAction* GliderAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	float WalkSpeed = 600.f;

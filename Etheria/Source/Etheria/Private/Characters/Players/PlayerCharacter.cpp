@@ -10,8 +10,10 @@
 #include "EnhancedInputSubsystems.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/Characters/Player/GliderComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -25,6 +27,8 @@ APlayerCharacter::APlayerCharacter()
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
+
+    GliderComponent = CreateDefaultSubobject<UGliderComponent>(TEXT("GliderComponent"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -49,6 +53,7 @@ void APlayerCharacter::BeginPlay()
 void APlayerCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -80,6 +85,11 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         {
             EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &APlayerCharacter::StartSprint);
             EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
+        }
+
+        if (GliderAction)
+        {
+            EnhancedInput->BindAction(GliderAction, ETriggerEvent::Started, this, &APlayerCharacter::ToggleGliding);
         }
 
     }
@@ -129,3 +139,10 @@ void APlayerCharacter::StopSprint(const FInputActionValue& Value)
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
+void APlayerCharacter::ToggleGliding()
+{
+    if (GliderComponent)
+    {
+        GliderComponent->ToggleGliding();
+    }
+}
