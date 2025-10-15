@@ -1,14 +1,15 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: 0nnen
  * Class: PlayerCharacter - Header
-*/
+ */
 
 #pragma once
-
 #include "CoreMinimal.h"
 #include "Characters/BaseCharacter.h"
+#include "Components/Inventory/InventoryComponent.h"
+#include "Components/Interaction/InteractorComponent.h"
 #include "PlayerCharacter.generated.h"
 
 class USpringArmComponent;
@@ -69,5 +70,32 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	float SprintSpeed = 900.f;
 
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player", meta=(AllowPrivateAccess="true"))
+	UInventoryComponent* InventoryComponent = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player", meta=(AllowPrivateAccess="true"))
+	UInteractorComponent* InteractorComponent = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+	UInputAction* NextItemAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+	UInputAction* PrevItemAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+	UInputAction* UseItemAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+	UInputAction* DropItemAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+	UInputAction* InteractAction; // (Pick up)
+
+	UFUNCTION() void Input_SelectNext();
+	UFUNCTION() void Input_SelectPrev();
+	UFUNCTION() void Input_UseItem();
+	UFUNCTION() void Input_DropItem();
+	UFUNCTION() void Input_Interact();
 private:
 };

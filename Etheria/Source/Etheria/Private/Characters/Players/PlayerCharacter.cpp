@@ -1,14 +1,13 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: 0nnen
  * Class: PlayerCharacter - Source
 */
 
 #include "Characters/Players/PlayerCharacter.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
-
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -25,6 +24,9 @@ APlayerCharacter::APlayerCharacter()
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
+
+    InventoryComponent  = CreateDefaultSubobject<UInventoryComponent>(TEXT("BPC_Inventory"));
+    InteractorComponent = CreateDefaultSubobject<UInteractorComponent>(TEXT("BPC_Interactor"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -81,7 +83,17 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
             EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &APlayerCharacter::StartSprint);
             EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
         }
+        
+        if (NextItemAction) { EnhancedInput->BindAction(NextItemAction, ETriggerEvent::Triggered, this, &ThisClass::Input_SelectNext); }
+        if (PrevItemAction) { EnhancedInput->BindAction(PrevItemAction, ETriggerEvent::Triggered, this, &ThisClass::Input_SelectPrev); }
 
+        if (UseItemAction)  { EnhancedInput->BindAction(UseItemAction,  ETriggerEvent::Started, this, &ThisClass::Input_UseItem); }
+        if (DropItemAction) { EnhancedInput->BindAction(DropItemAction, ETriggerEvent::Started, this, &ThisClass::Input_DropItem); }
+
+        if (InteractAction)
+        {
+            EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &ThisClass::Input_Interact);
+        }
     }
 }
 
@@ -94,11 +106,11 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-        const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+        const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+        const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 
-        AddMovementInput(Forward, MovementVector.X);
-        AddMovementInput(Right, MovementVector.Y);
+        AddMovementInput(Forward, MovementVector.Y);
+        AddMovementInput(Right, MovementVector.X);
     }
 }
 
@@ -129,3 +141,30 @@ void APlayerCharacter::StopSprint(const FInputActionValue& Value)
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
+void APlayerCharacter::Input_SelectNext()
+{
+    if (InventoryComponent) { InventoryComponent->SelectNext(); }
+}
+void APlayerCharacter::Input_SelectPrev()
+{
+    if (InventoryComponent) { InventoryComponent->SelectPrevious(); }
+}
+void APlayerCharacter::Input_UseItem()
+{
+    if (InventoryComponent) { InventoryComponent->UseSelected(); }
+}
+void APlayerCharacter::Input_DropItem()
+{
+    if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); }
+}
+
+void APlayerCharacter::Input_Interact()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
+    if (!InteractorComponent)
+    {
+        UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
+        return;
+    }
+    InteractorComponent->TryInteract();
+}
