@@ -25,23 +25,27 @@ class ETHERIA_API APlayerCharacter : public ABaseCharacter
 public:
 	APlayerCharacter();
 
+	UStaticMeshComponent* GetGliderVisual() const;
+	FORCEINLINE FVector2D GetMoveInput() const { return MoveInput; }
+
 protected:
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
-
+	
 	void Move(const struct FInputActionValue& Value);
 	void Look(const struct FInputActionValue& Value);
 
-	void StartCrouch(const FInputActionValue& Value);
-	void StopCrouch(const FInputActionValue& Value);
+	void StartCrouch();
+	void StopCrouch();
 
-	void StartSprint(const FInputActionValue& Value);
-	void StopSprint(const FInputActionValue& Value);
+	void StartSprint();
+	void StopSprint();
 
-	void ToggleGliding();
-
+	void ToggleGlideMode();
+	void ToggleDiveMode();
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
 	USpringArmComponent* CameraBoom;
 
@@ -50,6 +54,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
 	UGliderComponent* GliderComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
+	UStaticMeshComponent* GliderVisual;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
 	UInputMappingContext* PlayerContext;
@@ -72,6 +79,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInput")
 	UInputAction* GliderAction;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInput")
+	UInputAction* DiveAction;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	float WalkSpeed = 600.f;
 
@@ -79,4 +89,5 @@ protected:
 	float SprintSpeed = 900.f;
 
 private:
+	FVector2D MoveInput = FVector2D::ZeroVector;
 };
