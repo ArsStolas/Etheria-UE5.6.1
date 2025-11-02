@@ -3,12 +3,13 @@
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Header
-*/
+ */
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Characters/BaseCharacter.h"
+#include "InputActionValue.h"
 #include "PlayerCharacter.generated.h"
 
 class USpringArmComponent;
@@ -17,77 +18,138 @@ class UInputMappingContext;
 class UInputAction;
 class UGliderComponent;
 
+USTRUCT()
+struct FAxisPressState
+{
+    GENERATED_BODY();
+
+    bool bNegPressed = false;
+    bool bPosPressed = false;
+    double NegLastTime = -DBL_MAX;
+    double PosLastTime = -DBL_MAX;
+
+    int32 GetAxisValue() const
+    {
+        if (bNegPressed && bPosPressed)
+        {
+            return (PosLastTime > NegLastTime) ? +1 : -1;
+        }
+        if (bNegPressed) return -1;
+        if (bPosPressed) return +1;
+        return 0;
+    }
+
+    void OnNegStarted(double Time) { bNegPressed = true;  NegLastTime = Time; }
+    void OnPosStarted(double Time) { bPosPressed = true;  PosLastTime = Time; }
+    void OnNegCompleted()          { bNegPressed = false; }
+    void OnPosCompleted()          { bPosPressed = false; }
+};
+
 UCLASS()
 class ETHERIA_API APlayerCharacter : public ABaseCharacter
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	APlayerCharacter();
+    APlayerCharacter();
 
-	UStaticMeshComponent* GetGliderVisual() const;
-	FORCEINLINE FVector2D GetMoveInput() const { return MoveInput; }
+    UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
+    bool IsInSpecialMode() const;
+
+    // Exposés pour le GliderComponent
+    int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
+    int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
 
 protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
-	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaTime) override;
-	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
-	
-	void Move(const struct FInputActionValue& Value);
-	void Look(const struct FInputActionValue& Value);
+    void Look(const struct FInputActionValue& Value);
 
-	void StartCrouch();
-	void StopCrouch();
+    void StartCrouch();
+    void StopCrouch();
 
-	void StartSprint();
-	void StopSprint();
+    void StartSprint();
+    void StopSprint();
 
-	void ToggleGlideMode();
-	void ToggleDiveMode();
-	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
-	USpringArmComponent* CameraBoom;
+    void ToggleGlideMode();
+    void ToggleDiveMode();
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
-	UCameraComponent* FollowCamera;
+    void AlignToCamera();
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
-	UGliderComponent* GliderComponent;
+    // === CAMERA COMPONENTS ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
+    USpringArmComponent* CameraBoom;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
-	UStaticMeshComponent* GliderVisual;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
+    UCameraComponent* FollowCamera;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputMappingContext* PlayerContext;
+    // === GLIDER ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
+    UGliderComponent* GliderComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* MoveAction;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
+    UStaticMeshComponent* GliderVisual;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* LookAction;
+    // === INPUT ===
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputMappingContext* PlayerContext;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* JumpAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* LookAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* CrouchAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* JumpAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* SprintAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* CrouchAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInput")
-	UInputAction* GliderAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* SprintAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInput")
-	UInputAction* DiveAction;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
+    UInputAction* GliderAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-	float WalkSpeed = 600.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
+    UInputAction* DiveAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-	float SprintSpeed = 900.f;
+    // 4 actions séparées
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* ForwardAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* BackAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* LeftAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* RightAction;
+
+    // === MOVEMENT SPEEDS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float WalkSpeed = 600.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float SprintSpeed = 900.f;
 
 private:
-	FVector2D MoveInput = FVector2D::ZeroVector;
+    // États d’axes
+    FAxisPressState Horizontal;
+    FAxisPressState Vertical;
+
+    // === CAMERA STATE ===
+    bool bIsLookingAround = false;
+    float TimeSinceLastLook = 0.f;
+
+    // Handlers
+    void OnForwardStarted(const FInputActionValue& Value);
+    void OnForwardCompleted(const FInputActionValue& Value);
+    void OnBackStarted(const FInputActionValue& Value);
+    void OnBackCompleted(const FInputActionValue& Value);
+    void OnLeftStarted(const FInputActionValue& Value);
+    void OnLeftCompleted(const FInputActionValue& Value);
+    void OnRightStarted(const FInputActionValue& Value);
+    void OnRightCompleted(const FInputActionValue& Value);
 };

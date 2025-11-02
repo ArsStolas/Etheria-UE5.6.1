@@ -3,21 +3,22 @@
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
-*/
+ */
 
 #include "Characters/Players/PlayerCharacter.h"
-#include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
 
 #include "Camera/CameraComponent.h"
-#include "Components/Characters/Player/Glider/GliderComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "Components/Characters/Player/Glider/GliderComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
+    // --- CAMERA SETUP ---
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->TargetArmLength = 300.f;
@@ -27,58 +28,55 @@ APlayerCharacter::APlayerCharacter()
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
 
+    // --- CHARACTER ROTATION ---
+    bUseControllerRotationYaw = false;
+    bUseControllerRotationPitch = false;
+    bUseControllerRotationRoll = false;
+
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+
+    // --- GLIDER ---
+    GliderComponent = CreateDefaultSubobject<UGliderComponent>(TEXT("GliderComponent"));
     GliderVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GliderVisual"));
     GliderVisual->SetupAttachment(RootComponent);
-    GliderVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    
-    GliderComponent = CreateDefaultSubobject<UGliderComponent>(TEXT("GliderComponent"));
 }
 
 void APlayerCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    GliderVisual->SetVisibility(false);
-
-    if (const APlayerController* PC = Cast<APlayerController>(GetController()))
+    if (APlayerController* PC = Cast<APlayerController>(Controller))
     {
-        if (const ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
-            if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+            if (PlayerContext)
             {
-                if (PlayerContext)
-                {
-                    Subsystem->AddMappingContext(PlayerContext, 0);
-                }
+                Subsystem->AddMappingContext(PlayerContext, 0);
             }
         }
     }
+
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (GEngine && GetCharacterMovement())
+    int Hor = Horizontal.GetAxisValue();
+    int Ver = Vertical.GetAxisValue();
+
+    if (Controller)
     {
-        float VerticalSpeed = GetCharacterMovement()->Velocity.Z;
-        FString VerticalState = (VerticalSpeed > 50.f) ? TEXT("↑ MONTÉE") 
-                               : (VerticalSpeed < -50.f) ? TEXT("↓ DESCENTE") 
-                               : TEXT("→ STABLE");
+        const FRotator Rotation = Controller->GetControlRotation();
+        const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-        FString Msg = FString::Printf(
-            TEXT("[PLAYER] Alt: %.0f | VZ: %.0f %s | Speed: %.0f"), 
-            GetActorLocation().Z,
-            VerticalSpeed,
-            *VerticalState,
-            GetCharacterMovement()->Velocity.Size()
-        );
+        const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+        const FVector Right   = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-        FColor DebugColor = FColor::White;
-        if (VerticalSpeed > 50.f) DebugColor = FColor::Green;
-        else if (VerticalSpeed < -50.f) DebugColor = FColor::Red;
-
-        GEngine->AddOnScreenDebugMessage(0, 0.f, DebugColor, Msg);
+        if (Ver != 0) AddMovementInput(Forward, static_cast<float>(Ver));
+        if (Hor != 0) AddMovementInput(Right, static_cast<float>(Hor));
     }
 }
 
@@ -86,108 +84,74 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-    if (UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+    if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
-        if (MoveAction)
-        {
-            EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
-        }
-        if (LookAction)
-        {
-            EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
-        }
-        if (JumpAction)
-        {
-            EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
-            EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-        }
-        if (CrouchAction)
-        {
-            EnhancedInput->BindAction(CrouchAction, ETriggerEvent::Started, this, &APlayerCharacter::StartCrouch);
-            EnhancedInput->BindAction(CrouchAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopCrouch);
-        }
+        // Mouvement 4 touches
+        EIC->BindAction(ForwardAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnForwardStarted);
+        EIC->BindAction(ForwardAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnForwardCompleted);
+        EIC->BindAction(BackAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnBackStarted);
+        EIC->BindAction(BackAction,    ETriggerEvent::Completed, this, &APlayerCharacter::OnBackCompleted);
+        EIC->BindAction(LeftAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
+        EIC->BindAction(LeftAction,  ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
+        EIC->BindAction(LeftAction,  ETriggerEvent::Completed, this, &APlayerCharacter::OnLeftCompleted);
+        EIC->BindAction(RightAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnRightStarted);
+        EIC->BindAction(RightAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnRightCompleted);
 
-        if (SprintAction)
-        {
-            EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &APlayerCharacter::StartSprint);
-            EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
-        }
-
-        if (GliderAction)
-        {
-            EnhancedInput->BindAction(GliderAction, ETriggerEvent::Started, this, &APlayerCharacter::ToggleGlideMode);
-        }
-
-        if (DiveAction)
-        {
-            EnhancedInput->BindAction(DiveAction, ETriggerEvent::Started, this, &APlayerCharacter::ToggleDiveMode);
-        }
-
+        // Autres actions
+        EIC->BindAction(LookAction,  ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
+        EIC->BindAction(JumpAction,  ETriggerEvent::Triggered, this, &ACharacter::Jump);
+        EIC->BindAction(CrouchAction, ETriggerEvent::Started,   this, &APlayerCharacter::StartCrouch);
+        EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopCrouch);
+        EIC->BindAction(SprintAction, ETriggerEvent::Started,   this, &APlayerCharacter::StartSprint);
+        EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
+        EIC->BindAction(GliderAction, ETriggerEvent::Started,   this, &APlayerCharacter::ToggleGlideMode);
+        EIC->BindAction(DiveAction,   ETriggerEvent::Started,   this, &APlayerCharacter::ToggleDiveMode);
     }
 }
 
-UStaticMeshComponent* APlayerCharacter::GetGliderVisual() const
-{
-    return GliderVisual;
-}
-
-void APlayerCharacter::Move(const FInputActionValue& Value)
-{
-    MoveInput = Value.Get<FVector2D>();
-    
-    if (Controller != nullptr)
-    {
-        const FRotator Rotation = Controller->GetControlRotation();
-        const FRotator YawRotation(0, Rotation.Yaw, 0);
-
-        const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-        AddMovementInput(Forward, MoveInput.X);
-        AddMovementInput(Right, MoveInput.Y);
-    }
-}
+void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnForwardCompleted(const FInputActionValue&){ Vertical.OnPosCompleted(); }
+void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnBackCompleted(const FInputActionValue&)    { Vertical.OnNegCompleted(); }
+void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnLeftCompleted(const FInputActionValue&)    { Horizontal.OnNegCompleted(); }
+void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal.OnPosCompleted(); }
 
 void APlayerCharacter::Look(const FInputActionValue& Value)
 {
     const FVector2D LookAxis = Value.Get<FVector2D>();
-    AddControllerYawInput(LookAxis.X);
-    AddControllerPitchInput(LookAxis.Y);
+    if (Controller)
+    {
+        AddControllerYawInput(LookAxis.X);
+        AddControllerPitchInput(LookAxis.Y);
+    }
 }
 
-void APlayerCharacter::StartCrouch()
-{
-    Crouch();
-}
-
-void APlayerCharacter::StopCrouch()
-{
-    UnCrouch();
-}
-
-void APlayerCharacter::StartSprint()
-{
-    GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
-}
-
-void APlayerCharacter::StopSprint()
-{
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-}
+void APlayerCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
+void APlayerCharacter::StopSprint()  { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
+void APlayerCharacter::StartCrouch() { Crouch(); }
+void APlayerCharacter::StopCrouch()  { UnCrouch(); }
 
 void APlayerCharacter::ToggleGlideMode()
 {
-    if (GliderComponent)
-    {
-        GliderComponent->ToggleGliding();
-    }
+    if (GliderComponent) GliderComponent->ToggleGliding();
 }
-
 void APlayerCharacter::ToggleDiveMode()
 {
-    if (GliderComponent)
+    if (GliderComponent) GliderComponent->ToggleDiving();
+}
+
+void APlayerCharacter::AlignToCamera()
+{
+    if (Controller)
     {
-        GliderComponent->ToggleDiving();
+        FRotator CamRot = Controller->GetControlRotation();
+        SetActorRotation(FRotator(0.f, CamRot.Yaw, 0.f));
     }
 }
 
+bool APlayerCharacter::IsInSpecialMode() const
+{
+    return (GliderComponent && GliderComponent->IsGliding());
+}
