@@ -75,6 +75,19 @@ protected:
     UPROPERTY(EditAnywhere, Category="Dive|Settings")
     float MaxRollAngle = 30.f;
 
+
+    // Vitesse de rotation en Yaw (plus bas = virages plus larges)
+    UPROPERTY(EditAnywhere, Category="Dive|Settings")
+    float TurnRateDive = 120.f;
+
+    // Facteur de portance (plus haut = plus facile de remonter)
+    UPROPERTY(EditAnywhere, Category="Dive|Settings")
+    float LiftFactor = 0.7f;
+
+    // Gravité appliquée en dive (plus bas = plane plus longtemps)
+    UPROPERTY(EditAnywhere, Category="Dive|Settings")
+    float DiveGravity = -300.f;
+
 private:
     void StartGliding();
     void StopGliding();
@@ -88,6 +101,7 @@ private:
     void ApplyOriginalSettings();
     
     void HandleDescent(float DeltaTime);
+    void HandleDive(float DeltaTime);
 
     APlayerCharacter* OwnerCharacter = nullptr;
 

@@ -37,7 +37,7 @@ void UGliderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 		break;
 
 	case EGliderMode::Diving:
-		//HandleDive(DeltaTime);
+		HandleDive(DeltaTime);
 		// En mode Flying, IsWalking() ne fonctionne pas, donc on vérifie avec un raycast
 		if (IsGrounded())
 		{
@@ -125,17 +125,19 @@ void UGliderComponent::StartDiving()
 	if (!OwnerCharacter || CurrentMode != EGliderMode::Gliding) return;
 
 	CurrentMode = EGliderMode::Diving;
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, TEXT("Diving Started"));
+
+	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
 
 	if (OwnerCharacter->GetGliderVisual())
 		OwnerCharacter->GetGliderVisual()->SetVisibility(false);
-
-	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
 	
+	MoveComp->bUseControllerDesiredRotation = false;
+	MoveComp->bOrientRotationToMovement = false;
+
 	MoveComp->GravityScale = 0.0f;
 	MoveComp->AirControl = 1.0f;
 	MoveComp->BrakingDecelerationFalling = 0.f;
-	
+
 	MoveComp->SetMovementMode(MOVE_Flying);
 }
 
@@ -297,122 +299,86 @@ void UGliderComponent::HandleDescent(float DeltaTime)
 	MoveComp->Velocity = TargetVel;
 }
 
-			
-
-/*void UGliderComponent::HandleDive(float DeltaTime)
+void UGliderComponent::HandleDive(float DeltaTime)
 {
-	if (!OwnerCharacter) return;
+    if (!OwnerCharacter) return;
 
-	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
-	FVector2D Input = OwnerCharacter->GetMoveInput();
+    UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
 
-	// === PITCH (Haut/Bas) - Input.X ===
-	// Input.X > 0 (avancer/W) = pique vers le bas (pitch négatif)
-	// Input.X < 0 (reculer/S) = tire vers le haut (pitch positif)
-	float TargetPitch = FMath::Clamp(-Input.X * MaxPitchAngle, -MaxPitchAngle, MaxPitchAngle);
+    // Lire les axes du PlayerCharacter
+    const int Hor = OwnerCharacter->GetHorizontalAxis();
+    const int Ver = OwnerCharacter->GetVerticalAxis();
 
-	// === ROLL (Gauche/Droite) - Input.Y ===
-	// Input.Y > 0 (droite/D) = incline à droite (roll négatif)
-	// Input.Y < 0 (gauche/A) = incline à gauche (roll positif)
-	// INVERSÉ pour correspondre à la direction
-	float TargetRoll = FMath::Clamp(Input.Y * MaxRollAngle, -MaxRollAngle, MaxRollAngle);
+    // === PITCH (avant/arrière) ===
+    float TargetPitch = FMath::Clamp(-Ver * MaxPitchAngle, -MaxPitchAngle, MaxPitchAngle);
 
-	// === Interpolation de la rotation ===
-	FRotator CurrentRot = OwnerCharacter->GetActorRotation();
-	FRotator TargetRot = FRotator(TargetPitch, CurrentRot.Yaw, TargetRoll);
-	FRotator NewRot = FMath::RInterpTo(CurrentRot, TargetRot, DeltaTime, 4.f);
-	OwnerCharacter->SetActorRotation(NewRot);
+    // === ROLL (gauche/droite) ===
+    float TargetRoll = FMath::Clamp(Hor * MaxRollAngle, -MaxRollAngle, MaxRollAngle);
 
-	// === GESTION DE LA VITESSE ===
-	float PitchFactor = NewRot.Pitch / MaxPitchAngle; // entre -1 et 1
-	
-	if (PitchFactor < -0.1f) // Pique vers le bas (pitch négatif)
-	{
-		CurrentDiveSpeed += DiveAcceleration * FMath::Abs(PitchFactor) * DeltaTime;
-	}
-	else if (PitchFactor > 0.1f) // Monte (pitch positif)
-	{
-		CurrentDiveSpeed -= DiveDeceleration * PitchFactor * 2.f * DeltaTime;
-	}
-	else // Vol horizontal
-	{
-		CurrentDiveSpeed -= DiveDeceleration * 0.3f * DeltaTime;
-	}
+    // === Interpolation de la rotation ===
+    FRotator CurrentRot = OwnerCharacter->GetActorRotation();
+    FRotator TargetRot = FRotator(TargetPitch, CurrentRot.Yaw, TargetRoll);
+    FRotator NewRot = FMath::RInterpTo(CurrentRot, TargetRot, DeltaTime, 3.f);
+    OwnerCharacter->SetActorRotation(NewRot);
 
-	CurrentDiveSpeed = FMath::Clamp(CurrentDiveSpeed, MinDiveSpeed, MaxDiveSpeed);
+    // === Gestion de la vitesse ===
+    float PitchFactor = NewRot.Pitch / MaxPitchAngle;
 
-	// === ROTATION DU YAW (VIRAGE AVEC LE ROLL) ===
-	// Le roll fait tourner le personnage progressivement
-	float RollFactor = NewRot.Roll / MaxRollAngle; // entre -1 et 1
-	if (FMath::Abs(RollFactor) > 0.1f)
-	{
-		// Virage très rapide pour un contrôle réactif
-		float TurnRate = RollFactor * 360.f; // 360 degrés/sec = tour complet en 1 sec !
-		float SpeedBonus = FMath::Clamp(CurrentDiveSpeed / MaxDiveSpeed, 0.6f, 1.8f);
-		
-		FRotator NewYawRot = OwnerCharacter->GetActorRotation();
-		NewYawRot.Yaw += TurnRate * SpeedBonus * DeltaTime;
-		OwnerCharacter->SetActorRotation(FRotator(NewRot.Pitch, NewYawRot.Yaw, NewRot.Roll));
-	}
+    if (PitchFactor < -0.1f) // pique vers le bas → accélère fort
+        CurrentDiveSpeed += DiveAcceleration * 1.2f * FMath::Abs(PitchFactor) * DeltaTime;
+    else if (PitchFactor > 0.1f) // monte → perd un peu de vitesse
+        CurrentDiveSpeed -= DiveDeceleration * 0.8f * PitchFactor * DeltaTime;
+    else // vol horizontal/stable
+        CurrentDiveSpeed -= DiveDeceleration * 0.1f * DeltaTime;
 
-	// === CALCUL DE LA VÉLOCITÉ HORIZONTALE ===
-	FRotator HorizontalRot = FRotator(0.f, OwnerCharacter->GetActorRotation().Yaw, 0.f);
-	FVector HorizontalDir = FRotationMatrix(HorizontalRot).GetUnitAxis(EAxis::X);
-	FVector TargetVelocity = HorizontalDir * CurrentDiveSpeed;
+    CurrentDiveSpeed = FMath::Clamp(CurrentDiveSpeed, MinDiveSpeed, MaxDiveSpeed * 1.3f);
 
-	// === VÉLOCITÉ VERTICALE ===
-	float VerticalSpeed = PitchFactor * CurrentDiveSpeed * 0.6f;
-	float BaseGravity = -400.f;
-	TargetVelocity.Z = VerticalSpeed + BaseGravity;
+    // === Yaw influencé par le Roll ===
+    float RollFactor = NewRot.Roll / MaxRollAngle;
+    if (FMath::Abs(RollFactor) > 0.1f)
+    {
+        float TurnRate = RollFactor * TurnRateDive;
+        float SpeedBonus = FMath::Clamp(CurrentDiveSpeed / MaxDiveSpeed, 0.8f, 2.0f);
 
-	// Gravité renforcée si pitch vers le haut et pas assez de vitesse
-	if (PitchFactor > 0.2f && CurrentDiveSpeed < MinDiveSpeed * 1.5f)
-	{
-		float SpeedRatio = CurrentDiveSpeed / (MinDiveSpeed * 1.5f);
-		TargetVelocity.Z += FMath::Lerp(-1500.f, 0.f, SpeedRatio);
-	}
+        FRotator NewYawRot = OwnerCharacter->GetActorRotation();
+        NewYawRot.Yaw += TurnRate * SpeedBonus * DeltaTime;
+        OwnerCharacter->SetActorRotation(FRotator(NewRot.Pitch, NewYawRot.Yaw, NewRot.Roll));
+    }
 
-	// Gravité renforcée si vitesse très basse
-	if (CurrentDiveSpeed < MinDiveSpeed * 0.8f)
-	{
-		TargetVelocity.Z += FMath::Lerp(-1200.f, 0.f, CurrentDiveSpeed / (MinDiveSpeed * 0.8f));
-	}
+    // === Vélocité ===
+    FRotator HorizontalRot(0.f, OwnerCharacter->GetActorRotation().Yaw, 0.f);
+    FVector HorizontalDir = FRotationMatrix(HorizontalRot).GetUnitAxis(EAxis::X);
+    FVector TargetVelocity = HorizontalDir * CurrentDiveSpeed;
 
-	// Gravité renforcée si vitesse horizontale faible
-	float HorizontalSpeed = FVector(MoveComp->Velocity.X, MoveComp->Velocity.Y, 0.f).Size();
-	float MinHorizontalSpeed = 200.f;
-	if (HorizontalSpeed < MinHorizontalSpeed)
-	{
-		TargetVelocity.Z += FMath::Lerp(-1500.f, 0.f, HorizontalSpeed / MinHorizontalSpeed);
-	}
+    float VerticalSpeed = PitchFactor * CurrentDiveSpeed * LiftFactor;
+    TargetVelocity.Z = VerticalSpeed + DiveGravity;
 
-	// === APPLICATION DE LA VÉLOCITÉ ===
-	MoveComp->Velocity = FMath::VInterpTo(MoveComp->Velocity, TargetVelocity, DeltaTime, 3.f);
+    MoveComp->Velocity = FMath::VInterpTo(MoveComp->Velocity, TargetVelocity, DeltaTime, 2.5f);
 
-	// === DEBUG ===
-	if (GEngine)
-	{
-		float CurrentVerticalSpeed = MoveComp->Velocity.Z;
-		FString VerticalState = (CurrentVerticalSpeed > 50.f) ? TEXT("↑ MONTÉE") 
-							   : (CurrentVerticalSpeed < -50.f) ? TEXT("↓ DESCENTE") 
-							   : TEXT("→ STABLE");
+    // === Debug ===
+    if (GEngine)
+    {
+        float CurrentVerticalSpeed = MoveComp->Velocity.Z;
+        FString VerticalState = (CurrentVerticalSpeed > 50.f) ? TEXT("↑ MONTÉE")
+                               : (CurrentVerticalSpeed < -50.f) ? TEXT("↓ DESCENTE")
+                               : TEXT("→ STABLE");
 
-		FString Msg = FString::Printf(
-			TEXT("Alt: %.0f | VZ: %.0f %s | Speed: %.0f (%.0f%%) | P: %.1f° R: %.1f° Y: %.1f°"),
-			OwnerCharacter->GetActorLocation().Z,
-			CurrentVerticalSpeed,
-			*VerticalState,
-			CurrentDiveSpeed,
-			(CurrentDiveSpeed / MaxDiveSpeed) * 100.f,
-			NewRot.Pitch,
-			NewRot.Roll,
-			OwnerCharacter->GetActorRotation().Yaw
-		);
+        FString Msg = FString::Printf(
+            TEXT("Alt: %.0f | VZ: %.0f %s | Speed: %.0f (%.0f%%) | P: %.1f° R: %.1f° Y: %.1f°"),
+            OwnerCharacter->GetActorLocation().Z,
+            CurrentVerticalSpeed,
+            *VerticalState,
+            CurrentDiveSpeed,
+            (CurrentDiveSpeed / (MaxDiveSpeed*1.3f)) * 100.f,
+            NewRot.Pitch,
+            NewRot.Roll,
+            OwnerCharacter->GetActorRotation().Yaw
+        );
 
-		FColor DebugColor = FColor::White;
-		if (CurrentVerticalSpeed > 50.f) DebugColor = FColor::Green;
-		else if (CurrentVerticalSpeed < -50.f) DebugColor = FColor::Red;
+        FColor DebugColor = FColor::White;
+        if (CurrentVerticalSpeed > 50.f) DebugColor = FColor::Green;
+        else if (CurrentVerticalSpeed < -50.f) DebugColor = FColor::Red;
 
-		GEngine->AddOnScreenDebugMessage(1, 0.f, DebugColor, Msg);
-	}
-}*/
+        GEngine->AddOnScreenDebugMessage(1, 0.f, DebugColor, Msg);
+    }
+}
