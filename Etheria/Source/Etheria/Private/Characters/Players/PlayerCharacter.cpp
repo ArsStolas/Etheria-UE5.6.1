@@ -39,6 +39,11 @@ APlayerCharacter::APlayerCharacter()
     GliderComponent = CreateDefaultSubobject<UGliderComponent>(TEXT("GliderComponent"));
     GliderVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GliderVisual"));
     GliderVisual->SetupAttachment(RootComponent);
+
+    // --- PLAYER COMPONENTS ---
+    
+    InventoryComponent  = CreateDefaultSubobject<UInventoryComponent>(TEXT("BPC_Inventory"));
+    InteractorComponent = CreateDefaultSubobject<UInteractorComponent>(TEXT("BPC_Interactor"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -106,6 +111,11 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
         EIC->BindAction(GliderAction, ETriggerEvent::Started,   this, &APlayerCharacter::ToggleGlideMode);
         EIC->BindAction(DiveAction,   ETriggerEvent::Started,   this, &APlayerCharacter::ToggleDiveMode);
+        EIC->BindAction(NextItemAction, ETriggerEvent::Triggered, this, &ThisClass::Input_SelectNext);
+        EIC->BindAction(PrevItemAction, ETriggerEvent::Triggered, this, &ThisClass::Input_SelectPrev);
+        EIC->BindAction(UseItemAction,  ETriggerEvent::Started, this, &ThisClass::Input_UseItem);
+        EIC->BindAction(DropItemAction, ETriggerEvent::Started, this, &ThisClass::Input_DropItem);
+        EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &ThisClass::Input_Interact);
     }
 }
 
@@ -154,4 +164,32 @@ void APlayerCharacter::AlignToCamera()
 bool APlayerCharacter::IsInSpecialMode() const
 {
     return (GliderComponent && GliderComponent->IsGliding());
+}
+
+void APlayerCharacter::Input_SelectNext()
+{
+    if (InventoryComponent) { InventoryComponent->SelectNext(); }
+}
+void APlayerCharacter::Input_SelectPrev()
+{
+    if (InventoryComponent) { InventoryComponent->SelectPrevious(); }
+}
+void APlayerCharacter::Input_UseItem()
+{
+    if (InventoryComponent) { InventoryComponent->UseSelected(); }
+}
+void APlayerCharacter::Input_DropItem()
+{
+    if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); }
+}
+
+void APlayerCharacter::Input_Interact()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
+    if (!InteractorComponent)
+    {
+        UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
+        return;
+    }
+    InteractorComponent->TryInteract();
 }

@@ -17,6 +17,8 @@ class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
 class UGliderComponent;
+class UInventoryComponent;
+class UInteractorComponent;
 
 USTRUCT()
 struct FAxisPressState
@@ -78,6 +80,12 @@ protected:
 
     void AlignToCamera();
 
+    UFUNCTION() void Input_SelectNext();
+    UFUNCTION() void Input_SelectPrev();
+    UFUNCTION() void Input_UseItem();
+    UFUNCTION() void Input_DropItem();
+    UFUNCTION() void Input_Interact();
+
     // === CAMERA COMPONENTS ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
     USpringArmComponent* CameraBoom;
@@ -91,6 +99,13 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
     UStaticMeshComponent* GliderVisual;
+
+    // === PLAYER COMPONENTS ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player Components", meta=(AllowPrivateAccess="true"))
+    UInventoryComponent* InventoryComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player Components", meta=(AllowPrivateAccess="true"))
+    UInteractorComponent* InteractorComponent;
 
     // === INPUT ===
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
@@ -113,6 +128,21 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
     UInputAction* DiveAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* NextItemAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* PrevItemAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* UseItemAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* DropItemAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* InteractAction; // (Pick up)
 
     // 4 actions séparées
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
