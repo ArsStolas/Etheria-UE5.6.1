@@ -75,7 +75,6 @@ protected:
     UPROPERTY(EditAnywhere, Category="Dive|Settings")
     float MaxRollAngle = 30.f;
 
-
     // Vitesse de rotation en Yaw (plus bas = virages plus larges)
     UPROPERTY(EditAnywhere, Category="Dive|Settings")
     float TurnRateDive = 120.f;
@@ -87,6 +86,9 @@ protected:
     // Gravité appliquée en dive (plus bas = plane plus longtemps)
     UPROPERTY(EditAnywhere, Category="Dive|Settings")
     float DiveGravity = -100.f;
+
+    UPROPERTY(EditAnywhere, Category="Dive|Settings")
+    float AutonomousGlideDecay = -200.f;
 
 private:
     void StartGliding();
