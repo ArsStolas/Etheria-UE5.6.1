@@ -3,11 +3,3 @@
 // Add default functionality here for any IInteraction functions that are not pure virtual.
 
 #include "Interfaces/Interaction.h"
-
-void IInteraction::Interact() {
-
-}
-
-void IInteraction::CanReceiveTrace(bool CanReceiveTrace) {
-
-}

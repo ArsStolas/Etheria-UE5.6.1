@@ -19,8 +19,11 @@ public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, Category="Interaction")
 	float InteractDistance = 50.0f;
+
+	UPROPERTY(EditAnywhere, Category="Interaction")
+	UMaterialInterface* OverlayMaterial;
 
 protected:
 	// Called when the game starts
@@ -28,6 +31,8 @@ protected:
 
 private:
 	void CheckInteraction();
+	void Interact();
 
 	UCameraComponent* Camera;
+	AActor* InteractableActor;
 };

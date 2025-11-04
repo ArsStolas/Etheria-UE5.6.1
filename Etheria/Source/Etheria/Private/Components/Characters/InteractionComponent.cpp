@@ -66,16 +66,44 @@ void UInteractionComponent::CheckInteraction()
 			{
 				if (HitActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
 				{
-					UE_LOG(LogTemp, Log, TEXT("L’acteur %s est interactif !"), *HitActor->GetName());
+					if (GEngine != nullptr) {
+						GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.0f, FColor::Cyan, FString("L’acteur %s est interactif !"));
+					}
 
-					//IInteractionInterface::Execute_Interact(HitActor, GetOwner());
+					InteractableActor = HitActor;
+
+					if (OverlayMaterial != nullptr) {
+						UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
+						if (StaticMesh != nullptr) {
+							StaticMesh->SetOverlayMaterial(OverlayMaterial);
+						}
+					}
+
+					return;
 				}
 				else
 				{
-					UE_LOG(LogTemp, Warning, TEXT("%s n’a pas l’interface Interaction."), *HitActor->GetName());
+					if (GEngine != nullptr) {
+						GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.0f, FColor::Cyan, FString("%s n’a pas l’interface Interaction."));
+					}
 				}
 			}
 		}
+
+
+		if (InteractableActor != nullptr) {
+			UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
+			if (StaticMesh != nullptr) {
+				StaticMesh->SetOverlayMaterial(nullptr);
+			}
+		}
+
+		InteractableActor = nullptr;
 	}
 }
 
+void UInteractionComponent::Interact() {
+	if (InteractableActor != nullptr && InteractableActor->GetClass()->ImplementsInterface(UInteraction::StaticClass())) {
+		IInteraction::Execute_Interact(InteractableActor);
+	}
+}
