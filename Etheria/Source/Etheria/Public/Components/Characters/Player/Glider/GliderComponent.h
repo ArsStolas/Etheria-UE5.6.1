@@ -82,17 +82,17 @@ protected:
 
     // Facteur de portance (plus haut = plus facile de remonter)
     UPROPERTY(EditAnywhere, Category="Dive|Settings")
-    float LiftFactor = 0.7f;
+    float LiftFactor = 0.5f;
 
     // Gravité appliquée en dive (plus bas = plane plus longtemps)
     UPROPERTY(EditAnywhere, Category="Dive|Settings")
-    float DiveGravity = -300.f;
+    float DiveGravity = -100.f;
 
 private:
     void StartGliding();
     void StopGliding();
     void StartDiving();
-    void StopDiving();
+    void StopDiving(bool bGoToGlide = false);
 
     bool CanStartGliding() const;
     bool IsGrounded() const;

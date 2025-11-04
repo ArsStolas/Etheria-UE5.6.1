@@ -65,8 +65,7 @@ void UGliderComponent::ToggleGliding()
             StopGliding();
             break;
         case EGliderMode::Diving:
-            StopDiving();
-            StartGliding();
+            StopDiving(true);
             break;
     }
 }
@@ -75,13 +74,18 @@ void UGliderComponent::ToggleDiving()
 {
 	if (!OwnerCharacter) return;
 
-	if (CurrentMode == EGliderMode::Diving)
+	switch (CurrentMode)
 	{
-		StopDiving();
-	}
-	else if (CurrentMode == EGliderMode::Gliding)
-	{
+	case EGliderMode::Gliding:
 		StartDiving();
+		break;
+
+	case EGliderMode::Diving:
+		StopDiving(false);
+		break;
+
+	default:
+		break;
 	}
 }
 
@@ -141,51 +145,43 @@ void UGliderComponent::StartDiving()
 	MoveComp->SetMovementMode(MOVE_Flying);
 }
 
-void UGliderComponent::StopDiving()
+void UGliderComponent::StopDiving(bool bGoToGlide)
 {
 	if (!OwnerCharacter || CurrentMode != EGliderMode::Diving) return;
 
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Diving Stopped"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow,
+		bGoToGlide ? TEXT("Dive → Glide") : TEXT("Dive → Normal"));
 
 	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
-	
-	// === REMETTRE LE PERSONNAGE DROIT ===
+
+	// Remettre le joueur droit
 	FRotator CurrentRot = OwnerCharacter->GetActorRotation();
-	FRotator NeutralRot = FRotator(0.f, CurrentRot.Yaw, 0.f);
-	OwnerCharacter->SetActorRotation(NeutralRot);
-	
-	// Vérifier si on est au sol
-	bool bIsGrounded = IsGrounded();
-	
-	if (bIsGrounded)
+	OwnerCharacter->SetActorRotation(FRotator(0.f, CurrentRot.Yaw, 0.f));
+
+	// === Toujours reset les settings de base avant quoi que ce soit ===
+	ApplyOriginalSettings();
+
+	if (bGoToGlide)
 	{
-		// === SI AU SOL : RETOUR AU MODE NORMAL ===
-		MoveComp->SetMovementMode(MOVE_Walking);
-		CurrentMode = EGliderMode::None;
-		
-		if (OwnerCharacter->GetGliderVisual())
-			OwnerCharacter->GetGliderVisual()->SetVisibility(false);
-		
-		ApplyOriginalSettings();
+		// Passer en Gliding proprement
+		StartGliding();
 	}
 	else
 	{
-		// === SI EN L'AIR : RETOUR AU GLIDING ===
+		// Retour complet à la gravité naturelle
 		MoveComp->SetMovementMode(MOVE_Falling);
-		CurrentMode = EGliderMode::Gliding;
-		
-		MoveComp->GravityScale = 0.0f;
-		MoveComp->AirControl = 0.9f;
-		MoveComp->BrakingDecelerationFalling = 350.f;
-		MoveComp->MaxAcceleration = 1024.f;
-		MoveComp->MaxWalkSpeed = 640.f;
+		MoveComp->GravityScale = 1.0f;
+		MoveComp->AirControl = 0.35f;
+		MoveComp->BrakingDecelerationFalling = 200.f;
 		MoveComp->bUseControllerDesiredRotation = true;
-		MoveComp->RotationRate = FRotator(0.f, 250.f, 0.f);
-		
+		MoveComp->bOrientRotationToMovement = true;
+
+		CurrentMode = EGliderMode::None;
+
 		if (OwnerCharacter->GetGliderVisual())
-			OwnerCharacter->GetGliderVisual()->SetVisibility(true);
+			OwnerCharacter->GetGliderVisual()->SetVisibility(false);
 	}
-	
+
 	CurrentDiveSpeed = MinDiveSpeed;
 }
 

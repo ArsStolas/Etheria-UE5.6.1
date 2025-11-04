@@ -13,6 +13,8 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Components/Characters/Player/Glider/GliderComponent.h"
+#include "Components/Interaction/InteractorComponent.h"
+#include "Components/Inventory/InventoryComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
