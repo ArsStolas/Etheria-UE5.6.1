@@ -1,101 +1,185 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Header
  */
 
 #pragma once
+
 #include "CoreMinimal.h"
 #include "Characters/BaseCharacter.h"
-#include "Components/Inventory/InventoryComponent.h"
-#include "Components/Interaction/InteractorComponent.h"
+#include "InputActionValue.h"
 #include "PlayerCharacter.generated.h"
 
 class USpringArmComponent;
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
+class UGliderComponent;
+class UInventoryComponent;
+class UInteractorComponent;
+
+USTRUCT()
+struct FAxisPressState
+{
+    GENERATED_BODY();
+
+    bool bNegPressed = false;
+    bool bPosPressed = false;
+    double NegLastTime = -DBL_MAX;
+    double PosLastTime = -DBL_MAX;
+
+    int32 GetAxisValue() const
+    {
+        if (bNegPressed && bPosPressed)
+        {
+            return (PosLastTime > NegLastTime) ? +1 : -1;
+        }
+        if (bNegPressed) return -1;
+        if (bPosPressed) return +1;
+        return 0;
+    }
+
+    void OnNegStarted(double Time) { bNegPressed = true;  NegLastTime = Time; }
+    void OnPosStarted(double Time) { bPosPressed = true;  PosLastTime = Time; }
+    void OnNegCompleted()          { bNegPressed = false; }
+    void OnPosCompleted()          { bPosPressed = false; }
+};
 
 UCLASS()
 class ETHERIA_API APlayerCharacter : public ABaseCharacter
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	APlayerCharacter();
+    APlayerCharacter();
+
+    UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
+    bool IsInSpecialMode() const;
+
+    // Exposés pour le GliderComponent
+    int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
+    int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
 
 protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
-	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaTime) override;
-	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+    void Look(const struct FInputActionValue& Value);
 
-	void Move(const struct FInputActionValue& Value);
-	void Look(const struct FInputActionValue& Value);
+    void StartCrouch();
+    void StopCrouch();
 
-	void StartCrouch(const FInputActionValue& Value);
-	void StopCrouch(const FInputActionValue& Value);
+    void StartSprint();
+    void StopSprint();
 
-	void StartSprint(const FInputActionValue& Value);
-	void StopSprint(const FInputActionValue& Value);
+    void ToggleGlideMode();
+    void ToggleDiveMode();
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
-	USpringArmComponent* CameraBoom;
+    void AlignToCamera();
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
-	UCameraComponent* FollowCamera;
+    UFUNCTION() void Input_SelectNext();
+    UFUNCTION() void Input_SelectPrev();
+    UFUNCTION() void Input_UseItem();
+    UFUNCTION() void Input_DropItem();
+    UFUNCTION() void Input_Interact();
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputMappingContext* PlayerContext;
+    // === CAMERA COMPONENTS ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
+    USpringArmComponent* CameraBoom;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* MoveAction;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
+    UCameraComponent* FollowCamera;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* LookAction;
+    // === GLIDER ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
+    UGliderComponent* GliderComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* JumpAction;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
+    UStaticMeshComponent* GliderVisual;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* CrouchAction;
+    // === PLAYER COMPONENTS ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player Components", meta=(AllowPrivateAccess="true"))
+    UInventoryComponent* InventoryComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-	UInputAction* SprintAction;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player Components", meta=(AllowPrivateAccess="true"))
+    UInteractorComponent* InteractorComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-	float WalkSpeed = 600.f;
+    // === INPUT ===
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputMappingContext* PlayerContext;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-	float SprintSpeed = 900.f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* LookAction;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* JumpAction;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player", meta=(AllowPrivateAccess="true"))
-	UInventoryComponent* InventoryComponent = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* CrouchAction;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player", meta=(AllowPrivateAccess="true"))
-	UInteractorComponent* InteractorComponent = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* SprintAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
-	UInputAction* NextItemAction;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
+    UInputAction* GliderAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
-	UInputAction* PrevItemAction;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
+    UInputAction* DiveAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
-	UInputAction* UseItemAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* NextItemAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
-	UInputAction* DropItemAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* PrevItemAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
-	UInputAction* InteractAction; // (Pick up)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* UseItemAction;
 
-	UFUNCTION() void Input_SelectNext();
-	UFUNCTION() void Input_SelectPrev();
-	UFUNCTION() void Input_UseItem();
-	UFUNCTION() void Input_DropItem();
-	UFUNCTION() void Input_Interact();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* DropItemAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* InteractAction; // (Pick up)
+
+    // 4 actions séparées
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* ForwardAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* BackAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* LeftAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* RightAction;
+
+    // === MOVEMENT SPEEDS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float WalkSpeed = 600.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float SprintSpeed = 900.f;
+
 private:
+    // États d’axes
+    FAxisPressState Horizontal;
+    FAxisPressState Vertical;
+
+    // === CAMERA STATE ===
+    bool bIsLookingAround = false;
+    float TimeSinceLastLook = 0.f;
+
+    // Handlers
+    void OnForwardStarted(const FInputActionValue& Value);
+    void OnForwardCompleted(const FInputActionValue& Value);
+    void OnBackStarted(const FInputActionValue& Value);
+    void OnBackCompleted(const FInputActionValue& Value);
+    void OnLeftStarted(const FInputActionValue& Value);
+    void OnLeftCompleted(const FInputActionValue& Value);
+    void OnRightStarted(const FInputActionValue& Value);
+    void OnRightCompleted(const FInputActionValue& Value);
 };
