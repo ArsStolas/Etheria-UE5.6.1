@@ -3,20 +3,24 @@
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
-*/
+ */
 
 #include "Characters/Players/PlayerCharacter.h"
-#include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
 
 #include "Camera/CameraComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "Components/Characters/Player/Glider/GliderComponent.h"
+#include "Components/Interaction/InteractorComponent.h"
+#include "Components/Inventory/InventoryComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
+    // --- CAMERA SETUP ---
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->TargetArmLength = 300.f;
@@ -25,107 +29,169 @@ APlayerCharacter::APlayerCharacter()
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
+
+    // --- CHARACTER ROTATION ---
+    bUseControllerRotationYaw = false;
+    bUseControllerRotationPitch = false;
+    bUseControllerRotationRoll = false;
+
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+
+    // --- GLIDER ---
+    GliderComponent = CreateDefaultSubobject<UGliderComponent>(TEXT("GliderComponent"));
+    GliderVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GliderVisual"));
+    GliderVisual->SetupAttachment(RootComponent);
+
+    // --- PLAYER COMPONENTS ---
+    
+    InventoryComponent  = CreateDefaultSubobject<UInventoryComponent>(TEXT("BPC_Inventory"));
+    InteractorComponent = CreateDefaultSubobject<UInteractorComponent>(TEXT("BPC_Interactor"));
 }
 
 void APlayerCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (const APlayerController* PC = Cast<APlayerController>(GetController()))
+    if (APlayerController* PC = Cast<APlayerController>(Controller))
     {
-        if (const ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
-            if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+            if (PlayerContext)
             {
-                if (PlayerContext)
-                {
-                    Subsystem->AddMappingContext(PlayerContext, 0);
-                }
+                Subsystem->AddMappingContext(PlayerContext, 0);
             }
         }
     }
+
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+
+    int Hor = Horizontal.GetAxisValue();
+    int Ver = Vertical.GetAxisValue();
+
+    if (Controller)
+    {
+        const FRotator Rotation = Controller->GetControlRotation();
+        const FRotator YawRotation(0, Rotation.Yaw, 0);
+
+        const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+        const FVector Right   = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+        if (Ver != 0) AddMovementInput(Forward, static_cast<float>(Ver));
+        if (Hor != 0) AddMovementInput(Right, static_cast<float>(Hor));
+    }
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-    if (UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+    if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
-        if (MoveAction)
-        {
-            EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
-        }
-        if (LookAction)
-        {
-            EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
-        }
-        if (JumpAction)
-        {
-            EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
-            EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-        }
-        if (CrouchAction)
-        {
-            EnhancedInput->BindAction(CrouchAction, ETriggerEvent::Started, this, &APlayerCharacter::StartCrouch);
-            EnhancedInput->BindAction(CrouchAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopCrouch);
-        }
+        // Mouvement 4 touches
+        EIC->BindAction(ForwardAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnForwardStarted);
+        EIC->BindAction(ForwardAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnForwardCompleted);
+        EIC->BindAction(BackAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnBackStarted);
+        EIC->BindAction(BackAction,    ETriggerEvent::Completed, this, &APlayerCharacter::OnBackCompleted);
+        EIC->BindAction(LeftAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
+        EIC->BindAction(LeftAction,  ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
+        EIC->BindAction(LeftAction,  ETriggerEvent::Completed, this, &APlayerCharacter::OnLeftCompleted);
+        EIC->BindAction(RightAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnRightStarted);
+        EIC->BindAction(RightAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnRightCompleted);
 
-        if (SprintAction)
-        {
-            EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &APlayerCharacter::StartSprint);
-            EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
-        }
-
+        // Autres actions
+        EIC->BindAction(LookAction,  ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
+        EIC->BindAction(JumpAction,  ETriggerEvent::Triggered, this, &ACharacter::Jump);
+        EIC->BindAction(CrouchAction, ETriggerEvent::Started,   this, &APlayerCharacter::StartCrouch);
+        EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopCrouch);
+        EIC->BindAction(SprintAction, ETriggerEvent::Started,   this, &APlayerCharacter::StartSprint);
+        EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
+        EIC->BindAction(GliderAction, ETriggerEvent::Started,   this, &APlayerCharacter::ToggleGlideMode);
+        EIC->BindAction(DiveAction,   ETriggerEvent::Started,   this, &APlayerCharacter::ToggleDiveMode);
+        EIC->BindAction(NextItemAction, ETriggerEvent::Triggered, this, &ThisClass::Input_SelectNext);
+        EIC->BindAction(PrevItemAction, ETriggerEvent::Triggered, this, &ThisClass::Input_SelectPrev);
+        EIC->BindAction(UseItemAction,  ETriggerEvent::Started, this, &ThisClass::Input_UseItem);
+        EIC->BindAction(DropItemAction, ETriggerEvent::Started, this, &ThisClass::Input_DropItem);
+        EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &ThisClass::Input_Interact);
     }
 }
 
-void APlayerCharacter::Move(const FInputActionValue& Value)
-{
-    const FVector2D MovementVector = Value.Get<FVector2D>();
-    
-    if (Controller != nullptr)
-    {
-        const FRotator Rotation = Controller->GetControlRotation();
-        const FRotator YawRotation(0, Rotation.Yaw, 0);
-
-        const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-        AddMovementInput(Forward, MovementVector.Y);
-        AddMovementInput(Right, MovementVector.X);
-    }
-}
+void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnForwardCompleted(const FInputActionValue&){ Vertical.OnPosCompleted(); }
+void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnBackCompleted(const FInputActionValue&)    { Vertical.OnNegCompleted(); }
+void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnLeftCompleted(const FInputActionValue&)    { Horizontal.OnNegCompleted(); }
+void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal.OnPosCompleted(); }
 
 void APlayerCharacter::Look(const FInputActionValue& Value)
 {
     const FVector2D LookAxis = Value.Get<FVector2D>();
-    AddControllerYawInput(LookAxis.X);
-    AddControllerPitchInput(LookAxis.Y);
+    if (Controller)
+    {
+        AddControllerYawInput(LookAxis.X);
+        AddControllerPitchInput(LookAxis.Y);
+    }
 }
 
-void APlayerCharacter::StartCrouch(const FInputActionValue& Value)
+void APlayerCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
+void APlayerCharacter::StopSprint()  { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
+void APlayerCharacter::StartCrouch() { Crouch(); }
+void APlayerCharacter::StopCrouch()  { UnCrouch(); }
+
+void APlayerCharacter::ToggleGlideMode()
 {
-    Crouch();
+    if (GliderComponent) GliderComponent->ToggleGliding();
 }
-
-void APlayerCharacter::StopCrouch(const FInputActionValue& Value)
+void APlayerCharacter::ToggleDiveMode()
 {
-    UnCrouch();
+    if (GliderComponent) GliderComponent->ToggleDiving();
 }
 
-void APlayerCharacter::StartSprint(const FInputActionValue& Value)
+void APlayerCharacter::AlignToCamera()
 {
-    GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+    if (Controller)
+    {
+        FRotator CamRot = Controller->GetControlRotation();
+        SetActorRotation(FRotator(0.f, CamRot.Yaw, 0.f));
+    }
 }
 
-void APlayerCharacter::StopSprint(const FInputActionValue& Value)
+bool APlayerCharacter::IsInSpecialMode() const
 {
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+    return (GliderComponent && GliderComponent->IsGliding());
 }
 
+void APlayerCharacter::Input_SelectNext()
+{
+    if (InventoryComponent) { InventoryComponent->SelectNext(); }
+}
+void APlayerCharacter::Input_SelectPrev()
+{
+    if (InventoryComponent) { InventoryComponent->SelectPrevious(); }
+}
+void APlayerCharacter::Input_UseItem()
+{
+    if (InventoryComponent) { InventoryComponent->UseSelected(); }
+}
+void APlayerCharacter::Input_DropItem()
+{
+    if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); }
+}
+
+void APlayerCharacter::Input_Interact()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
+    if (!InteractorComponent)
+    {
+        UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
+        return;
+    }
+    InteractorComponent->TryInteract();
+}
