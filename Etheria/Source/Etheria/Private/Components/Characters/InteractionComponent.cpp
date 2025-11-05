@@ -66,10 +66,6 @@ void UInteractionComponent::CheckInteraction()
 			{
 				if (HitActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
 				{
-					if (GEngine != nullptr) {
-						GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.0f, FColor::Cyan, FString("L’acteur %s est interactif !"));
-					}
-
 					InteractableActor = HitActor;
 
 					if (OverlayMaterial != nullptr) {
@@ -80,12 +76,6 @@ void UInteractionComponent::CheckInteraction()
 					}
 
 					return;
-				}
-				else
-				{
-					if (GEngine != nullptr) {
-						GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.0f, FColor::Cyan, FString("%s n’a pas l’interface Interaction."));
-					}
 				}
 			}
 		}
@@ -104,6 +94,6 @@ void UInteractionComponent::CheckInteraction()
 
 void UInteractionComponent::Interact() {
 	if (InteractableActor != nullptr && InteractableActor->GetClass()->ImplementsInterface(UInteraction::StaticClass())) {
-		IInteraction::Execute_Interact(InteractableActor);
+		IInteraction::Execute_Interact(InteractableActor, GetOwner());
 	}
 }
