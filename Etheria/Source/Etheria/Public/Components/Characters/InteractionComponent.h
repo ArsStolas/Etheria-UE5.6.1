@@ -8,7 +8,7 @@
 
 class UCameraComponent;
 
-UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
+UCLASS( ClassGroup=(Custom), Blueprintable, meta=(BlueprintSpawnableComponent) )
 class ETHERIA_API UInteractionComponent : public USceneComponent
 {
 	GENERATED_BODY()
@@ -27,6 +27,12 @@ public:
 
 	UPROPERTY()
 	class UInputAction* InteractAction;
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction")
+	void OnEnter(AActor* NewActor);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction")
+	void OnLeave(AActor* OldActor);
 
 protected:
 	// Called when the game starts

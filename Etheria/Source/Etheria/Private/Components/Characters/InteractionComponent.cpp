@@ -73,12 +73,15 @@ void UInteractionComponent::CheckInteraction()
 			{
 				if (HitActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
 				{
-					InteractableActor = HitActor;
+					if (InteractableActor == nullptr || InteractableActor != HitActor) {
+						InteractableActor = HitActor;
+						OnEnter(InteractableActor);
 
-					if (OverlayMaterial != nullptr) {
-						UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
-						if (StaticMesh != nullptr) {
-							StaticMesh->SetOverlayMaterial(OverlayMaterial);
+						if (OverlayMaterial != nullptr) {
+							UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
+							if (StaticMesh != nullptr) {
+								StaticMesh->SetOverlayMaterial(OverlayMaterial);
+							}
 						}
 					}
 
@@ -93,6 +96,7 @@ void UInteractionComponent::CheckInteraction()
 			if (StaticMesh != nullptr) {
 				StaticMesh->SetOverlayMaterial(nullptr);
 			}
+			OnLeave(InteractableActor);
 		}
 
 		InteractableActor = nullptr;
