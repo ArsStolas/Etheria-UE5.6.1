@@ -25,6 +25,9 @@ public:
 	UPROPERTY(EditAnywhere, Category="Interaction")
 	UMaterialInterface* OverlayMaterial;
 
+	UPROPERTY()
+	class UInputAction* InteractAction;
+
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;

@@ -3,6 +3,8 @@
 
 #include "Components/Characters/InteractionComponent.h"
 #include "Interfaces/Interaction.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
 #include "Camera/CameraComponent.h"
 
 // Sets default values for this component's properties
@@ -26,6 +28,11 @@ void UInteractionComponent::BeginPlay()
 		return;
 
 	Camera = Owner->FindComponentByClass<UCameraComponent>();
+	UInputComponent* InputComponent = Owner->FindComponentByClass<UInputComponent>();
+
+	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(InputComponent)) {
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Triggered, this, &UInteractionComponent::Interact);
+	}
 }
 
 
