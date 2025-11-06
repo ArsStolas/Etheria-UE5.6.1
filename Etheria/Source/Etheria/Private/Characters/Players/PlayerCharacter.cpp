@@ -48,9 +48,6 @@ APlayerCharacter::APlayerCharacter()
 
     // --- INTERACTOR COMPONENT ---
     InteractorComponent = CreateDefaultSubobject<UInteractorComponent>(TEXT("BPC_Interactor"));
-
-    // --- COMBAT COMPONENT ---
-    CombatComponent     = CreateDefaultSubobject<UCombatComponent>(TEXT("BPC_Combat"));
     
     // --- LOCK COMPONENT ---
     LockTargetComponent = CreateDefaultSubobject<ULockTargetComponent>(TEXT("BPC_LockTarget"));
