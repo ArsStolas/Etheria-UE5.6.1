@@ -61,10 +61,13 @@ protected:
     float SplineOffset = 0.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement")
-    float SplineFollowSpeed = 200.f;
+    float SplineFollowSpeed = 300.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement")
-    float SplinePointReachDist = 80.f;
+    float SplinePointReachDist = 100.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement")
+    float SplineUpdateInterval = 0.2f;
 
     UFUNCTION(BlueprintImplementableEvent, Category = "AI|Animation")
     void PlayIdleAnimation();
@@ -72,14 +75,18 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "AI|VoiceLine")
     void PlayIdleVoiceLine();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "AI")
+    UFUNCTION(BlueprintImplementableEvent, Category="AI")
     void OnAIDeath();
 
+    virtual bool CanIdleMove() const { return true; }
+    
     int CurrentIdlePointIndex = 0;
-    float CurrentSplineProgress = 0.f;
     FVector SplineCurrentTarget = FVector::ZeroVector;
     bool bSplineActive = false;
-    int SplineDirection = 1; // 1 avant, -1 arrière
+    int SplineDirection = 1;
+
+    TArray<float> SplineWaypoints;
+    int32 CurrentWaypointIndex = 0;
 
 public:
     virtual void Tick(float DeltaTime) override;
@@ -90,9 +97,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
     AActor* CurrentTarget = nullptr;
 
+    bool bCanAttack = true;
+
     UFUNCTION(BlueprintCallable, Category="AI|Movement")
     void MoveToIdlePoint();
 
     UFUNCTION(BlueprintCallable, Category="AI|Movement")
     void UpdateSplineMove(float DeltaTime);
+
+    void InitSplineWaypoints(float Step);
+    void MoveToCurrentSplineWaypoint();
 };

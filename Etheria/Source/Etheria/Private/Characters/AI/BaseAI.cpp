@@ -11,41 +11,48 @@
 #include "Engine/TargetPoint.h"
 #include "AIController.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Perception/AISenseConfig_Sight.h"
 
 ABaseAI::ABaseAI()
 {
     PrimaryActorTick.bCanEverTick = true;
     AIPerception = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
-    IdleSpline = CreateDefaultSubobject<USplineComponent>(TEXT("IdleSpline"));
 
-    IdlePoints.SetNum(4);
-    for (int i = 0; i < 4; ++i)
-    {
-        FString PointName = FString::Printf(TEXT("IdlePoint%d"), i);
-        ATargetPoint* IdlePoint = CreateDefaultSubobject<ATargetPoint>(*PointName);
-        IdlePoints[i] = IdlePoint;
-    }
+    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = 2000.f;
+    SightConfig->LoseSightRadius = 2200.f;
+    SightConfig->PeripheralVisionAngleDegrees = 180.f;
+    SightConfig->SetMaxAge(5.f);
+    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    AIPerception->ConfigureSense(*SightConfig);
+    AIPerception->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    IdleSpline = CreateDefaultSubobject<USplineComponent>(TEXT("IdleSpline"));
+    IdlePoints.Empty();
+
+    IdleMoveType = EAIIdleMoveType::Spline;
+    SplinePatrolMode = ESplinePatrolMode::Loop;
+    SplineFollowSpeed = 300.f;
+    SplinePointReachDist = 100.f;
+    SplineOffset = 0.f;
+    bSplineActive = false;
+    SplineDirection = 1;
+
+    SplineWaypoints.Empty();
+    CurrentWaypointIndex = 0;
 }
 
 void ABaseAI::BeginPlay()
 {
     Super::BeginPlay();
 
-    UE_LOG(LogTemp, Warning, TEXT("BaseAI::BeginPlay called"));
-
     if (IdleMoveType == EAIIdleMoveType::Spline && IdleSpline)
     {
-        CurrentSplineProgress = 0.f;
-        SplineDirection = 1;
-        SplineCurrentTarget = IdleSpline->GetLocationAtDistanceAlongSpline(CurrentSplineProgress + SplineOffset, ESplineCoordinateSpace::World);
+        InitSplineWaypoints(SplinePointReachDist);
         bSplineActive = true;
-        UE_LOG(LogTemp, Warning, TEXT("BaseAI: Spline mode enabled, first target set to %s"), *SplineCurrentTarget.ToString());
-
-        if (AAIController* AICon = Cast<AAIController>(GetController()))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("BaseAI: MoveToLocation on spline first target"));
-            AICon->MoveToLocation(SplineCurrentTarget);
-        }
+        MoveToCurrentSplineWaypoint();
     }
 }
 
@@ -56,8 +63,9 @@ void ABaseAI::Tick(float DeltaTime)
     HandlePerception();
     HandleDecisionMaking();
 
-    switch(IdleMoveType)
-    {
+    if (CanIdleMove()) {
+        switch(IdleMoveType)
+        {
         case EAIIdleMoveType::Points:
             MoveToIdlePoint();
             break;
@@ -66,77 +74,84 @@ void ABaseAI::Tick(float DeltaTime)
             break;
         default:
             break;
+        }
     }
 }
 
-void ABaseAI::HandlePerception()
+void ABaseAI::InitSplineWaypoints(float Step)
 {
-    UE_LOG(LogTemp, Warning, TEXT("BaseAI::HandlePerception called"));
+    SplineWaypoints.Empty();
+    if (!IdleSpline) return;
+    float Length = IdleSpline->GetSplineLength();
+    for (float d = 0; d < Length; d += Step)
+        SplineWaypoints.Add(d);
+    SplineWaypoints.Add(Length);
+
+    CurrentWaypointIndex = 0;
+    SplineDirection = 1;
 }
 
-void ABaseAI::HandleDecisionMaking()
+void ABaseAI::MoveToCurrentSplineWaypoint()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BaseAI::HandleDecisionMaking called"));
-}
-
-void ABaseAI::MoveToIdlePoint()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BaseAI::MoveToIdlePoint called"));
-    if (IdlePoints.Num() == 0 || !IdlePoints[CurrentIdlePointIndex]) return;
+    if (!IdleSpline || !bSplineActive || SplineWaypoints.Num() == 0) return;
+    float TargetDist = SplineWaypoints[CurrentWaypointIndex];
+    SplineCurrentTarget = IdleSpline->GetLocationAtDistanceAlongSpline(TargetDist + SplineOffset, ESplineCoordinateSpace::World);
     if (AAIController* AICon = Cast<AAIController>(GetController()))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Moving to IdlePoint %d at %s"), CurrentIdlePointIndex, *IdlePoints[CurrentIdlePointIndex]->GetActorLocation().ToString());
-        AICon->MoveToActor(IdlePoints[CurrentIdlePointIndex]);
-    }
-    CurrentIdlePointIndex = (CurrentIdlePointIndex + 1) % IdlePoints.Num();
-
-    PlayIdleAnimation();
-    PlayIdleVoiceLine();
+        AICon->MoveToLocation(SplineCurrentTarget);
 }
 
 void ABaseAI::UpdateSplineMove(float DeltaTime)
 {
-    if (!IdleSpline || !bSplineActive) return;
+    if (!IdleSpline || !bSplineActive || SplineWaypoints.Num() == 0) return;
 
-    float Dist = FVector::Dist(GetActorLocation(), SplineCurrentTarget);
+    FVector ActorLocation = GetActorLocation();
+    float DistToTarget = FVector::Dist(ActorLocation, SplineCurrentTarget);
 
-    UE_LOG(LogTemp, Warning, TEXT("UpdateSplineMove: SplineCurrentTarget=%s, ActorLocation=%s, Dist=%.1f"), 
-        *SplineCurrentTarget.ToString(), *GetActorLocation().ToString(), Dist);
-
-    AAIController* AICon = Cast<AAIController>(GetController());
-    if (!AICon) {
-        UE_LOG(LogTemp, Error, TEXT("BaseAI: No AIController detected! Check Pawn AutoPossessAI and ControllerClass."));
-        return;
-    }
-
-    if (Dist < SplinePointReachDist || Dist > 10000.f)
+    if (DistToTarget < SplinePointReachDist)
     {
-        float SplineLength = IdleSpline->GetSplineLength();
-        CurrentSplineProgress += SplineFollowSpeed * DeltaTime * SplineDirection;
+        CurrentWaypointIndex += SplineDirection;
 
         if (SplinePatrolMode == ESplinePatrolMode::Loop)
         {
-            if (CurrentSplineProgress > SplineLength) CurrentSplineProgress = 0.f;
-            if (CurrentSplineProgress < 0.f) CurrentSplineProgress = SplineLength;
+            if (CurrentWaypointIndex >= SplineWaypoints.Num())
+                CurrentWaypointIndex = 0;
+            else if (CurrentWaypointIndex < 0)
+                CurrentWaypointIndex = SplineWaypoints.Num() - 1;
         }
         else if (SplinePatrolMode == ESplinePatrolMode::BackAndForth)
         {
-            if (CurrentSplineProgress > SplineLength) {
-                CurrentSplineProgress = SplineLength;
+            if (CurrentWaypointIndex >= SplineWaypoints.Num())
+            {
+                CurrentWaypointIndex = SplineWaypoints.Num() - 2;
                 SplineDirection = -1;
-                UE_LOG(LogTemp, Warning, TEXT("Spline reached end. Reverse direction!"));
             }
-            else if (CurrentSplineProgress < 0.f) {
-                CurrentSplineProgress = 0.f;
+            else if (CurrentWaypointIndex < 0)
+            {
+                CurrentWaypointIndex = 1;
                 SplineDirection = 1;
-                UE_LOG(LogTemp, Warning, TEXT("Spline reached start. Forward direction!"));
             }
         }
 
-        SplineCurrentTarget = IdleSpline->GetLocationAtDistanceAlongSpline(CurrentSplineProgress + SplineOffset, ESplineCoordinateSpace::World);
-        EPathFollowingRequestResult::Type Result = AICon->MoveToLocation(SplineCurrentTarget);
+        MoveToCurrentSplineWaypoint();
+        PlayIdleAnimation();
+        PlayIdleVoiceLine();
+    }
+}
 
-        UE_LOG(LogTemp, Warning, TEXT("[Spline] Mode %d | Progress %.2f | Dir %d | Target %s | MoveResult %d"), (int)SplinePatrolMode, CurrentSplineProgress, SplineDirection, *SplineCurrentTarget.ToString(), Result);
+void ABaseAI::HandlePerception() {}
+void ABaseAI::HandleDecisionMaking() {}
+
+void ABaseAI::MoveToIdlePoint()
+{
+    if (IdlePoints.Num() == 0 || !IdlePoints.IsValidIndex(CurrentIdlePointIndex) || !IdlePoints[CurrentIdlePointIndex]) 
+        return;
+
+    if (AAIController* AICon = Cast<AAIController>(GetController()))
+    {
+        FVector TargetLocation = IdlePoints[CurrentIdlePointIndex]->GetActorLocation();
+        AICon->MoveToActor(IdlePoints[CurrentIdlePointIndex]);
+
+        CurrentIdlePointIndex = (CurrentIdlePointIndex + 1) % IdlePoints.Num();
 
         PlayIdleAnimation();
         PlayIdleVoiceLine();
