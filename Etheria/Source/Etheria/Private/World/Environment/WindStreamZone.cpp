@@ -10,6 +10,8 @@
 #include "Characters/Players/PlayerCharacter.h"
 #include "Components/Characters/Player/Glider/GliderComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 
 AWindStreamZone::AWindStreamZone()
@@ -21,13 +23,15 @@ AWindStreamZone::AWindStreamZone()
 
 	TriggerZone->SetCollisionProfileName(TEXT("Trigger"));
 	TriggerZone->SetGenerateOverlapEvents(true);
+	TriggerZone->OnComponentBeginOverlap.AddDynamic(this, &AWindStreamZone::OnOverlapBegin);
+	TriggerZone->OnComponentEndOverlap.AddDynamic(this, &AWindStreamZone::OnOverlapEnd);
 }
 
 void AWindStreamZone::BeginPlay()
 {
 	Super::BeginPlay();
-	TriggerZone->OnComponentBeginOverlap.AddDynamic(this, &AWindStreamZone::OnOverlapBegin);
 
+	// Debug visuel
 	DrawDebugBox(
 		GetWorld(),
 		GetActorLocation(),
@@ -41,38 +45,69 @@ void AWindStreamZone::BeginPlay()
 	);
 }
 
-void AWindStreamZone::OnOverlapBegin(
-	UPrimitiveComponent* OverlappedComp,
-	AActor* OtherActor,
-	UPrimitiveComponent* OtherComp,
-	int32 OtherBodyIndex,
-	bool bFromSweep,
-	const FHitResult& SweepResult)
+void AWindStreamZone::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	if (bUsed && bOneTimeUse)
-		return;
-
 	APlayerCharacter* Player = Cast<APlayerCharacter>(OtherActor);
-	if (!Player)
+	if (!Player) return;
+	if (bOneTimeUse && ActivePlayers.Num() > 0) return;
+
+	// Optionnel : check dive mode
+	if (bAffectOnlyDive && !Player->GetGliderComponent()->IsDiving())
 		return;
 
-	UGliderComponent* GliderComp = Player->FindComponentByClass<UGliderComponent>();
-	if (!GliderComp || !GliderComp->IsGliding())
-		return;
+	// Timer répétitif pour appliquer le mouvement
+	if (!ActivePlayers.Contains(Player))
+	{
+		FTimerHandle TimerHandle;
+		GetWorldTimerManager().SetTimer(TimerHandle, FTimerDelegate::CreateWeakLambda(this, [this, Player]()
+		{
+			if (!Player || !IsValid(Player))
+			{
+				if (ActivePlayers.Contains(Player))
+				{
+					GetWorldTimerManager().ClearTimer(ActivePlayers[Player]);
+					ActivePlayers.Remove(Player);
+				}
+				return;
+			}
+			ApplyStreamMovement(Player);
+		}), ApplyInterval, true);
 
-	UCharacterMovementComponent* MoveComp = Player->GetCharacterMovement();
-	if (!MoveComp)
-		return;
+		ActivePlayers.Add(Player, TimerHandle);
 
-	FVector ForwardDir = Player->GetActorForwardVector();
-	FVector Velocity = MoveComp->Velocity;
-
-	Velocity += ForwardDir * BoostForce;
-	MoveComp->Velocity = Velocity;
-
-	GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan, TEXT("Glider Speed Boost!"));
-
-	if (bOneTimeUse)
-		bUsed = true;
+		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan, TEXT("Wind Stream Active!"));
+	}
 }
 
+void AWindStreamZone::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	APlayerCharacter* Player = Cast<APlayerCharacter>(OtherActor);
+	if (!Player) return;
+
+	if (FTimerHandle* Handle = ActivePlayers.Find(Player))
+	{
+		GetWorldTimerManager().ClearTimer(*Handle);
+		ActivePlayers.Remove(Player);
+		GEngine->AddOnScreenDebugMessage(-1, 1.f, FColor::Cyan, TEXT("Wind Stream Ended"));
+	}
+}
+
+void AWindStreamZone::ApplyStreamMovement(APlayerCharacter* Player)
+{
+	if (!Player) return;
+	UCharacterMovementComponent* MoveComp = Player->GetCharacterMovement();
+	if (!MoveComp) return;
+
+	FVector Dir = StreamDirection.GetSafeNormal();
+	FVector Vel = MoveComp->Velocity;
+
+	// Boost constant dans la direction du courant
+	Vel += Dir * BoostForce * ApplyInterval;
+
+	// Optionnel : verrouille l’orientation vers la direction
+	Player->SetActorRotation(Dir.Rotation());
+
+	MoveComp->Velocity = Vel;
+}
