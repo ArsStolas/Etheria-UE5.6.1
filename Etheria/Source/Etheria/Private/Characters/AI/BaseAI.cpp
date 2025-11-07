@@ -9,15 +9,15 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Components/SplineComponent.h"
 #include "Engine/TargetPoint.h"
-#include "AIController.h"
-#include "Kismet/KismetSystemLibrary.h"
 #include "Perception/AISenseConfig_Sight.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Engine.h"
 
 ABaseAI::ABaseAI()
 {
     PrimaryActorTick.bCanEverTick = true;
-    AIPerception = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
 
+    AIPerception = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
     UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
     SightConfig->SightRadius = 2000.f;
     SightConfig->LoseSightRadius = 2200.f;
@@ -37,11 +37,24 @@ ABaseAI::ABaseAI()
     SplineOffset = 0.f;
     bSplineActive = false;
     SplineDirection = 1;
+
+    GetCharacterMovement()->MaxWalkSpeed = 300.f;
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    bUseControllerRotationYaw = false;
 }
 
 void ABaseAI::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (GetController() == nullptr)
+    {
+        SpawnDefaultController();
+    }
+
+    GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    bUseControllerRotationYaw = false;
 
     if (IdleMoveType == EAIIdleMoveType::Spline && IdleSpline)
     {
@@ -55,21 +68,27 @@ void ABaseAI::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
+        const float Speed = GetVelocity().Size2D();
+        GEngine->AddOnScreenDebugMessage(1, 0.f, FColor::Green,
+            FString::Printf(TEXT("Speed: %.1f"), Speed));
+
     HandlePerception();
     HandleDecisionMaking();
 
-    if (CanIdleMove()) {
-        switch(IdleMoveType)
-        {
+    if (!CanIdleMove()) return;
+
+    switch (IdleMoveType)
+    {
         case EAIIdleMoveType::Points:
-            MoveToIdlePoint();
+            MoveToIdlePoint(DeltaTime);
             break;
+
         case EAIIdleMoveType::Spline:
             UpdateSplineMove(DeltaTime);
             break;
+
         default:
             break;
-        }
     }
 }
 
@@ -77,11 +96,12 @@ void ABaseAI::InitSplineWaypoints(float Step)
 {
     SplineWaypoints.Empty();
     if (!IdleSpline) return;
+
     float Length = IdleSpline->GetSplineLength();
     for (float d = 0; d < Length; d += Step)
         SplineWaypoints.Add(d);
-    SplineWaypoints.Add(Length);
 
+    SplineWaypoints.Add(Length);
     CurrentWaypointIndex = 0;
     SplineDirection = 1;
 }
@@ -89,20 +109,19 @@ void ABaseAI::InitSplineWaypoints(float Step)
 void ABaseAI::MoveToCurrentSplineWaypoint()
 {
     if (!IdleSpline || !bSplineActive || SplineWaypoints.Num() == 0) return;
+
     float TargetDist = SplineWaypoints[CurrentWaypointIndex];
     SplineCurrentTarget = IdleSpline->GetLocationAtDistanceAlongSpline(TargetDist + SplineOffset, ESplineCoordinateSpace::World);
-    if (AAIController* AICon = Cast<AAIController>(GetController()))
-        AICon->MoveToLocation(SplineCurrentTarget);
 }
 
 void ABaseAI::UpdateSplineMove(float DeltaTime)
 {
     if (!IdleSpline || !bSplineActive || SplineWaypoints.Num() == 0) return;
 
-    FVector ActorLocation = GetActorLocation();
-    float DistToTarget = FVector::Dist(ActorLocation, SplineCurrentTarget);
+    FVector TargetLocation = SplineCurrentTarget;
+    MoveTowards(TargetLocation, DeltaTime);
 
-    if (DistToTarget < SplinePointReachDist)
+    if (FVector::Dist2D(GetActorLocation(), TargetLocation) < SplinePointReachDist)
     {
         CurrentWaypointIndex += SplineDirection;
 
@@ -128,27 +147,39 @@ void ABaseAI::UpdateSplineMove(float DeltaTime)
         }
 
         MoveToCurrentSplineWaypoint();
-        PlayIdleAnimation();
         PlayIdleVoiceLine();
     }
 }
 
-void ABaseAI::HandlePerception() {}
-void ABaseAI::HandleDecisionMaking() {}
-
-void ABaseAI::MoveToIdlePoint()
+void ABaseAI::MoveToIdlePoint(float DeltaTime)
 {
     if (IdlePoints.Num() == 0 || !IdlePoints.IsValidIndex(CurrentIdlePointIndex) || !IdlePoints[CurrentIdlePointIndex]) 
         return;
 
-    if (AAIController* AICon = Cast<AAIController>(GetController()))
+    FVector TargetLocation = IdlePoints[CurrentIdlePointIndex]->GetActorLocation();
+    MoveTowards(TargetLocation, DeltaTime);
+
+    if (FVector::Dist2D(GetActorLocation(), TargetLocation) < SplinePointReachDist)
     {
-        FVector TargetLocation = IdlePoints[CurrentIdlePointIndex]->GetActorLocation();
-        AICon->MoveToActor(IdlePoints[CurrentIdlePointIndex]);
-
         CurrentIdlePointIndex = (CurrentIdlePointIndex + 1) % IdlePoints.Num();
-
-        PlayIdleAnimation();
         PlayIdleVoiceLine();
     }
 }
+
+void ABaseAI::MoveTowards(const FVector& TargetLocation, float DeltaTime)
+{
+    FVector ToTarget = TargetLocation - GetActorLocation();
+    ToTarget.Z = 0.f;
+    FVector Direction = ToTarget.GetSafeNormal();
+
+    if (Direction.IsNearlyZero()) return;
+
+    AddMovementInput(Direction, 1.0f);
+
+    FRotator TargetRot = Direction.Rotation();
+    FRotator NewRot = FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, 6.f);
+    SetActorRotation(NewRot);
+}
+
+void ABaseAI::HandlePerception() {}
+void ABaseAI::HandleDecisionMaking() {}

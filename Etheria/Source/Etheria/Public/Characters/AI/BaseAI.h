@@ -38,7 +38,6 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
     virtual void HandlePerception();
     virtual void HandleDecisionMaking();
 
@@ -73,7 +72,7 @@ protected:
     void OnAIDeath();
 
     virtual bool CanIdleMove() const { return true; }
-    
+
     int CurrentIdlePointIndex = 0;
     FVector SplineCurrentTarget = FVector::ZeroVector;
     bool bSplineActive = false;
@@ -87,6 +86,8 @@ protected:
     UPROPERTY(Transient)
     int32 CurrentWaypointIndex = 0;
 
+    void MoveTowards(const FVector& TargetLocation, float DeltaTime);
+
 public:
     virtual void Tick(float DeltaTime) override;
 
@@ -94,7 +95,7 @@ public:
     bool bIsHostile = false;
 
     UFUNCTION(BlueprintCallable, Category="AI|Movement")
-    void MoveToIdlePoint();
+    void MoveToIdlePoint(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category="AI|Movement")
     void UpdateSplineMove(float DeltaTime);
