@@ -75,9 +75,8 @@ void ABaseEnemy::Tick(float DeltaTime)
             }
             break;
         default: ;
-        }    }
-
-    
+        }
+    }
 }
 
 void ABaseEnemy::HandlePerception()
