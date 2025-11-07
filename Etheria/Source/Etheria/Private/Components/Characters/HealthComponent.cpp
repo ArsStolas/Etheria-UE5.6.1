@@ -51,7 +51,7 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 
 		if (AActor* Owner = GetOwner())
 		{
-			Owner->Destroy();
+			
 		}
 	}
 }
