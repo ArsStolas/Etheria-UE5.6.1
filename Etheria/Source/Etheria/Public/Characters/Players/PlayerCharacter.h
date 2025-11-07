@@ -19,7 +19,6 @@ class UInputAction;
 class UGliderComponent;
 class UInventoryComponent;
 class UInteractorComponent;
-class UCombatComponent;
 class ULockTargetComponent;
 
 USTRUCT()
@@ -110,10 +109,6 @@ protected:
     // === Interactor COMPONENTS ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interactor Component", meta=(AllowPrivateAccess="true"))
     UInteractorComponent* InteractorComponent;
-
-    // === COMBAT COMPONENTS ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Combat Components", meta=(AllowPrivateAccess="true"))
-    UCombatComponent* CombatComponent;
 
     // === LOCK TARGET COMPONENTS ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Lock Target Components", meta=(AllowPrivateAccess="true"))

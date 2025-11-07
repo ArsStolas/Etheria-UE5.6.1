@@ -42,17 +42,20 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 	if (DamageAmount <= 0.f || IsDead()) return;
 
 	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
-
-	UE_LOG(LogTemp, Warning, TEXT("HealthComponent::TakeDamage => Health = %f"), Health);
-
+	
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
 	if (IsDead())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("HealthComponent::TakeDamage => Actor is dead"));
 		OnDeath.Broadcast();
+
+		if (AActor* Owner = GetOwner())
+		{
+			
+		}
 	}
 }
+
 
 void UHealthComponent::Heal(const float HealAmount)
 {

@@ -105,6 +105,10 @@ class ETHERIA_API UCombatComponent : public UActorComponent
 public:
     UCombatComponent();
 
+    const TArray<FEEAttackSpec>& GetAttacks() const { return Attacks; }
+    const TArray<FEEComboSpec>& GetCombos() const { return Combos; }
+
+
     UFUNCTION(BlueprintCallable, Category="Combat") void SetAttacks(const TArray<FEEAttackSpec>& InAttacks);
     UFUNCTION(BlueprintCallable, Category="Combat") void SetCombos(const TArray<FEEComboSpec>& InCombos);
     UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackPrimary();
