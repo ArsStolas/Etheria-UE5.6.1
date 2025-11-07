@@ -17,14 +17,14 @@
 UENUM(BlueprintType)
 enum class EAIIdleMoveType : uint8
 {
-    Points UMETA(DisplayName = "Idle Points"),
-    Spline UMETA(DisplayName = "Follow Spline")
+    Points  UMETA(DisplayName = "Idle Points"),
+    Spline  UMETA(DisplayName = "Follow Spline")
 };
 
 UENUM(BlueprintType)
 enum class ESplinePatrolMode : uint8
 {
-    Loop UMETA(DisplayName = "Loop"),
+    Loop        UMETA(DisplayName = "Loop"),
     BackAndForth UMETA(DisplayName = "Back And Forth")
 };
 
@@ -62,10 +62,10 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement")
     float SplinePointReachDist = 100.f;
 
-    UFUNCTION(BlueprintImplementableEvent, Category="AI|Animation")
+    UFUNCTION(BlueprintImplementableEvent, Category = "AI|Animation")
     void PlayIdleAnimation();
 
-    UFUNCTION(BlueprintImplementableEvent, Category="AI|VoiceLine")
+    UFUNCTION(BlueprintImplementableEvent, Category = "AI|VoiceLine")
     void PlayIdleVoiceLine();
 
     UFUNCTION(BlueprintImplementableEvent, Category="AI")

@@ -66,4 +66,12 @@ protected:
 	FName SelectedComboId = NAME_None;
 	FName SingleAttackId = NAME_None;
 
+private:
+	FVector PreviousVelocity;
+	float CachedAccelerationMagnitude = 0.f;
+
+public:
+	float GetAccelerationMagnitude() const { return CachedAccelerationMagnitude; }
+
+	
 };
