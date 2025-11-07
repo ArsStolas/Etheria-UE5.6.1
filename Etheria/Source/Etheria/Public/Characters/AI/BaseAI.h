@@ -61,13 +61,7 @@ protected:
     float SplineOffset = 0.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement")
-    float SplineFollowSpeed = 300.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement")
     float SplinePointReachDist = 100.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement")
-    float SplineUpdateInterval = 0.2f;
 
     UFUNCTION(BlueprintImplementableEvent, Category = "AI|Animation")
     void PlayIdleAnimation();
@@ -83,9 +77,14 @@ protected:
     int CurrentIdlePointIndex = 0;
     FVector SplineCurrentTarget = FVector::ZeroVector;
     bool bSplineActive = false;
+
+    UPROPERTY(Transient)
     int SplineDirection = 1;
 
+    UPROPERTY(Transient)
     TArray<float> SplineWaypoints;
+
+    UPROPERTY(Transient)
     int32 CurrentWaypointIndex = 0;
 
 public:
@@ -93,11 +92,6 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
     bool bIsHostile = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
-    AActor* CurrentTarget = nullptr;
-
-    bool bCanAttack = true;
 
     UFUNCTION(BlueprintCallable, Category="AI|Movement")
     void MoveToIdlePoint();

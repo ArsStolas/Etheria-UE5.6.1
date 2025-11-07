@@ -19,10 +19,6 @@ enum class EEnemyState : uint8
 	Fighting
 };
 
-inline FName SelectedComboId = NAME_None;
-inline FName SingleAttackId = NAME_None;
-
-
 UCLASS(Abstract)
 class ETHERIA_API ABaseEnemy : public ABaseAI
 {
@@ -33,37 +29,41 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual void HandlePerception() override;
 	virtual bool CanIdleMove() const override;
+	
+	void StartChasePlayer();
+	void AttackEnemy();
+	void StartAttackCycle();
 
-protected:
-	virtual void BeginPlay() override;
+	void StopAttackCycle();
+	void ResetComboState();
+
+	bool bIsAttacking = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
 	EEnemyState CurrentState = EEnemyState::Idle;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
+	bool bUseBehaviorTree = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
 	AActor* TargetActor = nullptr;
 
-	FTimerHandle EnemyAttackTimerHandle;
-	bool bIsAttacking = false;
+protected:
+	virtual void BeginPlay() override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat")
-	FName ComboIdToUse = "DefaultCombo";
+	FTimerHandle EnemyAttackTimerHandle;
 
 	int32 ComboStep = 0;
 	int32 ComboLength = 0;
 	bool bComboInProgress = false;
-
-	void StartAttackCycle();
-	void StopAttackCycle();
-	void AttackEnemy();
-	void StartChasePlayer();
-	void ResetComboState();
-	void AdvanceCombo();
 
 	UFUNCTION()
 	void OnComboEndHandler(FName AttackId);
 
 	UFUNCTION()
 	void TryComboAttackStep();
+	
+	FName SelectedComboId = NAME_None;
+	FName SingleAttackId = NAME_None;
 
 };

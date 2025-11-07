@@ -30,18 +30,13 @@ ABaseAI::ABaseAI()
     AIPerception->SetDominantSense(SightConfig->GetSenseImplementation());
 
     IdleSpline = CreateDefaultSubobject<USplineComponent>(TEXT("IdleSpline"));
-    IdlePoints.Empty();
 
     IdleMoveType = EAIIdleMoveType::Spline;
     SplinePatrolMode = ESplinePatrolMode::Loop;
-    SplineFollowSpeed = 300.f;
     SplinePointReachDist = 100.f;
     SplineOffset = 0.f;
     bSplineActive = false;
     SplineDirection = 1;
-
-    SplineWaypoints.Empty();
-    CurrentWaypointIndex = 0;
 }
 
 void ABaseAI::BeginPlay()

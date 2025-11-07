@@ -12,9 +12,6 @@
 #include "Characters/BaseCharacter.h"
 #include "Characters/Players/PlayerCharacter.h"
 #include "TimerManager.h"
-#include "Math/UnrealMathUtility.h"
-
-const float DistanceMaxChase = 2200.f;
 
 ABaseEnemy::ABaseEnemy() { bIsHostile = true; }
 
@@ -39,44 +36,48 @@ void ABaseEnemy::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    float AttackRange = 0.f;
-    if (CombatComponent && CombatComponent->IsValidLowLevel())
+    if (!bUseBehaviorTree)
     {
-        const TArray<FEEAttackSpec>& Attacks = CombatComponent->GetAttacks();
-        if (Attacks.Num() > 0)
-            AttackRange = Attacks[0].Range;
-    }
-
-    if ((CurrentState == EEnemyState::Fighting) && TargetActor)
-    {
-        float Dist = FVector::Dist(GetActorLocation(), TargetActor->GetActorLocation());
-        if (Dist > AttackRange)
+        float AttackRange = 0.f;
+        if (CombatComponent && CombatComponent->IsValidLowLevel())
         {
-            // UE_LOG(LogTemp, Warning, TEXT("[ENEMY] Target too far - Stopping attacks, switch to Chase"));
-            CurrentState = EEnemyState::Chase;
-            StopAttackCycle();
-            StartChasePlayer();
-            ResetComboState();
-            return;
+            const TArray<FEEAttackSpec>& Attacks = CombatComponent->GetAttacks();
+            if (Attacks.Num() > 0)
+                AttackRange = Attacks[0].Range;
         }
-    }
 
-    switch (CurrentState)
-    {
-    case EEnemyState::Idle: break;
-    case EEnemyState::Chase:
-        if (TargetActor && AttackRange > 0.f)
+        if ((CurrentState == EEnemyState::Fighting) && TargetActor)
         {
             float Dist = FVector::Dist(GetActorLocation(), TargetActor->GetActorLocation());
-            if (Dist < AttackRange)
+            if (Dist > AttackRange)
             {
-                CurrentState = EEnemyState::Fighting;
-                StartAttackCycle();
+                // UE_LOG(LogTemp, Warning, TEXT("[ENEMY] Target too far - Stopping attacks, switch to Chase"));
+                CurrentState = EEnemyState::Chase;
+                StopAttackCycle();
+                StartChasePlayer();
+                ResetComboState();
+                return;
             }
         }
-        break;
-    default: ;
-    }
+
+        switch (CurrentState)
+        {
+        case EEnemyState::Idle: break;
+        case EEnemyState::Chase:
+            if (TargetActor && AttackRange > 0.f)
+            {
+                float Dist = FVector::Dist(GetActorLocation(), TargetActor->GetActorLocation());
+                if (Dist < AttackRange)
+                {
+                    CurrentState = EEnemyState::Fighting;
+                    StartAttackCycle();
+                }
+            }
+            break;
+        default: ;
+        }    }
+
+    
 }
 
 void ABaseEnemy::HandlePerception()

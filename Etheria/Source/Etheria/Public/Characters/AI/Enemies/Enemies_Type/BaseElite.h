@@ -4,7 +4,7 @@
  * Last Updated by: ArsStolas
  * Class: BaseElite - Header
 */
-// BaseElite.h
+
 #pragma once
 
 #include "CoreMinimal.h"
