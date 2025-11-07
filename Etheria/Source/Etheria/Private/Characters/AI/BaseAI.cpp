@@ -47,14 +47,7 @@ void ABaseAI::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (GetController() == nullptr)
-    {
-        SpawnDefaultController();
-    }
-
     GetCharacterMovement()->SetMovementMode(MOVE_Walking);
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    bUseControllerRotationYaw = false;
 
     if (IdleMoveType == EAIIdleMoveType::Spline && IdleSpline)
     {
@@ -68,9 +61,9 @@ void ABaseAI::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-        const float Speed = GetVelocity().Size2D();
-        GEngine->AddOnScreenDebugMessage(1, 0.f, FColor::Green,
-            FString::Printf(TEXT("Speed: %.1f"), Speed));
+    const float Speed = GetVelocity().Size2D();
+    GEngine->AddOnScreenDebugMessage(1, 0.f, FColor::Green,
+        FString::Printf(TEXT("Speed: %.1f"), Speed));
 
     HandlePerception();
     HandleDecisionMaking();
@@ -82,11 +75,9 @@ void ABaseAI::Tick(float DeltaTime)
         case EAIIdleMoveType::Points:
             MoveToIdlePoint(DeltaTime);
             break;
-
         case EAIIdleMoveType::Spline:
             UpdateSplineMove(DeltaTime);
             break;
-
         default:
             break;
     }
@@ -168,17 +159,11 @@ void ABaseAI::MoveToIdlePoint(float DeltaTime)
 
 void ABaseAI::MoveTowards(const FVector& TargetLocation, float DeltaTime)
 {
-    FVector ToTarget = TargetLocation - GetActorLocation();
-    ToTarget.Z = 0.f;
-    FVector Direction = ToTarget.GetSafeNormal();
-
-    if (Direction.IsNearlyZero()) return;
-
+    FVector Direction = (TargetLocation - GetActorLocation()).GetSafeNormal2D();
     AddMovementInput(Direction, 1.0f);
 
-    FRotator TargetRot = Direction.Rotation();
-    FRotator NewRot = FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, 6.f);
-    SetActorRotation(NewRot);
+    FRotator TargetRotation = Direction.Rotation();
+    SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRotation, DeltaTime, 3.f));
 }
 
 void ABaseAI::HandlePerception() {}
