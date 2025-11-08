@@ -207,7 +207,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float SprintSpeed = 900.f;
 
-    UPROPERTY(EditAnywhere, Category="Input") float JumpBufferTime = 0.25f;
+    UPROPERTY(EditAnywhere, Category="Player Input") float JumpBufferTime = 0.25f;
     bool bJumpBuffered = false;
     float JumpBufferExpireAt = 0.f;
     bool bLockJumpCrouchFromCombat = false;

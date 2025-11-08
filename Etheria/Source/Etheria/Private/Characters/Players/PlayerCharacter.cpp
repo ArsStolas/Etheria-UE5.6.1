@@ -239,6 +239,8 @@ void APlayerCharacter::OnJumpPressed()
         JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
         return;
     }
+
+    if (bLockJumpCrouchFromCombat) return;
     Jump();
 }
 
