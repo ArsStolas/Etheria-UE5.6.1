@@ -6,7 +6,7 @@
  * Note: Pluggable effect executed when an item is used (Blueprintable)
  */
 
-#include "Data/ItemUseEffect.h"
+#include "Data/Items/ItemUseEffect.h"
 #include "Components/Inventory/InventoryComponent.h"
 
 bool UItemUseEffect::ApplyEffect_Implementation(AActor* User, UInventoryComponent* Inventory, int32 SlotIndex)

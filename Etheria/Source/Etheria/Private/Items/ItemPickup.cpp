@@ -8,7 +8,7 @@
 #include "Items/ItemPickup.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Data/ItemDefinition.h"
+#include "Data/Items/ItemDefinition.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"

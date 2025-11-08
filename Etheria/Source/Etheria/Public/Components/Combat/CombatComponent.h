@@ -15,14 +15,17 @@ class ULockTargetComponent;
 class USkeletalMeshComponent;
 class UMaterialInterface;
 class UDecalComponent;
+class UEEWeaponData;
 class AActor;
 
 /* Basic enums */
+UENUM(BlueprintType) enum class EEEStance : uint8 { Both=0, GroundOnly=1, AirOnly=2 };
 UENUM(BlueprintType) enum class EEEAttackType : uint8 { Melee=0, Ranged=1, AoE=2 };
 UENUM(BlueprintType) enum class EEETraceShape : uint8 { Line=0, Sphere=1, Capsule=2 };
 UENUM(BlueprintType) enum class EEEPerfectKind : uint8 { None=0, Parry=1, Dodge=2 };
 UENUM(BlueprintType) enum class EEECombatCuePhase : uint8 { Start=0, Impact=1, End=2 };
 UENUM(BlueprintType) enum class EEEChargeShape : uint8 { None=0, Radial=1, FrontalRect=2 };
+UENUM(BlueprintType) enum class EEERangedMode : uint8 { None=0, Line=1 };
 
 /* Charge structs */
 USTRUCT(BlueprintType)
@@ -53,14 +56,16 @@ USTRUCT(BlueprintType)
 struct FEEAttackSpec
 {
     GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") FName Group = NAME_None; // "Light", "Heavy"
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") EEEStance Stance = EEEStance::GroundOnly;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") FName AttackId = NAME_None;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") EEEAttackType AttackType = EEEAttackType::Melee;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Damage") float BaseDamage = 25.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Damage") float CritChance = 0.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Damage") float CritMultiplier = 1.5f;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float HitStartDelay = 0.1f;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float HitWindow = 0.15f;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float Cooldown = 0.35f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float HitStartDelay = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float HitWindow = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float Cooldown = 0.0f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") EEETraceShape TraceShape = EEETraceShape::Sphere;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") float Range = 220.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") float Radius = 35.f;
@@ -110,18 +115,14 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackPrimary();
     UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackById(FName AttackId);
 
-    /* Combo control from input */
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void RequestComboAdvance();
 
-    /* Targeting */
     UFUNCTION(BlueprintCallable, Category="Combat|Target") void SetExternalTarget(AActor* InTarget);
     UFUNCTION(BlueprintPure,   Category="Combat|Target") AActor* GetCurrentTarget() const;
 
-    /* Attack windows driven by notifies */
     UFUNCTION(BlueprintCallable, Category="Combat|Window") void BeginAttackWindow();
     UFUNCTION(BlueprintCallable, Category="Combat|Window") void EndAttackWindow();
 
-    /* Parry and Dodge */
     UFUNCTION(BlueprintCallable, Category="Combat|Parry") void SetParryHeld(bool bHeld);
     UFUNCTION(BlueprintPure,   Category="Combat|Parry") bool IsParryHeld() const { return bParryHeld; }
     UFUNCTION(BlueprintCallable, Category="Combat|Parry") void BeginPerfectParryWindow();
@@ -131,16 +132,23 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Dodge") void EndPerfectDodgeWindow();
     UFUNCTION(BlueprintPure,   Category="Combat|Dodge") bool IsInIFrames() const { return bInDodgeIFrames; }
 
-    /* Charge API driven by AnimNotifyState_ChargeWindow */
     UFUNCTION(BlueprintCallable, Category="Combat|Charge") void BeginCharge(FName AttackId, float ExpectedDuration);
     UFUNCTION(BlueprintCallable, Category="Combat|Charge") void UpdateChargeProgress(float DeltaTime);
     UFUNCTION(BlueprintCallable, Category="Combat|Charge") void EndCharge(bool bCanceled);
 
-    /* Combo notifies */
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void BeginComboWindow(FName ComboId);
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void EndComboWindow(FName ComboId);
 
-    /* Events */
+    // Weapon data hot-swap
+    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UEEWeaponData* InData);
+    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void ApplyWeaponData();
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UEEWeaponData* WeaponData = nullptr;
+
+    // Combo buffer timeout (editor tweak)
+    UPROPERTY(EditAnywhere, Category="Combat|Combo", meta=(ClampMin="0.0")) float MaxComboBufferTime = 1.0f; // seconds
+    float ComboBufferExpireAt = 0.0f;
+
     UPROPERTY(BlueprintAssignable, Category="Events") FEEOnCue OnCue;
     UPROPERTY(BlueprintAssignable, Category="Events") FEEOnAttackEvent OnAttackStarted;
     UPROPERTY(BlueprintAssignable, Category="Events") FEEOnAttackEvent OnAttackEnded;
@@ -150,12 +158,18 @@ public:
 
     UFUNCTION(BlueprintPure, Category="Combat|State") bool IsInCooldown() const;
     UFUNCTION(BlueprintPure, Category="Combat|State") bool IsInAttackWindow() const { return bInAttackWindow; }
+    UFUNCTION(BlueprintPure, Category="Combat|State") bool IsAttackActive() const { return CurrentAttackId != NAME_None; }
+    UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackGroup(FName GroupId); // picks ground/air variant automatically
+    void PushRecentHitActor(AActor* A);
+    void ClearRecentHitActors();
+    void GetRecentHitActors(TArray<AActor*>& Out) const;
+
 
 protected:
     virtual void BeginPlay() override;
 
 private:
-    /* Internal execution */
+#pragma region "Internal execution"
     bool ResolveOwnerRefs();
     bool CanExecuteAttack(const FName AttackId) const;
     void ExecuteAttack(const FEEAttackSpec& Spec, float DamageScale = 1.f, float RangeScale = 1.f);
@@ -164,41 +178,52 @@ private:
     void PerformMeleeTrace(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
     void PerformAoE(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
     void PerformFrontalRect(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
+#pragma endregion
 
-    /* Facing and target assist */
+#pragma region "Facing and target assist"
     void NudgeOwnerRotationToward(const FVector& Direction, float MaxYawDeltaDeg) const;
     FVector GetEyeLocationForward(FVector& OutForward) const;
     AActor* ResolveBestTarget(const FVector& EyeLoc, const FVector& Forward) const;
     FVector ApplyMagnetismBias(const FVector& RawForward, const FVector& EyeLoc) const;
+#pragma endregion
 
-    /* Damage and defense */
+#pragma region "Damage and defense"
     float ComputeFinalDamageForTarget(AActor* Victim, float RawDamage, bool& bOutCrit, float CritChance, float CritMultiplier) const;
+#pragma endregion
 
-    /* Legacy hooks */
+#pragma region "Hooks"
     void BindDamageHooks();
     UFUNCTION() void HandleAnyDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser);
     UFUNCTION() void HandlePointDamage(AActor* DamagedActor, float Damage, class AController* InstigatedBy, FVector HitLocation, class UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const class UDamageType* DamageType, AActor* DamageCauser);
+#pragma endregion
 
-    /* Perfect boosts */
+#pragma region "Perfect boosts"
     void ApplyPerfectBoost(EEEPerfectKind Kind);
     void RestoreBoosts();
+#pragma endregion
 
-    /* Search helpers */
+#pragma region "Search helpers"
     const FEEAttackSpec* FindAttack(FName AttackId) const;
+#pragma endregion
 
-    /* Combo runtime helpers */
+#pragma region "Combo runtime helpers"
     void AdvanceComboIfRequested();
+#pragma endregion
 
-    /* Telegraph */
+#pragma region "Telegraph"
     void SpawnTelegraph();
     void UpdateTelegraph(float Alpha);
     void DestroyTelegraph();
+#pragma endregion
 
-    /* Utils */
+#pragma region "Utils"
     TArray<AActor*> UniqueActorsFromHits(const TArray<FHitResult>& Hits) const;
+    void PlayOrJumpMontageSection(const FEEAttackSpec& Spec) const;
+    void PerformRangedLine(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
+#pragma endregion
 
 private:
-    /* Config */
+#pragma region "Config"
     UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FEEAttackSpec> Attacks;
     UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FEEComboSpec> Combos;
     UPROPERTY(EditAnywhere, Category="Combat|Config") TEnumAsByte<ECollisionChannel> DamageTraceChannel = ECC_Pawn;
@@ -206,26 +231,38 @@ private:
     UPROPERTY(EditAnywhere, Category="Combat|Magnetism", meta=(ClampMin="0.0", ClampMax="90.0")) float MagnetismAngleDeg = 35.f;
     UPROPERTY(EditAnywhere, Category="Combat|Magnetism", meta=(ClampMin="0.0", ClampMax="1.0")) float MagnetismStrength = 0.55f;
     UPROPERTY(EditAnywhere, Category="Combat|Facing", meta=(ClampMin="0.0", ClampMax="45.0")) float MaxAutoYawOnAttackDeg = 20.f;
+    UPROPERTY(EditAnywhere, Category="Combat|Direction") bool bUseMeshFacing = true;
+#pragma endregion
 
-    /* Parry */
+#pragma region "Ranged"
+    UPROPERTY(EditAnywhere, Category="Combat|Ranged") EEERangedMode RangedMode = EEERangedMode::Line;
+    UPROPERTY(EditAnywhere, Category="Combat|Ranged") FName MuzzleSocketName = "Muzzle";
+#pragma endregion
+    
+#pragma region "Parry"
     UPROPERTY(EditAnywhere, Category="Combat|Parry", meta=(ClampMin="0.0", ClampMax="1.0")) float ParryDamageFactorWhileHeld = 0.2f;
     UPROPERTY(EditAnywhere, Category="Combat|Parry") TArray<UAnimMontage*> ParryHitReactionMontages;
     UPROPERTY(EditAnywhere, Category="Combat|Parry", meta=(ClampMin="0.1")) float ParryMoveSpeedMultiplier = 0.6f;
+#pragma endregion
 
-    /* Dodge */
+#pragma region "Dodge"
     UPROPERTY(EditAnywhere, Category="Combat|Dodge", meta=(ClampMin="0.05")) float DodgeIFrameDuration = 0.35f;
+#pragma endregion
 
-    /* Perfect boost */
+#pragma region "Perfect boost"
     UPROPERTY(EditAnywhere, Category="Combat|Perfect", meta=(ClampMin="1.0")) float PerfectMoveSpeedMultiplier = 1.25f;
     UPROPERTY(EditAnywhere, Category="Combat|Perfect", meta=(ClampMin="1.0")) float PerfectAnimRateMultiplier = 1.25f;
     UPROPERTY(EditAnywhere, Category="Combat|Perfect", meta=(ClampMin="0.1")) float PerfectBoostDuration = 2.0f;
+#pragma endregion
 
-    /* Telegraph visuals */
+#pragma region "Telegraph visuals"
     UPROPERTY(EditAnywhere, Category="Combat|Telegraph") UMaterialInterface* RadialDecalMaterial = nullptr;
     UPROPERTY(EditAnywhere, Category="Combat|Telegraph") UMaterialInterface* RectDecalMaterial = nullptr;
+#pragma endregion
 
-    /* Runtime */
+#pragma region "Runtime"
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") FName CurrentAttackId = NAME_None;
+    UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") FName LastAttackId = NAME_None;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bInAttackWindow = false;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") float CooldownEndTime = 0.f;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bParryHeld = false;
@@ -233,29 +270,40 @@ private:
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bPerfectDodgeWindow = false;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bInDodgeIFrames = false;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") TWeakObjectPtr<AActor> ExternalTarget;
-
-    /* Charge runtime */
+    TArray<TWeakObjectPtr<AActor>> RecentHitActors;
+#pragma endregion
+    
+#pragma region "Debug"
+    UPROPERTY(EditAnywhere, Category="Combat|Debug") bool bDebugDraw = false;
+#pragma endregion
+    
+#pragma region "Charge runtime"
     bool bCharging = false;
     float ChargeStartTime = 0.f;
     float ChargeExpectedDuration = 0.f;
     float ChargeAccumulated = 0.f;
     int32 ChargeLevelIndex = -1;
+    int32 ObservedChargeLevel = -1;
+#pragma endregion
 
-    /* Combo runtime */
+#pragma region "Combo runtime"
     FName ActiveComboId = NAME_None;
     int32 ActiveComboStep = -1;
     bool bComboWindowOpen = false;
     bool bComboAdvanceRequested = false;
     float ComboResetTime = 0.f;
+#pragma endregion
 
-    /* Cached */
+#pragma region "Cached"
     TWeakObjectPtr<class ACharacter> OwnerCharacter;
     TWeakObjectPtr<USkeletalMeshComponent> OwnerMesh;
     TWeakObjectPtr<UCharacterMovementComponent> MoveComp;
     TWeakObjectPtr<ULockTargetComponent> LockComp;
     float BaseWalkSpeed = -1.f;
     float BaseGlobalAnimRate = 1.f;
+#pragma endregion
 
-    /* Telegraph component */
+#pragma region "Telegraph component"
     UDecalComponent* ActiveDecal = nullptr;
+#pragma endregion
 };

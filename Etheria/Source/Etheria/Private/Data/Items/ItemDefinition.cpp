@@ -6,4 +6,4 @@
  * Note: Data asset describing an item (safe UDataAsset variant)
  */
 
-#include "Data/ItemDefinition.h"
+#include "Data/Items/ItemDefinition.h"
