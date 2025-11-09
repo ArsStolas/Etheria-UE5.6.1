@@ -1,4 +1,4 @@
-/**
+/*
  * Etheria's End Project, 2025
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
