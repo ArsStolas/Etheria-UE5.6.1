@@ -210,195 +210,194 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 #pragma endregion
 
 #pragma region "MOVEMENT INPUTS"
-void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
-void APlayerCharacter::OnForwardCompleted(const FInputActionValue&){ Vertical.OnPosCompleted(); }
-void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); }
-void APlayerCharacter::OnBackCompleted(const FInputActionValue&)    { Vertical.OnNegCompleted(); }
-void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); }
-void APlayerCharacter::OnLeftCompleted(const FInputActionValue&)    { Horizontal.OnNegCompleted(); }
-void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); }
-void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal.OnPosCompleted(); }
-
-void APlayerCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
-void APlayerCharacter::StopSprint()  { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
-
-void APlayerCharacter::OnCrouchPressed()
-{
-    if (CombatComponent && CombatComponent->IsAttackActive()) return;
-    Crouch();
-}
-void APlayerCharacter::StopCrouch()  { UnCrouch(); }
-
-void APlayerCharacter::OnJumpPressed()
-{
-    if (!CombatComponent) { Jump(); return; }
-
-    if (CombatComponent->IsAttackActive())
+    void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+    void APlayerCharacter::OnForwardCompleted(const FInputActionValue&){ Vertical.OnPosCompleted(); }
+    void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+    void APlayerCharacter::OnBackCompleted(const FInputActionValue&)    { Vertical.OnNegCompleted(); }
+    void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+    void APlayerCharacter::OnLeftCompleted(const FInputActionValue&)    { Horizontal.OnNegCompleted(); }
+    void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+    void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal.OnPosCompleted(); }
+    
+    void APlayerCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
+    void APlayerCharacter::StopSprint()  { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
+    
+    void APlayerCharacter::OnCrouchPressed()
     {
-        bJumpBuffered = true;
-        JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
-        return;
+        if (CombatComponent && CombatComponent->IsAttackActive()) return;
+        Crouch();
     }
-
-    if (bLockJumpCrouchFromCombat) return;
-    Jump();
-}
-
+    void APlayerCharacter::StopCrouch()  { UnCrouch(); }
+    
+    void APlayerCharacter::OnJumpPressed()
+    {
+        if (!CombatComponent) { Jump(); return; }
+    
+        if (CombatComponent->IsAttackActive())
+        {
+            bJumpBuffered = true;
+            JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
+            return;
+        }
+    
+        if (bLockJumpCrouchFromCombat) return;
+        Jump();
+    }
 #pragma endregion
 
 #pragma region "GLIDER INPUTS"
-void APlayerCharacter::ToggleGlideMode() { if (GliderComponent) GliderComponent->ToggleGliding(); }
-void APlayerCharacter::ToggleDiveMode() { if (GliderComponent) GliderComponent->ToggleDiving(); }
+    void APlayerCharacter::ToggleGlideMode() { if (GliderComponent) GliderComponent->ToggleGliding(); }
+    void APlayerCharacter::ToggleDiveMode() { if (GliderComponent) GliderComponent->ToggleDiving(); }
 
-void APlayerCharacter::AlignToCamera()
-{
-    if (Controller)
+    void APlayerCharacter::AlignToCamera()
     {
-        FRotator CamRot = Controller->GetControlRotation();
-        SetActorRotation(FRotator(0.f, CamRot.Yaw, 0.f));
+        if (Controller)
+        {
+            FRotator CamRot = Controller->GetControlRotation();
+            SetActorRotation(FRotator(0.f, CamRot.Yaw, 0.f));
+        }
     }
-}
 
-bool APlayerCharacter::IsInSpecialMode() const { return (GliderComponent && GliderComponent->IsGliding()); }
+    bool APlayerCharacter::IsInSpecialMode() const { return (GliderComponent && GliderComponent->IsGliding()); }
 #pragma endregion
 
 #pragma region "INVENTORY INPUTS"
-// INVENTORY INPUTS
-void APlayerCharacter::Input_SelectNext() { if (InventoryComponent) { InventoryComponent->SelectNext(); } }
-void APlayerCharacter::Input_SelectPrev() { if (InventoryComponent) { InventoryComponent->SelectPrevious(); } }
-void APlayerCharacter::Input_UseItem() { if (InventoryComponent) { InventoryComponent->UseSelected(); } }
-void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
+    // INVENTORY INPUTS
+    void APlayerCharacter::Input_SelectNext() { if (InventoryComponent) { InventoryComponent->SelectNext(); } }
+    void APlayerCharacter::Input_SelectPrev() { if (InventoryComponent) { InventoryComponent->SelectPrevious(); } }
+    void APlayerCharacter::Input_UseItem() { if (InventoryComponent) { InventoryComponent->UseSelected(); } }
+    void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
 #pragma endregion
 
 #pragma region "INTERACTION INPUT"
-// INTERACTION INPUT
-void APlayerCharacter::Input_Interact()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
-    if (!InteractorComponent)
+    // INTERACTION INPUT
+    void APlayerCharacter::Input_Interact()
     {
-        UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
+        if (!InteractorComponent)
+        {
+            UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
+            return;
+        }
+        InteractorComponent->TryInteract();
     }
-    InteractorComponent->TryInteract();
-}
 #pragma endregion
 
 #pragma region "COMBAT INPUTS"
-// Light attack: try primary if idle, else request combo advance during combo window
-void APlayerCharacter::OnAttackLightPressed()
-{
-    if (!CombatComponent) return;
-
-    // If an attack is active or we are inside the hit window, just ask to advance combo.
-    if (CombatComponent->IsAttackActive() || CombatComponent->IsInAttackWindow())
+    // Light attack: try primary if idle, else request combo advance during combo window
+    void APlayerCharacter::OnAttackLightPressed()
     {
+        if (!CombatComponent) return;
+
+        // If an attack is active or we are inside the hit window, just ask to advance combo.
+        if (CombatComponent->IsAttackActive() || CombatComponent->IsInAttackWindow())
+        {
+            CombatComponent->RequestComboAdvance();
+            return;
+        }
+
+        // Route by stance automatically: will pick Light Ground or Light Air variant based on IsFalling()
+        CombatComponent->TryAttackGroup(FName("Light"));
+    }
+
+    void APlayerCharacter::OnAttackLightReleased()
+    {
+        
+    }
+
+    // Heavy charge attack: use an explicit attack id, for example "Heavy"
+    void APlayerCharacter::OnAttackHeavyPressed()
+    {
+        if (!CombatComponent) return;
         CombatComponent->RequestComboAdvance();
-        return;
+        if (!CombatComponent->IsAttackActive())
+        {
+            CombatComponent->TryAttackGroup(FName("Heavy"));
+        }
     }
 
-    // Route by stance automatically: will pick Light Ground or Light Air variant based on IsFalling()
-    CombatComponent->TryAttackGroup(FName("Light"));
-}
-
-void APlayerCharacter::OnAttackLightReleased()
-{
-    
-}
-
-// Heavy charge attack: use an explicit attack id, for example "Heavy"
-void APlayerCharacter::OnAttackHeavyPressed()
-{
-    if (!CombatComponent) return;
-    CombatComponent->RequestComboAdvance();
-    if (!CombatComponent->IsAttackActive())
+    // Release the charge and execute at current level
+    void APlayerCharacter::OnAttackHeavyReleased()
     {
-        CombatComponent->TryAttackGroup(FName("Heavy"));
+        if (!CombatComponent) return;
+        // EndCharge(false) will compute level and release.
+        CombatComponent->EndCharge(false);
     }
-}
 
-// Release the charge and execute at current level
-void APlayerCharacter::OnAttackHeavyReleased()
-{
-    if (!CombatComponent) return;
-    // EndCharge(false) will compute level and release.
-    CombatComponent->EndCharge(false);
-}
-
-// Cancel the charge without releasing
-void APlayerCharacter::OnAttackHeavyCanceled()
-{
-    if (!CombatComponent) return;
-    CombatComponent->EndCharge(true);
-}
-
-void APlayerCharacter::OnParryPressed()
-{
-    if (!CombatComponent) return;
-    CombatComponent->SetParryHeld(true);
-}
-
-void APlayerCharacter::OnParryReleased()
-{
-    if (!CombatComponent) return;
-    CombatComponent->SetParryHeld(false);
-}
-
-void APlayerCharacter::OnDodgePressed()
-{
-    // Have to play a dodge montage that contains a notify to call StartDodgeIFrames
-    if (CombatComponent)
+    // Cancel the charge without releasing
+    void APlayerCharacter::OnAttackHeavyCanceled()
     {
-        CombatComponent->StartDodgeIFrames(-1.f);
+        if (!CombatComponent) return;
+        CombatComponent->EndCharge(true);
     }
-}
+
+    void APlayerCharacter::OnParryPressed()
+    {
+        if (!CombatComponent) return;
+        CombatComponent->SetParryHeld(true);
+    }
+
+    void APlayerCharacter::OnParryReleased()
+    {
+        if (!CombatComponent) return;
+        CombatComponent->SetParryHeld(false);
+    }
+
+    void APlayerCharacter::OnDodgePressed()
+    {
+        // Have to play a dodge montage that contains a notify to call StartDodgeIFrames
+        if (CombatComponent)
+        {
+            CombatComponent->StartDodgeIFrames(-1.f);
+        }
+    }
 #pragma endregion
 
 #pragma region "LOCK TARGET INPUTS"
-void APlayerCharacter::OnLockToggle()
-{
-    if (LockTargetComponent)
+    void APlayerCharacter::OnLockToggle()
     {
-        LockTargetComponent->ToggleLock(nullptr);
+        if (LockTargetComponent)
+        {
+            LockTargetComponent->ToggleLock(nullptr);
+        }
     }
-}
 
-void APlayerCharacter::OnLockSwitchLeft()
-{
-    if (LockTargetComponent)
+    void APlayerCharacter::OnLockSwitchLeft()
     {
-        LockTargetComponent->SwitchTarget(false);
+        if (LockTargetComponent)
+        {
+            LockTargetComponent->SwitchTarget(false);
+        }
     }
-}
 
-void APlayerCharacter::OnLockSwitchRight()
-{
-    if (LockTargetComponent)
+    void APlayerCharacter::OnLockSwitchRight()
     {
-        LockTargetComponent->SwitchTarget(true);
+        if (LockTargetComponent)
+        {
+            LockTargetComponent->SwitchTarget(true);
+        }
     }
-}
 #pragma endregion
 
 
 #pragma region "HANDLERS"
-void APlayerCharacter::HandleAttackStart(FName)
-{
-    bLockJumpCrouchFromCombat = true;
-}
-
-void APlayerCharacter::HandleAttackEnd(FName)
-{
-    bLockJumpCrouchFromCombat = false;
-
-    if (bJumpBuffered && GetWorld())
+    void APlayerCharacter::HandleAttackStart(FName)
     {
-        const float Now = GetWorld()->GetTimeSeconds();
-        if (Now <= JumpBufferExpireAt)
-        {
-            Jump();
-        }
+        bLockJumpCrouchFromCombat = true;
     }
-    bJumpBuffered = false;
-}
+
+    void APlayerCharacter::HandleAttackEnd(FName)
+    {
+        bLockJumpCrouchFromCombat = false;
+
+        if (bJumpBuffered && GetWorld())
+        {
+            const float Now = GetWorld()->GetTimeSeconds();
+            if (Now <= JumpBufferExpireAt)
+            {
+                Jump();
+            }
+        }
+        bJumpBuffered = false;
+    }
 #pragma endregion
