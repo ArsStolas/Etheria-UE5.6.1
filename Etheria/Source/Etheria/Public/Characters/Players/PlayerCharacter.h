@@ -70,6 +70,9 @@ protected:
 
     void Look(const struct FInputActionValue& Value);
 
+    void OnJumpPressed();
+    
+    void OnCrouchPressed();
     void StartCrouch();
     void StopCrouch();
 
@@ -86,6 +89,9 @@ protected:
     UFUNCTION() void Input_UseItem();
     UFUNCTION() void Input_DropItem();
     UFUNCTION() void Input_Interact();
+    
+    UFUNCTION() void HandleAttackStart(FName AttackId);
+    UFUNCTION() void HandleAttackEnd(FName AttackId);
     
 #pragma region "COMPONENTS"
     // === CAMERA COMPONENTS ===
@@ -200,6 +206,11 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float SprintSpeed = 900.f;
+
+    UPROPERTY(EditAnywhere, Category="Player Input") float JumpBufferTime = 0.25f;
+    bool bJumpBuffered = false;
+    float JumpBufferExpireAt = 0.f;
+    bool bLockJumpCrouchFromCombat = false;
 
 private:
     // STATES AXIS

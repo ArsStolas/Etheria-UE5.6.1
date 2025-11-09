@@ -8,8 +8,8 @@
 
 #include "Components/Inventory/InventoryComponent.h"
 #include "Items/ItemPickup.h"
-#include "Data/ItemDefinition.h"
-#include "Data/ItemUseEffect.h"
+#include "Data/Items/ItemDefinition.h"
+#include "Data/Items/ItemUseEffect.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"

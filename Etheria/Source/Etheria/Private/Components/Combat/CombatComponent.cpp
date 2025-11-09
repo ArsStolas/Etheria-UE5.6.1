@@ -6,6 +6,7 @@
  */
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTargetComponent.h"
+#include "Data/Weapons/EEWeaponData.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/DecalComponent.h"
 #include "GameFramework/Character.h"
@@ -13,8 +14,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 #include "Engine/EngineTypes.h"
+#include "DrawDebugHelpers.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 
@@ -46,48 +47,88 @@ void UCombatComponent::BeginPlay()
     {
         LockComp = O->FindComponentByClass<ULockTargetComponent>();
     }
+
+    // Auto-apply weapon data if provided
+    if (WeaponData)
+    {
+        ApplyWeaponData();
+    }
 }
 
 bool UCombatComponent::ResolveOwnerRefs()
 {
-    if (ACharacter* C = Cast<ACharacter>(GetOwner()))
+    AActor* O = GetOwner();
+    OwnerCharacter = Cast<ACharacter>(O);
+
+    // Prefer the character mesh if available
+    if (OwnerCharacter.IsValid())
     {
-        OwnerCharacter = C;
-        OwnerMesh = C->GetMesh();
-        return true;
+        OwnerMesh = OwnerCharacter->GetMesh();
+        MoveComp  = OwnerCharacter->GetCharacterMovement();
     }
-    return false;
+    else if (O)
+    {
+        // Fallback: any skeletal mesh on the owner
+        if (USkeletalMeshComponent* Skel = O->FindComponentByClass<USkeletalMeshComponent>())
+        {
+            OwnerMesh = Skel;
+        }
+    }
+
+    return OwnerCharacter.IsValid() || OwnerMesh.IsValid();
 }
 
+// Bind damage delegates once at begin play
 void UCombatComponent::BindDamageHooks()
 {
     if (AActor* O = GetOwner())
     {
+        // Avoid duplicate binds if BeginPlay can happen twice (PIE reload etc.)
+        O->OnTakeAnyDamage.RemoveDynamic(this, &UCombatComponent::HandleAnyDamage);
         O->OnTakeAnyDamage.AddDynamic(this, &UCombatComponent::HandleAnyDamage);
+
+        O->OnTakePointDamage.RemoveDynamic(this, &UCombatComponent::HandlePointDamage);
         O->OnTakePointDamage.AddDynamic(this, &UCombatComponent::HandlePointDamage);
     }
 }
 
-void UCombatComponent::SetAttacks(const TArray<FEEAttackSpec>& InAttacks)
+#pragma region "Set data"
+void UCombatComponent::SetAttacks(const TArray<FEEAttackSpec>& InAttacks) { Attacks = InAttacks; }
+void UCombatComponent::SetCombos(const TArray<FEEComboSpec>& InCombos) { Combos = InCombos; }
+
+void UCombatComponent::SetWeaponData(UEEWeaponData* InData)
 {
-    Attacks = InAttacks;
+    WeaponData = InData;
+    ApplyWeaponData();
 }
 
-void UCombatComponent::SetCombos(const TArray<FEEComboSpec>& InCombos)
+void UCombatComponent::ApplyWeaponData()
 {
-    Combos = InCombos;
-}
+    if (!WeaponData) return;
+    Attacks = WeaponData->Attacks;
+    Combos  = WeaponData->Combos;
 
+    if (WeaponData->DamageTraceChannelOverride != ECC_MAX)
+    {
+        DamageTraceChannel = WeaponData->DamageTraceChannelOverride;
+    }
+    if (WeaponData->bOverrideMagnetism)
+    {
+        MagnetismAngleDeg   = WeaponData->MagnetismAngleDeg;
+        MagnetismStrength   = WeaponData->MagnetismStrength;
+    }
+}
+#pragma endregion
+
+#pragma region "State"
 bool UCombatComponent::IsInCooldown() const
 {
     UWorld* W = GetWorld();
     return W ? (W->GetTimeSeconds() < CooldownEndTime) : false;
 }
+#pragma endregion
 
-void UCombatComponent::SetExternalTarget(AActor* InTarget)
-{
-    ExternalTarget = InTarget;
-}
+void UCombatComponent::SetExternalTarget(AActor* InTarget) { ExternalTarget = InTarget; }
 
 AActor* UCombatComponent::GetCurrentTarget() const
 {
@@ -101,6 +142,27 @@ AActor* UCombatComponent::GetCurrentTarget() const
 const FEEAttackSpec* UCombatComponent::FindAttack(FName AttackId) const
 {
     return Attacks.FindByPredicate([&](const FEEAttackSpec& S){ return S.AttackId == AttackId; });
+}
+
+bool UCombatComponent::TryAttackGroup(FName GroupId)
+{
+    if (IsInCooldown()) return false;
+
+    const bool bInAir =
+        (OwnerCharacter.IsValid() &&
+         OwnerCharacter->GetCharacterMovement() &&
+         OwnerCharacter->GetCharacterMovement()->IsFalling());
+
+    const FEEAttackSpec* Chosen = nullptr;
+    for (const FEEAttackSpec& S : Attacks)
+    {
+        if (S.Group != GroupId) continue;
+        if (S.Stance == EEEStance::AirOnly   && !bInAir) continue;
+        if (S.Stance == EEEStance::GroundOnly &&  bInAir) continue;
+        Chosen = &S; break; // first match wins
+    }
+    if (!Chosen) return false;
+    return TryAttackById(Chosen->AttackId);
 }
 
 bool UCombatComponent::TryAttackPrimary()
@@ -117,6 +179,33 @@ bool UCombatComponent::TryAttackById(FName AttackId)
     if (!CanExecuteAttack(AttackId)) return false;
 
     CurrentAttackId = AttackId;
+
+    // Seed combo state to the index of this attack if it belongs to a combo.
+    {
+        const FEEComboSpec* FoundCombo = nullptr;
+        int32 FoundIndex = -1;
+        for (const FEEComboSpec& C : Combos)
+        {
+            for (int32 i=0;i<C.Steps.Num();++i)
+            {
+                if (C.Steps[i].AttackId == AttackId)
+                {
+                    FoundCombo = &C; FoundIndex = i; break;
+                }
+            }
+            if (FoundCombo) break;
+        }
+        if (FoundCombo)
+        {
+            ActiveComboId   = FoundCombo->ComboId;
+            ActiveComboStep = FoundIndex; // exact index of the section we are about to play
+        }
+        else
+        {
+            ActiveComboId   = NAME_None;
+            ActiveComboStep = -1;
+        }
+    }
 
     if (Spec->Charge.bChargeable)
     {
@@ -136,24 +225,34 @@ bool UCombatComponent::CanExecuteAttack(const FName AttackId) const
     return !IsInCooldown();
 }
 
+void UCombatComponent::PlayOrJumpMontageSection(const FEEAttackSpec& Spec) const
+{
+    if (!OwnerCharacter.IsValid()) return;
+    UAnimInstance* AnimInst = OwnerCharacter->GetMesh() ? OwnerCharacter->GetMesh()->GetAnimInstance() : nullptr;
+    if (!AnimInst || !Spec.Montage) return;
+
+    if (AnimInst->Montage_IsPlaying(Spec.Montage))
+    {
+        if (Spec.MontageSection != NAME_None)
+        {
+            AnimInst->Montage_JumpToSection(Spec.MontageSection, Spec.Montage);
+            return;
+        }
+    }
+    OwnerCharacter->PlayAnimMontage(Spec.Montage, 1.f, Spec.MontageSection);
+}
+
 void UCombatComponent::ExecuteAttack(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
 {
     OnCue.Broadcast(FName("AttackStart"), EEECombatCuePhase::Start);
     OnAttackStarted.Broadcast(Spec.AttackId);
 
-    if (OwnerCharacter.IsValid())
+    if (OwnerCharacter.IsValid() && Spec.Montage)
     {
-        UAnimMontage* MontageToPlay = Spec.Montage;
-        if (Spec.Charge.bChargeable && Spec.Charge.ReleaseMontages.Num() > 0 && ChargeLevelIndex >= 0 && Spec.Charge.ReleaseMontages.IsValidIndex(ChargeLevelIndex))
-        {
-            MontageToPlay = Spec.Charge.ReleaseMontages[ChargeLevelIndex] ? Spec.Charge.ReleaseMontages[ChargeLevelIndex] : MontageToPlay;
-        }
-        if (MontageToPlay)
-        {
-            OwnerCharacter->PlayAnimMontage(MontageToPlay, 1.f, Spec.MontageSection);
-        }
+        PlayOrJumpMontageSection(Spec);
     }
 
+    // Only notifies or timers drive the hit window. No eager hit now.
     if (Spec.HitWindow > 0.f)
     {
         OpenWindowWithTimers(Spec);
@@ -162,16 +261,6 @@ void UCombatComponent::ExecuteAttack(const FEEAttackSpec& Spec, float DamageScal
     if (UWorld* W = GetWorld())
     {
         CooldownEndTime = W->GetTimeSeconds() + FMath::Max(0.f, Spec.Cooldown);
-    }
-
-    if (!bInAttackWindow)
-    {
-        switch (Spec.AttackType)
-        {
-            case EEEAttackType::Melee: PerformMeleeTrace(Spec, DamageScale, RangeScale); break;
-            case EEEAttackType::AoE:
-            default: PerformAoE(Spec, DamageScale, RangeScale); break;
-        }
     }
 }
 
@@ -183,15 +272,6 @@ void UCombatComponent::OpenWindowWithTimers(const FEEAttackSpec& Spec)
         W->GetTimerManager().SetTimer(HStart, [this, Spec]()
         {
             BeginAttackWindow();
-
-            FVector Fwd;
-            const FVector Eye = GetEyeLocationForward(Fwd);
-            Fwd = ApplyMagnetismBias(Fwd, Eye);
-            NudgeOwnerRotationToward(Fwd, MaxAutoYawOnAttackDeg);
-
-            if (Spec.AttackType == EEEAttackType::Melee) PerformMeleeTrace(Spec, 1.f, 1.f);
-            else if (Spec.AttackType == EEEAttackType::AoE) PerformAoE(Spec, 1.f, 1.f);
-
             if (UWorld* W2 = GetWorld())
             {
                 FTimerHandle HEnd;
@@ -205,7 +285,10 @@ void UCombatComponent::CloseCurrentAttack()
 {
     OnAttackEnded.Broadcast(CurrentAttackId);
     OnCue.Broadcast(FName("AttackEnd"), EEECombatCuePhase::End);
+
+    LastAttackId = CurrentAttackId;
     CurrentAttackId = NAME_None;
+
     AdvanceComboIfRequested();
 }
 
@@ -215,10 +298,21 @@ void UCombatComponent::BeginAttackWindow()
     OnCue.Broadcast(FName("HitWindow"), EEECombatCuePhase::Start);
 
     const FEEAttackSpec* Spec = FindAttack(CurrentAttackId);
-    if (Spec)
+    if (!Spec) return;
+
+    FVector Fwd;
+    const FVector Eye = GetEyeLocationForward(Fwd);
+    Fwd = ApplyMagnetismBias(Fwd, Eye);
+    NudgeOwnerRotationToward(Fwd, MaxAutoYawOnAttackDeg);
+    
+    ClearRecentHitActors();
+
+    switch (Spec->AttackType)
     {
-        if (Spec->AttackType == EEEAttackType::Melee) PerformMeleeTrace(*Spec, 1.f, 1.f);
-        else if (Spec->AttackType == EEEAttackType::AoE) PerformAoE(*Spec, 1.f, 1.f);
+        case EEEAttackType::Melee:  PerformMeleeTrace(*Spec, 1.f, 1.f);  break;
+        case EEEAttackType::AoE:    PerformAoE(*Spec, 1.f, 1.f);        break;
+        case EEEAttackType::Ranged: PerformRangedLine(*Spec, 1.f, 1.f); break;
+        default: break;
     }
 }
 
@@ -236,7 +330,12 @@ FVector UCombatComponent::GetEyeLocationForward(FVector& OutForward) const
 
     if (OwnerCharacter.IsValid())
     {
-        OwnerCharacter->GetActorEyesViewPoint(Loc, Rot);
+        Loc = OwnerCharacter->GetActorLocation();
+        Rot = OwnerCharacter->GetActorRotation();
+        if (USkeletalMeshComponent* M = OwnerCharacter->GetMesh())
+        {
+            Loc = M->GetComponentLocation();
+        }
     }
     else if (GetOwner())
     {
@@ -319,6 +418,25 @@ TArray<AActor*> UCombatComponent::UniqueActorsFromHits(const TArray<FHitResult>&
         Result.AddUnique(Other);
     }
     return Result;
+}
+
+void UCombatComponent::PushRecentHitActor(AActor* A)
+{
+    if (!A) return;
+    RecentHitActors.AddUnique(A);
+}
+
+void UCombatComponent::ClearRecentHitActors()
+{
+    RecentHitActors.Reset();
+}
+
+void UCombatComponent::GetRecentHitActors(TArray<AActor*>& Out) const
+{
+    for (const TWeakObjectPtr<AActor>& W : RecentHitActors)
+    {
+        if (W.IsValid()) Out.Add(W.Get());
+    }
 }
 
 float UCombatComponent::ComputeFinalDamageForTarget(AActor* Victim, float RawDamage, bool& bOutCrit, float CritChance, float CritMultiplier) const
@@ -411,7 +529,10 @@ void UCombatComponent::PerformMeleeTrace(const FEEAttackSpec& Spec, float Damage
     }
 
 #if !(UE_BUILD_SHIPPING)
-    DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 1.f, 0, 1.f);
+    if (bDebugDraw)
+    {
+        DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 1.f, 0, 1.f);
+    }
 #endif
 
     const TArray<AActor*> Unique = UniqueActorsFromHits(Hits);
@@ -428,7 +549,79 @@ void UCombatComponent::PerformMeleeTrace(const FEEAttackSpec& Spec, float Damage
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage); else OnHit.Broadcast(Other, FinalDamage);
         OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+
+        PushRecentHitActor(Other);
     }
+}
+
+void UCombatComponent::PerformRangedLine(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
+{
+    if (!GetWorld()) return;
+
+    // Use mesh or actor facing, not the camera
+    FVector Fwd;
+    const FVector Origin = GetEyeLocationForward(Fwd);
+    const float Range = Spec.Range * RangeScale;
+
+    // Try muzzle socket if available
+    FVector Start = Origin;
+    if (OwnerCharacter.IsValid() && OwnerCharacter->GetMesh())
+    {
+        if (OwnerCharacter->GetMesh()->DoesSocketExist(MuzzleSocketName))
+        {
+            Start = OwnerCharacter->GetMesh()->GetSocketLocation(MuzzleSocketName);
+        }
+    }
+    const FVector End = Start + Fwd * Range;
+
+    // Trace against DamageTraceChannel
+    FCollisionObjectQueryParams Obj;
+    Obj.AddObjectTypesToQuery(DamageTraceChannel);
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(CombatRanged), false, GetOwner());
+
+    FHitResult Hit;
+    const bool bHit = GetWorld()->LineTraceSingleByObjectType(Hit, Start, End, Obj, Params);
+
+#if !(UE_BUILD_SHIPPING)
+    if (bDebugDraw)
+    {
+        DrawDebugLine(GetWorld(), Start, End, FColor::Cyan, false, 1.f, 0, 1.5f);
+        if (bHit) DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 10.f, FColor::Yellow, false, 1.f);
+    }
+#endif
+
+    if (!bHit) return;
+
+    AActor* Other = Hit.GetActor();
+    if (!Other) return;
+    if (bIgnoreOwner && Other == GetOwner()) return;
+
+    bool bCrit = false;
+    const float FinalDamage = ComputeFinalDamageForTarget(
+        Other,
+        Spec.BaseDamage * DamageScale,
+        bCrit,
+        Spec.CritChance,
+        Spec.CritMultiplier
+    );
+    if (FinalDamage <= 0.f) return;
+
+    UGameplayStatics::ApplyPointDamage(
+        Other,
+        FinalDamage,
+        Fwd,
+        Hit,
+        GetOwner()->GetInstigatorController(),
+        GetOwner(),
+        nullptr
+    );
+
+    if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage);
+    else       OnHit.Broadcast(Other, FinalDamage);
+
+    OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+    
+    PushRecentHitActor(Other);
 }
 
 void UCombatComponent::PerformAoE(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
@@ -444,10 +637,15 @@ void UCombatComponent::PerformAoE(const FEEAttackSpec& Spec, float DamageScale, 
 
     TArray<AActor*> Ignore; Ignore.Add(Owner);
     TArray<AActor*> OutActors;
-    const bool bHit = UKismetSystemLibrary::SphereOverlapActors(
-        Owner, Center, Radius, ObjTypes, AActor::StaticClass(), Ignore, OutActors
-    );
+    const bool bHit = UKismetSystemLibrary::SphereOverlapActors(Owner, Center, Radius, ObjTypes, AActor::StaticClass(), Ignore, OutActors);
     if (!bHit) return;
+
+#if !(UE_BUILD_SHIPPING)
+    if (bDebugDraw)
+    {
+        DrawDebugSphere(GetWorld(), Center, Radius, 16, FColor::Red, false, 1.f, 0, 1.f);
+    }
+#endif
 
     for (AActor* Other : OutActors)
     {
@@ -464,6 +662,8 @@ void UCombatComponent::PerformAoE(const FEEAttackSpec& Spec, float DamageScale, 
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage); else OnHit.Broadcast(Other, FinalDamage);
         OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+        
+        PushRecentHitActor(Other);
     }
 }
 
@@ -486,9 +686,7 @@ void UCombatComponent::PerformFrontalRect(const FEEAttackSpec& Spec, float Damag
     TArray<AActor*> Ignore; Ignore.Add(Owner);
     TArray<AActor*> OutActors;
 
-    const bool bHit = UKismetSystemLibrary::BoxOverlapActors(
-        Owner, Center, Extents, ObjTypes, AActor::StaticClass(), Ignore, OutActors
-    );
+    const bool bHit = UKismetSystemLibrary::BoxOverlapActors(Owner, Center, Extents, ObjTypes, AActor::StaticClass(), Ignore, OutActors);
     if (!bHit) return;
 
     for (AActor* Other : OutActors)
@@ -506,15 +704,20 @@ void UCombatComponent::PerformFrontalRect(const FEEAttackSpec& Spec, float Damag
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage); else OnHit.Broadcast(Other, FinalDamage);
         OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+        
+        PushRecentHitActor(Other);
     }
 
 #if !(UE_BUILD_SHIPPING)
-    DrawDebugBox(GetWorld(), Center, Extents, FQuat(Fwd.Rotation()), FColor::Orange, false, 1.f, 0, 1.f);
+    if (bDebugDraw)
+    {
+        DrawDebugBox(GetWorld(), Center, Extents, FQuat(Fwd.Rotation()), FColor::Orange, false, 1.f, 0, 1.f);
+    }
 #endif
 }
 
 /* ================= Parry / Dodge ================= */
-
+#pragma region "PARRY / DODGE"
 void UCombatComponent::SetParryHeld(bool bHeld)
 {
     if (bParryHeld == bHeld) return;
@@ -603,9 +806,10 @@ void UCombatComponent::RestoreBoosts()
         OwnerMesh->GlobalAnimRateScale = BaseGlobalAnimRate;
     }
 }
+#pragma endregion
 
 /* ================= Charge ================= */
-
+#pragma region "CHARGE"
 void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
 {
     if (AttackId == NAME_None)
@@ -623,6 +827,7 @@ void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
     ChargeExpectedDuration = FMath::Max(0.1f, ExpectedDuration);
     ChargeAccumulated = 0.f;
     ChargeLevelIndex = -1;
+    ObservedChargeLevel = -1;
 
     if (Spec->Charge.bShowTelegraph)
     {
@@ -637,8 +842,26 @@ void UCombatComponent::UpdateChargeProgress(float DeltaTime)
 {
     if (!bCharging) return;
     ChargeAccumulated += FMath::Max(0.f, DeltaTime);
+
     const float Alpha = FMath::Clamp(ChargeAccumulated / FMath::Max(0.001f, ChargeExpectedDuration), 0.f, 1.f);
     UpdateTelegraph(Alpha);
+
+    const FEEAttackSpec* Spec = FindAttack(CurrentAttackId);
+    if (!Spec) return;
+    int32 NewObserved = -1;
+    for (int32 i=0; i<Spec->Charge.Levels.Num(); ++i)
+    {
+        if (ChargeAccumulated >= Spec->Charge.Levels[i].Time) NewObserved = i;
+    }
+    if (NewObserved != ObservedChargeLevel)
+    {
+        ObservedChargeLevel = NewObserved;
+        if (ObservedChargeLevel >= 0)
+        {
+            const FName Cue = FName(*FString::Printf(TEXT("ChargeLevel_%d"), ObservedChargeLevel + 1));
+            OnCue.Broadcast(Cue, EEECombatCuePhase::Start);
+        }
+    }
 }
 
 void UCombatComponent::EndCharge(bool bCanceled)
@@ -652,7 +875,7 @@ void UCombatComponent::EndCharge(bool bCanceled)
     float Elapsed = ChargeAccumulated;
     int32 Level = -1;
     float DamageScale = 1.f;
-    float RangeScale = 1.f;
+    float RangeScale  = 1.f;
 
     if (Spec->Charge.Levels.Num() > 0)
     {
@@ -677,13 +900,30 @@ void UCombatComponent::EndCharge(bool bCanceled)
     }
 
     OnCue.Broadcast(FName("ChargeRelease"), EEECombatCuePhase::Impact);
-    ExecuteAttack(*Spec, DamageScale, RangeScale);
+
+    if (OwnerCharacter.IsValid() && Spec->Montage && ChargeLevelIndex >= 0 && Spec->Charge.ReleaseMontages.Num() == 0)
+    {
+        if (UAnimInstance* Anim = OwnerCharacter->GetMesh()->GetAnimInstance())
+        {
+            const FName ReleaseSection = FName(*FString::Printf(TEXT("Release_L%d"), ChargeLevelIndex + 1));
+            if (Anim->Montage_IsPlaying(Spec->Montage))
+            {
+                Anim->Montage_JumpToSection(ReleaseSection, Spec->Montage);
+            }
+            else
+            {
+                OwnerCharacter->PlayAnimMontage(Spec->Montage, 1.f, ReleaseSection);
+            }
+        }
+    }
+    else
+    {
+        ExecuteAttack(*Spec, DamageScale, RangeScale);
+    }
 
     if (Spec->Charge.Shape == EEEChargeShape::Radial)
     {
-        FEEAttackSpec Copy = *Spec;
-        Copy.AttackType = EEEAttackType::AoE;
-        Copy.Radius = Spec->Charge.MaxRadius;
+        FEEAttackSpec Copy = *Spec; Copy.AttackType = EEEAttackType::AoE; Copy.Radius = Spec->Charge.MaxRadius;
         PerformAoE(Copy, DamageScale, RangeScale);
     }
     else if (Spec->Charge.Shape == EEEChargeShape::FrontalRect)
@@ -691,6 +931,7 @@ void UCombatComponent::EndCharge(bool bCanceled)
         PerformFrontalRect(*Spec, DamageScale, RangeScale);
     }
 }
+
 
 /* Telegraph visuals */
 
@@ -755,9 +996,10 @@ void UCombatComponent::DestroyTelegraph()
         ActiveDecal = nullptr;
     }
 }
+#pragma endregion
 
 /* ================= Combo ================= */
-
+#pragma region "COMBO"
 void UCombatComponent::BeginComboWindow(FName ComboId)
 {
     bComboWindowOpen = true;
@@ -773,13 +1015,25 @@ void UCombatComponent::EndComboWindow(FName ComboId)
 void UCombatComponent::RequestComboAdvance()
 {
     bComboAdvanceRequested = true;
-    AdvanceComboIfRequested();
+    if (UWorld* W = GetWorld())
+    {
+        ComboBufferExpireAt = W->GetTimeSeconds() + FMath::Max(0.0f, MaxComboBufferTime);
+    }
 }
 
 void UCombatComponent::AdvanceComboIfRequested()
 {
     if (!bComboAdvanceRequested) return;
-    bComboAdvanceRequested = false;
+
+    if (UWorld* W = GetWorld())
+    {
+        if (ComboBufferExpireAt > 0.0f && W->GetTimeSeconds() > ComboBufferExpireAt)
+        {
+            bComboAdvanceRequested = false;
+            ComboBufferExpireAt = 0.0f;
+            return;
+        }
+    }
 
     const FEEComboSpec* Combo = nullptr;
 
@@ -792,29 +1046,43 @@ void UCombatComponent::AdvanceComboIfRequested()
     {
         Combo = Combos.FindByPredicate([&](const FEEComboSpec& C)
         {
-            return C.Steps.Num() > 0 && C.Steps[0].AttackId == CurrentAttackId;
+            return C.Steps.Num() > 0 && C.Steps[0].AttackId == LastAttackId;
         });
         if (Combo) ActiveComboId = Combo->ComboId;
     }
-    if (!Combo || Combo->Steps.Num() == 0) return;
+    if (!Combo || Combo->Steps.Num() == 0) { bComboAdvanceRequested = false; return; }
 
+    // Compute next index based on our known ActiveComboStep (seeded at TryAttackById)
     int32 NextIndex = (ActiveComboStep < 0) ? 0 : ActiveComboStep + 1;
-    if (!Combo->Steps.IsValidIndex(NextIndex)) { ActiveComboId = NAME_None; ActiveComboStep = -1; return; }
+    if (!Combo->Steps.IsValidIndex(NextIndex))
+    {
+        // End of combo
+        ActiveComboId = NAME_None;
+        ActiveComboStep = -1;
+        bComboAdvanceRequested = false;
+        ComboBufferExpireAt = 0.0f;
+        return;
+    }
     ActiveComboStep = NextIndex;
 
     const FEEComboStep& Step = Combo->Steps[ActiveComboStep];
     const FEEAttackSpec* Spec = FindAttack(Step.AttackId);
-    if (!Spec) return;
+    if (!Spec) { bComboAdvanceRequested = false; return; }
 
     FEEAttackSpec Local = *Spec;
-    if (Step.DamageOverride > 0.f) Local.BaseDamage = Step.DamageOverride;
-    if (Step.CritChanceOverride >= 0.f) Local.CritChance = Step.CritChanceOverride;
+    if (Step.DamageOverride > 0.f)        Local.BaseDamage = Step.DamageOverride;
+    if (Step.CritChanceOverride >= 0.f)   Local.CritChance = Step.CritChanceOverride;
     if (Step.CritMultiplierOverride >= 0.f) Local.CritMultiplier = Step.CritMultiplierOverride;
 
+    // Trigger next step by id. PlayOrJumpMontageSection guarantees no "restart" of first section.
     TryAttackById(Local.AttackId);
 
     if (UWorld* W = GetWorld())
     {
         ComboResetTime = W->GetTimeSeconds() + Combo->ResetDelay;
     }
+
+    bComboAdvanceRequested = false;
+    ComboBufferExpireAt = 0.0f;
 }
+#pragma endregion

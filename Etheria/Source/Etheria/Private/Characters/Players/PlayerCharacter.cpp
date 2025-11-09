@@ -70,6 +70,12 @@ void APlayerCharacter::BeginPlay()
     }
 
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+
+    if (CombatComponent)
+    {
+        CombatComponent->OnAttackStarted.AddDynamic(this, &APlayerCharacter::HandleAttackStart);
+        CombatComponent->OnAttackEnded  .AddDynamic(this, &APlayerCharacter::HandleAttackEnd);
+    }
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
@@ -114,12 +120,12 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         EIC->BindAction(LeftAction,  ETriggerEvent::Completed, this, &APlayerCharacter::OnLeftCompleted);
         EIC->BindAction(RightAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnRightStarted);
         EIC->BindAction(RightAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnRightCompleted);
-
-        EIC->BindAction(JumpAction,  ETriggerEvent::Triggered, this, &ACharacter::Jump);
-        EIC->BindAction(CrouchAction, ETriggerEvent::Started,   this, &APlayerCharacter::StartCrouch);
+        
+        EIC->BindAction(CrouchAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnCrouchPressed);
         EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopCrouch);
         EIC->BindAction(SprintAction, ETriggerEvent::Started,   this, &APlayerCharacter::StartSprint);
         EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
+        EIC->BindAction(JumpAction,   ETriggerEvent::Started,   this, &APlayerCharacter::OnJumpPressed);
     #pragma endregion
 
     #pragma region "GLIDER BINDS"
@@ -215,8 +221,29 @@ void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal
 
 void APlayerCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
 void APlayerCharacter::StopSprint()  { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
-void APlayerCharacter::StartCrouch() { Crouch(); }
+
+void APlayerCharacter::OnCrouchPressed()
+{
+    if (CombatComponent && CombatComponent->IsAttackActive()) return;
+    Crouch();
+}
 void APlayerCharacter::StopCrouch()  { UnCrouch(); }
+
+void APlayerCharacter::OnJumpPressed()
+{
+    if (!CombatComponent) { Jump(); return; }
+
+    if (CombatComponent->IsAttackActive())
+    {
+        bJumpBuffered = true;
+        JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
+        return;
+    }
+
+    if (bLockJumpCrouchFromCombat) return;
+    Jump();
+}
+
 #pragma endregion
 
 #pragma region "GLIDER INPUTS"
@@ -263,16 +290,15 @@ void APlayerCharacter::OnAttackLightPressed()
 {
     if (!CombatComponent) return;
 
-    if (CombatComponent->IsInAttackWindow())
+    // If an attack is active or we are inside the hit window, just ask to advance combo.
+    if (CombatComponent->IsAttackActive() || CombatComponent->IsInAttackWindow())
     {
-        // Buffer the next step while the combo window is open
         CombatComponent->RequestComboAdvance();
+        return;
     }
-    else
-    {
-        // Start the default primary attack (first in the array)
-        CombatComponent->TryAttackPrimary();
-    }
+
+    // Route by stance automatically: will pick Light Ground or Light Air variant based on IsFalling()
+    CombatComponent->TryAttackGroup(FName("Light"));
 }
 
 void APlayerCharacter::OnAttackLightReleased()
@@ -284,8 +310,11 @@ void APlayerCharacter::OnAttackLightReleased()
 void APlayerCharacter::OnAttackHeavyPressed()
 {
     if (!CombatComponent) return;
-    // The heavy attack spec should have Charge.bChargeable = true in the component settings
-    CombatComponent->TryAttackById(FName("Heavy"));
+    CombatComponent->RequestComboAdvance();
+    if (!CombatComponent->IsAttackActive())
+    {
+        CombatComponent->TryAttackGroup(FName("Heavy"));
+    }
 }
 
 // Release the charge and execute at current level
@@ -348,5 +377,28 @@ void APlayerCharacter::OnLockSwitchRight()
     {
         LockTargetComponent->SwitchTarget(true);
     }
+}
+#pragma endregion
+
+
+#pragma region "HANDLERS"
+void APlayerCharacter::HandleAttackStart(FName)
+{
+    bLockJumpCrouchFromCombat = true;
+}
+
+void APlayerCharacter::HandleAttackEnd(FName)
+{
+    bLockJumpCrouchFromCombat = false;
+
+    if (bJumpBuffered && GetWorld())
+    {
+        const float Now = GetWorld()->GetTimeSeconds();
+        if (Now <= JumpBufferExpireAt)
+        {
+            Jump();
+        }
+    }
+    bJumpBuffered = false;
 }
 #pragma endregion
