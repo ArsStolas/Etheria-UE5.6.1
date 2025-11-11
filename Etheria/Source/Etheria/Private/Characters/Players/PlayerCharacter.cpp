@@ -224,7 +224,9 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     
     void APlayerCharacter::OnCrouchPressed()
     {
-        if (CombatComponent && CombatComponent->IsAttackActive()) return;
+        if (!CombatComponent) { Crouch(); return; }
+        if (CombatComponent->IsCrouchBlocked()) return;
+        if (CombatComponent->IsAttackActive()) return;
         Crouch();
     }
     void APlayerCharacter::StopCrouch()  { UnCrouch(); }
@@ -232,15 +234,14 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     void APlayerCharacter::OnJumpPressed()
     {
         if (!CombatComponent) { Jump(); return; }
-    
+        if (CombatComponent->IsJumpBlocked()) return;
+
         if (CombatComponent->IsAttackActive())
         {
             bJumpBuffered = true;
             JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
             return;
         }
-    
-        if (bLockJumpCrouchFromCombat) return;
         Jump();
     }
 #pragma endregion
