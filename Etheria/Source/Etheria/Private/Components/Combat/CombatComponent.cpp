@@ -15,6 +15,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/World.h"
 #include "Engine/EngineTypes.h"
+#include "Animation/AnimInstance.h"
 #include "DrawDebugHelpers.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
@@ -28,8 +29,6 @@ void UCombatComponent::BeginPlay()
 {
     Super::BeginPlay();
     ResolveOwnerRefs();
-    BindDamageHooks();
-
     if (OwnerCharacter.IsValid())
     {
         MoveComp = OwnerCharacter->GetCharacterMovement();
@@ -78,55 +77,58 @@ bool UCombatComponent::ResolveOwnerRefs()
     return OwnerCharacter.IsValid() || OwnerMesh.IsValid();
 }
 
-// Bind damage delegates once at begin play
-void UCombatComponent::BindDamageHooks()
-{
-    if (AActor* O = GetOwner())
-    {
-        // Avoid duplicate binds if BeginPlay can happen twice (PIE reload etc.)
-        O->OnTakeAnyDamage.RemoveDynamic(this, &UCombatComponent::HandleAnyDamage);
-        O->OnTakeAnyDamage.AddDynamic(this, &UCombatComponent::HandleAnyDamage);
-
-        O->OnTakePointDamage.RemoveDynamic(this, &UCombatComponent::HandlePointDamage);
-        O->OnTakePointDamage.AddDynamic(this, &UCombatComponent::HandlePointDamage);
-    }
-}
-
 #pragma region "Set data"
-void UCombatComponent::SetAttacks(const TArray<FEEAttackSpec>& InAttacks) { Attacks = InAttacks; }
-void UCombatComponent::SetCombos(const TArray<FEEComboSpec>& InCombos) { Combos = InCombos; }
+    void UCombatComponent::SetAttacks(const TArray<FEEAttackSpec>& InAttacks) { Attacks = InAttacks; }
+    void UCombatComponent::SetCombos(const TArray<FEEComboSpec>& InCombos) { Combos = InCombos; }
 
-void UCombatComponent::SetWeaponData(UEEWeaponData* InData)
-{
-    WeaponData = InData;
-    ApplyWeaponData();
-}
-
-void UCombatComponent::ApplyWeaponData()
-{
-    if (!WeaponData) return;
-    Attacks = WeaponData->Attacks;
-    Combos  = WeaponData->Combos;
-
-    if (WeaponData->DamageTraceChannelOverride != ECC_MAX)
+    void UCombatComponent::SetWeaponData(UEEWeaponData* InData)
     {
-        DamageTraceChannel = WeaponData->DamageTraceChannelOverride;
+        WeaponData = InData;
+        ApplyWeaponData();
     }
-    if (WeaponData->bOverrideMagnetism)
+
+    void UCombatComponent::ApplyWeaponData()
     {
-        MagnetismAngleDeg   = WeaponData->MagnetismAngleDeg;
-        MagnetismStrength   = WeaponData->MagnetismStrength;
+        if (!WeaponData) return;
+        Attacks = WeaponData->Attacks;
+        Combos  = WeaponData->Combos;
+
+        if (WeaponData->DamageTraceChannelOverride != ECC_MAX)
+        {
+            DamageTraceChannel = WeaponData->DamageTraceChannelOverride;
+        }
+        if (WeaponData->bOverrideMagnetism)
+        {
+            MagnetismAngleDeg   = WeaponData->MagnetismAngleDeg;
+            MagnetismStrength   = WeaponData->MagnetismStrength;
+        }
     }
-}
 #pragma endregion
 
 #pragma region "State"
-bool UCombatComponent::IsInCooldown() const
-{
-    UWorld* W = GetWorld();
-    return W ? (W->GetTimeSeconds() < CooldownEndTime) : false;
-}
+    bool UCombatComponent::IsInCooldown() const
+    {
+        UWorld* W = GetWorld();
+        return W ? (W->GetTimeSeconds() < CooldownEndTime) : false;
+    }
 #pragma endregion
+
+bool UCombatComponent::IsJumpBlocked() const { return JumpLocks.Num() > 0; }
+bool UCombatComponent::IsCrouchBlocked() const { return CrouchLocks.Num() > 0; }
+
+void UCombatComponent::PushInputLock(FName LockId, bool bBlockJump, bool bBlockCrouch)
+{
+    if (LockId == NAME_None) return;
+    if (bBlockJump)   JumpLocks.Add(LockId);
+    if (bBlockCrouch) CrouchLocks.Add(LockId);
+}
+
+void UCombatComponent::PopInputLock(FName LockId)
+{
+    if (LockId == NAME_None) return;
+    JumpLocks.Remove(LockId);
+    CrouchLocks.Remove(LockId);
+}
 
 void UCombatComponent::SetExternalTarget(AActor* InTarget) { ExternalTarget = InTarget; }
 
@@ -178,6 +180,31 @@ bool UCombatComponent::TryAttackById(FName AttackId)
     if (!Spec) return false;
     if (!CanExecuteAttack(AttackId)) return false;
 
+    // Combo start cooldown gating (per combo)
+    {
+        const FEEComboSpec* GateCombo = nullptr;
+        for (const FEEComboSpec& C : Combos)
+        {
+            if (C.Steps.Num() > 0 && C.Steps[0].AttackId == AttackId) { GateCombo = &C; break; }
+        }
+        if (GateCombo)
+        {
+            const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+            const float Cd = (GateCombo->Cooldown > 0.f) ? GateCombo->Cooldown : DefaultComboStartCooldown;
+            if (Cd > 0.f)
+            {
+                if (const float* Until = ComboCooldownUntil.Find(GateCombo->ComboId))
+                {
+                    if (Now < *Until)
+                    {
+                        return false; // still cooling down
+                    }
+                }
+                ComboCooldownUntil.FindOrAdd(GateCombo->ComboId) = Now + Cd;
+            }
+        }
+    }
+
     CurrentAttackId = AttackId;
 
     // Seed combo state to the index of this attack if it belongs to a combo.
@@ -211,6 +238,8 @@ bool UCombatComponent::TryAttackById(FName AttackId)
     {
         if (OwnerCharacter.IsValid() && Spec->Montage)
         {
+            PrePlayMontageSafety(*Spec);
+
             OwnerCharacter->PlayAnimMontage(Spec->Montage, 1.f, Spec->MontageSection);
         }
         return true;
@@ -225,11 +254,57 @@ bool UCombatComponent::CanExecuteAttack(const FName AttackId) const
     return !IsInCooldown();
 }
 
-void UCombatComponent::PlayOrJumpMontageSection(const FEEAttackSpec& Spec) const
+void UCombatComponent::PrePlayMontageSafety(const FEEAttackSpec& Spec)
+{
+    if (!bForceFallbackAnimBPForMontages) return;
+    if (!OwnerCharacter.IsValid() || !Spec.Montage) return;
+
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh) return;
+
+    UAnimInstance* Anim = Mesh->GetAnimInstance();
+
+    // Swap to fallback AnimBP that contains the Slot, if needed
+    if (FallbackMontageAnimClass && (!Anim || !Anim->IsA(FallbackMontageAnimClass)))
+    {
+        SavedAnimClass = Mesh->GetAnimClass();
+        Mesh->SetAnimInstanceClass(FallbackMontageAnimClass);
+        bUsingFallbackAnimClass = true;
+
+        Anim = Mesh->GetAnimInstance();
+    }
+
+    if (Anim)
+    {
+        Anim->OnMontageEnded.RemoveDynamic(this, &UCombatComponent::HandleMontageEnded_RestoreAnimClass);
+        Anim->OnMontageEnded.AddDynamic(this, &UCombatComponent::HandleMontageEnded_RestoreAnimClass);
+    }
+}
+
+void UCombatComponent::HandleMontageEnded_RestoreAnimClass(UAnimMontage* Montage, bool bInterrupted)
 {
     if (!OwnerCharacter.IsValid()) return;
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh) return;
+
+    if (bUsingFallbackAnimClass && SavedAnimClass)
+    {
+        Mesh->SetAnimInstanceClass(SavedAnimClass);
+    }
+
+    bUsingFallbackAnimClass = false;
+    SavedAnimClass = nullptr;
+}
+
+void UCombatComponent::PlayOrJumpMontageSection(const FEEAttackSpec& Spec)
+{
+    if (!OwnerCharacter.IsValid() || !Spec.Montage) return;
+
+    // NEW: ensure a valid Slot by swapping to fallback if needed
+    PrePlayMontageSafety(Spec);
+
     UAnimInstance* AnimInst = OwnerCharacter->GetMesh() ? OwnerCharacter->GetMesh()->GetAnimInstance() : nullptr;
-    if (!AnimInst || !Spec.Montage) return;
+    if (!AnimInst) return;
 
     if (AnimInst->Montage_IsPlaying(Spec.Montage))
     {
@@ -773,9 +848,6 @@ void UCombatComponent::EndPerfectDodgeWindow()
     OnCue.Broadcast(FName("PerfectDodgeWindow"), EEECombatCuePhase::End);
 }
 
-void UCombatComponent::HandleAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType, AController* InstigatedBy, AActor* DamageCauser) {}
-void UCombatComponent::HandlePointDamage(AActor* DamagedActor, float Damage, AController* InstigatedBy, FVector HitLocation, UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const UDamageType* DamageType, AActor* DamageCauser) {}
-
 void UCombatComponent::ApplyPerfectBoost(EEEPerfectKind Kind)
 {
     if (MoveComp.IsValid() && BaseWalkSpeed > 0.f)
@@ -932,7 +1004,6 @@ void UCombatComponent::EndCharge(bool bCanceled)
     }
 }
 
-
 /* Telegraph visuals */
 
 void UCombatComponent::SpawnTelegraph()
@@ -1086,3 +1157,19 @@ void UCombatComponent::AdvanceComboIfRequested()
     ComboBufferExpireAt = 0.0f;
 }
 #pragma endregion
+
+float UCombatComponent::GetComboCooldownRemaining(FName ComboId) const
+{
+    if (!GetWorld()) return 0.f;
+    if (const float* Until = ComboCooldownUntil.Find(ComboId))
+    {
+        const float Now = GetWorld()->GetTimeSeconds();
+        return FMath::Max(0.f, *Until - Now);
+    }
+    return 0.f;
+}
+
+void UCombatComponent::ClearAllComboCooldowns()
+{
+    ComboCooldownUntil.Reset();
+}

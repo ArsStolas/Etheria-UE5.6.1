@@ -93,6 +93,7 @@ struct FEEComboSpec
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo") FName ComboId = NAME_None;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo") TArray<FEEComboStep> Steps;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo", meta=(ClampMin="0.1")) float ResetDelay = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo", meta=(ClampMin="0.0")) float Cooldown = 0.0f;
 };
 
 /* Delegates */
@@ -113,12 +114,12 @@ public:
     const TArray<FEEAttackSpec>& GetAttacks() const { return Attacks; }
     const TArray<FEEComboSpec>& GetCombos() const { return Combos; }
 
-
     UFUNCTION(BlueprintCallable, Category="Combat") void SetAttacks(const TArray<FEEAttackSpec>& InAttacks);
     UFUNCTION(BlueprintCallable, Category="Combat") void SetCombos(const TArray<FEEComboSpec>& InCombos);
     UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackPrimary();
     UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackById(FName AttackId);
-
+    UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackGroup(FName GroupId); // picks ground/air variant automatically
+    
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void RequestComboAdvance();
 
     UFUNCTION(BlueprintCallable, Category="Combat|Target") void SetExternalTarget(AActor* InTarget);
@@ -143,6 +144,9 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void BeginComboWindow(FName ComboId);
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void EndComboWindow(FName ComboId);
 
+    UFUNCTION(BlueprintPure, Category="Combat|Combo") float GetComboCooldownRemaining(FName ComboId) const;
+    UFUNCTION(BlueprintCallable, Category="Combat|Combo") void ClearAllComboCooldowns();
+
     // Weapon data hot-swap
     UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UEEWeaponData* InData);
     UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void ApplyWeaponData();
@@ -151,6 +155,7 @@ public:
 
     // Combo buffer timeout (editor tweak)
     UPROPERTY(EditAnywhere, Category="Combat|Combo", meta=(ClampMin="0.0")) float MaxComboBufferTime = 1.0f; // seconds
+    UPROPERTY(EditAnywhere, Category="Combat|Combo", meta=(ClampMin="0.0")) float DefaultComboStartCooldown = 0.0f;
     float ComboBufferExpireAt = 0.0f;
 
     UPROPERTY(BlueprintAssignable, Category="Events") FEEOnCue OnCue;
@@ -163,11 +168,33 @@ public:
     UFUNCTION(BlueprintPure, Category="Combat|State") bool IsInCooldown() const;
     UFUNCTION(BlueprintPure, Category="Combat|State") bool IsInAttackWindow() const { return bInAttackWindow; }
     UFUNCTION(BlueprintPure, Category="Combat|State") bool IsAttackActive() const { return CurrentAttackId != NAME_None; }
-    UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackGroup(FName GroupId); // picks ground/air variant automatically
+    
     void PushRecentHitActor(AActor* A);
     void ClearRecentHitActors();
     void GetRecentHitActors(TArray<AActor*>& Out) const;
 
+    UFUNCTION(BlueprintPure, Category="Combat|Input") bool IsJumpBlocked() const;
+    UFUNCTION(BlueprintPure, Category="Combat|Input") bool IsCrouchBlocked() const;
+    UFUNCTION(BlueprintCallable, Category="Combat|Input") void PushInputLock(FName LockId, bool bBlockJump, bool bBlockCrouch);
+    UFUNCTION(BlueprintCallable, Category="Combat|Input") void PopInputLock(FName LockId);
+
+    // Force a fallback AnimBP (with a valid Slot) while playing montages
+    UPROPERTY(EditAnywhere, Category="Combat|Montage")
+    bool bForceFallbackAnimBPForMontages = true;
+
+    UPROPERTY(EditAnywhere, Category="Combat|Montage")
+    TSubclassOf<class UAnimInstance> FallbackMontageAnimClass;
+
+    // Runtime bookkeeping
+    TSubclassOf<class UAnimInstance> SavedAnimClass = nullptr;
+    bool bUsingFallbackAnimClass = false;
+
+    // Internal hooks
+    UFUNCTION()
+    void HandleMontageEnded_RestoreAnimClass(class UAnimMontage* Montage, bool bInterrupted);
+
+    // Called before any Montage_Play / JumpToSection to ensure a valid Slot
+    void PrePlayMontageSafety(const FEEAttackSpec& Spec);
 
 protected:
     virtual void BeginPlay() override;
@@ -195,11 +222,7 @@ private:
     float ComputeFinalDamageForTarget(AActor* Victim, float RawDamage, bool& bOutCrit, float CritChance, float CritMultiplier) const;
 #pragma endregion
 
-#pragma region "Hooks"
-    void BindDamageHooks();
-    UFUNCTION() void HandleAnyDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser);
-    UFUNCTION() void HandlePointDamage(AActor* DamagedActor, float Damage, class AController* InstigatedBy, FVector HitLocation, class UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const class UDamageType* DamageType, AActor* DamageCauser);
-#pragma endregion
+// Hooks region removed.
 
 #pragma region "Perfect boosts"
     void ApplyPerfectBoost(EEEPerfectKind Kind);
@@ -222,11 +245,10 @@ private:
 
 #pragma region "Utils"
     TArray<AActor*> UniqueActorsFromHits(const TArray<FHitResult>& Hits) const;
-    void PlayOrJumpMontageSection(const FEEAttackSpec& Spec) const;
+    void PlayOrJumpMontageSection(const FEEAttackSpec& Spec);
     void PerformRangedLine(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
 #pragma endregion
 
-private:
 #pragma region "Config"
     UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FEEAttackSpec> Attacks;
     UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FEEComboSpec> Combos;
@@ -275,6 +297,8 @@ private:
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bInDodgeIFrames = false;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") TWeakObjectPtr<AActor> ExternalTarget;
     TArray<TWeakObjectPtr<AActor>> RecentHitActors;
+    TSet<FName> JumpLocks;
+    TSet<FName> CrouchLocks;
 #pragma endregion
     
 #pragma region "Debug"
@@ -296,6 +320,7 @@ private:
     bool bComboWindowOpen = false;
     bool bComboAdvanceRequested = false;
     float ComboResetTime = 0.f;
+    UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") TMap<FName, float> ComboCooldownUntil;
 #pragma endregion
 
 #pragma region "Cached"
