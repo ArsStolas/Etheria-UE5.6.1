@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotifyState_ChargeWindow" - Header
+ * Class: "AnimNotifyState_ChargeWindow" - Header
  */
 #pragma once
 #include "Animation/AnimNotifies/AnimNotifyState.h"

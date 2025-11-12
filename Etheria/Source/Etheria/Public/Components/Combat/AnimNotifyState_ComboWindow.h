@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotifyState_ComboWindow" - Header
+ * Class: "AnimNotifyState_ComboWindow" - Header
  */
 #pragma once
 #include "Animation/AnimNotifies/AnimNotifyState.h"
