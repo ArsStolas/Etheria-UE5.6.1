@@ -56,12 +56,14 @@ class ETHERIA_API APlayerCharacter : public ABaseCharacter
 public:
     APlayerCharacter();
 
-    UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
+    FORCEINLINE UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
     bool IsInSpecialMode() const;
 
     // Exposés pour le GliderComponent
-    int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
-    int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
+    FORCEINLINE int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
+    FORCEINLINE int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
+
+    FORCEINLINE UGliderComponent* GetGliderComponent() const { return GliderComponent; }
 
 protected:
     virtual void BeginPlay() override;
