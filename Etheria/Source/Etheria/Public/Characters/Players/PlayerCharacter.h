@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by: Zhailendra
  * Last Updated by: 0nnen
- * Class: PlayerCharacter - Header
+ * Class: APlayerCharacter - Header
  */
 
 #pragma once
