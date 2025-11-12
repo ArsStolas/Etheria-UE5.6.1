@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: 0nnen
  * Class: PlayerCharacter - Header
  */
 
@@ -19,6 +19,7 @@ class UInputAction;
 class UGliderComponent;
 class UInventoryComponent;
 class UInteractorComponent;
+class ULockTargetComponent;
 
 USTRUCT()
 struct FAxisPressState
@@ -71,6 +72,9 @@ protected:
 
     void Look(const struct FInputActionValue& Value);
 
+    void OnJumpPressed();
+    
+    void OnCrouchPressed();
     void StartCrouch();
     void StopCrouch();
 
@@ -87,7 +91,11 @@ protected:
     UFUNCTION() void Input_UseItem();
     UFUNCTION() void Input_DropItem();
     UFUNCTION() void Input_Interact();
-
+    
+    UFUNCTION() void HandleAttackStart(FName AttackId);
+    UFUNCTION() void HandleAttackEnd(FName AttackId);
+    
+#pragma region "COMPONENTS"
     // === CAMERA COMPONENTS ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
     USpringArmComponent* CameraBoom;
@@ -95,27 +103,48 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
     UCameraComponent* FollowCamera;
 
-    // === GLIDER ===
+    // === GLIDER COMPONENT ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
     UGliderComponent* GliderComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
     UStaticMeshComponent* GliderVisual;
 
-    // === PLAYER COMPONENTS ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player Components", meta=(AllowPrivateAccess="true"))
+    // === INVENTORY COMPONENTS ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Inventory Component", meta=(AllowPrivateAccess="true"))
     UInventoryComponent* InventoryComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Player Components", meta=(AllowPrivateAccess="true"))
+    // === Interactor COMPONENTS ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interactor Component", meta=(AllowPrivateAccess="true"))
     UInteractorComponent* InteractorComponent;
 
-    // === INPUT ===
+    // === LOCK TARGET COMPONENTS ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Lock Target Components", meta=(AllowPrivateAccess="true"))
+    ULockTargetComponent* LockTargetComponent;
+#pragma endregion
+    
+#pragma region "INPUTS"
+    // --===-- INPUTS --===--
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
     UInputMappingContext* PlayerContext;
 
+    // === CAMERA ACTION ===
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
     UInputAction* LookAction;
+    
+    // === MOVEMENTS ACTIONS ===
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* ForwardAction;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* BackAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* LeftAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UInputAction* RightAction;
+    
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
     UInputAction* JumpAction;
 
@@ -125,12 +154,14 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
     UInputAction* SprintAction;
 
+    // === GLIDER ACTIONS ===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
     UInputAction* GliderAction;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
     UInputAction* DiveAction;
 
+    // === INVENTORY ACTIONS ===
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
     UInputAction* NextItemAction;
 
@@ -144,21 +175,33 @@ protected:
     UInputAction* DropItemAction;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
-    UInputAction* InteractAction; // (Pick up)
+    UInputAction* InteractAction;
+    
+    // === COMBAT ACTIONS ===
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* AttackLightAction;
 
-    // 4 actions séparées
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-    UInputAction* ForwardAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* AttackHeavyAction; // used for charge attacks
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-    UInputAction* BackAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* ParryAction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-    UInputAction* LeftAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* DodgeAction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
-    UInputAction* RightAction;
+    // === LOCK TARGET ACTIONS ===
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* LockToggleAction;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* LockSwitchLeftAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UInputAction* LockSwitchRightAction;
+
+#pragma endregion
+    
     // === MOVEMENT SPEEDS ===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float WalkSpeed = 600.f;
@@ -166,8 +209,13 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float SprintSpeed = 900.f;
 
+    UPROPERTY(EditAnywhere, Category="Player Input") float JumpBufferTime = 0.25f;
+    bool bJumpBuffered = false;
+    float JumpBufferExpireAt = 0.f;
+    bool bLockJumpCrouchFromCombat = false;
+
 private:
-    // États d’axes
+    // STATES AXIS
     FAxisPressState Horizontal;
     FAxisPressState Vertical;
 
@@ -175,7 +223,8 @@ private:
     bool bIsLookingAround = false;
     float TimeSinceLastLook = 0.f;
 
-    // Handlers
+#pragma region "HANDLERS"
+    // === MOVEMENTS HANDLERS ===
     void OnForwardStarted(const FInputActionValue& Value);
     void OnForwardCompleted(const FInputActionValue& Value);
     void OnBackStarted(const FInputActionValue& Value);
@@ -184,4 +233,20 @@ private:
     void OnLeftCompleted(const FInputActionValue& Value);
     void OnRightStarted(const FInputActionValue& Value);
     void OnRightCompleted(const FInputActionValue& Value);
+    
+    // === COMBAT HANDLERS ===
+    void OnAttackLightPressed();
+    void OnAttackLightReleased();
+    void OnAttackHeavyPressed();
+    void OnAttackHeavyReleased();   // release the charge at current level
+    void OnAttackHeavyCanceled();   // cancel the charge if needed
+    void OnParryPressed();
+    void OnParryReleased();
+    void OnDodgePressed();
+    void OnLockToggle();
+    
+    // === LOCK TARGET HANDLERS ===
+    void OnLockSwitchLeft();
+    void OnLockSwitchRight();
+#pragma endregion
 };

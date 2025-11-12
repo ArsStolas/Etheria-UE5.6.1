@@ -1,4 +1,4 @@
-/**
+/*
  * Etheria's End Project, 2025
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
@@ -9,6 +9,7 @@
 
 #include "Components/CapsuleComponent.h"
 #include "Components/Characters/HealthComponent.h"
+#include "Components/Combat/CombatComponent.h"
 
 ABaseCharacter::ABaseCharacter()
 {
@@ -25,6 +26,7 @@ ABaseCharacter::ABaseCharacter()
 	}
 
 	HealthComponent = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
+	CombatComponent = CreateDefaultSubobject<UCombatComponent>(TEXT("BPC_Combat"));
 }
 
 void ABaseCharacter::BeginPlay()
