@@ -278,3 +278,11 @@ void UInventoryComponent::BroadcastSlot(int32 Slot)
 		OnInventorySlotChanged.Broadcast(Slot, slots[Slot].stack);
 	}
 }
+
+UItemDefinition* UInventoryComponent::GetItemDefInSlot(int32 SlotIndex) const
+{
+	if (!slots.IsValidIndex(SlotIndex)) return nullptr;
+	const FItemStack& St = slots[SlotIndex].stack;
+	return (St.IsValid() ? St.def : nullptr);
+}
+
