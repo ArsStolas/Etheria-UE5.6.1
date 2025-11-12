@@ -229,7 +229,12 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
         if (CombatComponent->IsAttackActive()) return;
         Crouch();
     }
-    void APlayerCharacter::StopCrouch()  { UnCrouch(); }
+
+void APlayerCharacter::StartCrouch()
+{
+}
+
+void APlayerCharacter::StopCrouch()  { UnCrouch(); }
     
     void APlayerCharacter::OnJumpPressed()
     {
@@ -288,7 +293,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     // Light attack: try primary if idle, else request combo advance during combo window
     void APlayerCharacter::OnAttackLightPressed()
     {
-        if (!CombatComponent) return;
+        if (!CombatComponent || GliderComponent->IsInSpecialMode()) return;
 
         // If an attack is active or we are inside the hit window, just ask to advance combo.
         if (CombatComponent->IsAttackActive() || CombatComponent->IsInAttackWindow())
@@ -309,7 +314,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     // Heavy charge attack: use an explicit attack id, for example "Heavy"
     void APlayerCharacter::OnAttackHeavyPressed()
     {
-        if (!CombatComponent) return;
+        if (!CombatComponent || GliderComponent->IsInSpecialMode()) return;
         CombatComponent->RequestComboAdvance();
         if (!CombatComponent->IsAttackActive())
         {
@@ -320,7 +325,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     // Release the charge and execute at current level
     void APlayerCharacter::OnAttackHeavyReleased()
     {
-        if (!CombatComponent) return;
+        if (!CombatComponent || GliderComponent->IsInSpecialMode()) return;
         // EndCharge(false) will compute level and release.
         CombatComponent->EndCharge(false);
     }

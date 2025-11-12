@@ -37,6 +37,8 @@ public:
     void ToggleDiving();
     FORCEINLINE bool IsDiving() const { return CurrentMode == EGliderMode::Diving; }
 
+    FORCEINLINE bool IsInSpecialMode() const { return CurrentMode != EGliderMode::None; }
+
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
