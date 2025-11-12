@@ -1,15 +1,15 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Header
  */
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Characters/BaseCharacter.h"
-#include "InputActionValue.h"
 #include "PlayerCharacter.generated.h"
 
 class USpringArmComponent;
@@ -57,7 +57,6 @@ public:
     APlayerCharacter();
 
     FORCEINLINE UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
-    bool IsInSpecialMode() const;
 
     // Exposés pour le GliderComponent
     FORCEINLINE int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
@@ -223,6 +222,14 @@ private:
     bool bIsLookingAround = false;
     float TimeSinceLastLook = 0.f;
 
+#pragma region "STATE LOGS"
+    UFUNCTION() void LogMovementStateChanged(FGameplayTag Previous, FGameplayTag New);
+    UFUNCTION() void LogCombatStateChanged(FGameplayTag Previous, FGameplayTag New);
+    UFUNCTION() void LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New);
+    UFUNCTION() void LogHealthChanged(float NewHealth, float MaxHealth);
+    UFUNCTION() void LogDeath();
+#pragma endregion
+
 #pragma region "HANDLERS"
     // === MOVEMENTS HANDLERS ===
     void OnForwardStarted(const FInputActionValue& Value);
@@ -248,5 +255,18 @@ private:
     // === LOCK TARGET HANDLERS ===
     void OnLockSwitchLeft();
     void OnLockSwitchRight();
+
+    // === GLIDER HANDLERS ===
+    UFUNCTION()
+    void OnGlideStart();
+
+    UFUNCTION()
+    void OnGlideStop();
+
+    UFUNCTION()
+    void OnDiveStart();
+
+    UFUNCTION()
+    void OnDiveStop();
 #pragma endregion
 };

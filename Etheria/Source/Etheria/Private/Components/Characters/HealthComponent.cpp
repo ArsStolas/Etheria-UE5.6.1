@@ -42,20 +42,13 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 	if (DamageAmount <= 0.f || IsDead()) return;
 
 	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
-	
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
 	if (IsDead())
 	{
 		OnDeath.Broadcast();
-
-		if (AActor* Owner = GetOwner())
-		{
-			
-		}
 	}
 }
-
 
 void UHealthComponent::Heal(const float HealAmount)
 {

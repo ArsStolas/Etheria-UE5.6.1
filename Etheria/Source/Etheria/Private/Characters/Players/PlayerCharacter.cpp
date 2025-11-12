@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
  */
 
@@ -11,11 +11,14 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Components/Characters/CharacterStateComponent.h"
+#include "Components/Characters/HealthComponent.h"
 #include "Components/Characters/Player/Glider/GliderComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTargetComponent.h"
+#include "Core/System/EtheriaGameplayTags.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -71,17 +74,40 @@ void APlayerCharacter::BeginPlay()
 
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 
+    // --- Combat Delegates ---
     if (CombatComponent)
     {
         CombatComponent->OnAttackStarted.AddDynamic(this, &APlayerCharacter::HandleAttackStart);
         CombatComponent->OnAttackEnded  .AddDynamic(this, &APlayerCharacter::HandleAttackEnd);
     }
+
+    // --- State Delegates ---
+    if (StateComponent)
+    {
+        StateComponent->OnMovementStateChanged.AddDynamic(this, &APlayerCharacter::LogMovementStateChanged);
+        StateComponent->OnCombatStateChanged.AddDynamic(this, &APlayerCharacter::LogCombatStateChanged);
+        StateComponent->OnLifeStateChanged.AddDynamic(this, &APlayerCharacter::LogLifeStateChanged);
+    }
+
+    // --- Health Delegates ---
+    if (HealthComponent)
+    {
+        HealthComponent->OnHealthChanged.AddDynamic(this, &APlayerCharacter::LogHealthChanged);
+        HealthComponent->OnDeath.AddDynamic(this, &APlayerCharacter::LogDeath);
+    }
+
+    // --- Glider Delegates ---
+    if (GliderComponent && StateComponent)
+    {
+        GliderComponent->OnGlideStart.AddDynamic(this, &APlayerCharacter::OnGlideStart);
+        GliderComponent->OnGlideStop.AddDynamic(this, &APlayerCharacter::OnGlideStop);
+        GliderComponent->OnDiveStart.AddDynamic(this, &APlayerCharacter::OnDiveStart);
+        GliderComponent->OnDiveStop.AddDynamic(this, &APlayerCharacter::OnDiveStop);
+    }
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
 {
-    Super::Tick(DeltaTime);
-
     int Hor = Horizontal.GetAxisValue();
     int Ver = Vertical.GetAxisValue();
 
@@ -89,12 +115,21 @@ void APlayerCharacter::Tick(float DeltaTime)
     {
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
-
         const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         const FVector Right   = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
         if (Ver != 0) AddMovementInput(Forward, static_cast<float>(Ver));
         if (Hor != 0) AddMovementInput(Right, static_cast<float>(Hor));
+    }
+
+    if (GetCharacterMovement()->IsMovingOnGround() && StateComponent)
+    {
+        if (GetCharacterMovement()->MaxWalkSpeed == SprintSpeed)
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Sprinting);
+        else if (Hor != 0 || Ver != 0)
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Walking);
+        else
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
     }
 }
 
@@ -197,6 +232,42 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     
 }
 
+#pragma region "STATE LOGS"
+
+void APlayerCharacter::LogMovementStateChanged(FGameplayTag Previous, FGameplayTag New)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] MovementState changed: %s -> %s"),
+           *GetName(), *Previous.ToString(), *New.ToString());
+}
+
+void APlayerCharacter::LogCombatStateChanged(FGameplayTag Previous, FGameplayTag New)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] CombatState changed: %s -> %s"),
+           *GetName(), *Previous.ToString(), *New.ToString());
+}
+
+void APlayerCharacter::LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] LifeState changed: %s -> %s"),
+           *GetName(), *Previous.ToString(), *New.ToString());
+}
+
+void APlayerCharacter::LogHealthChanged(float NewHealth, float MaxHealth)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] Health changed: %f / %f"), *GetName(), NewHealth, MaxHealth);
+}
+
+void APlayerCharacter::LogDeath()
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] Player DIED!"), *GetName());
+    if (StateComponent)
+    {
+        StateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
+    }
+}
+
+#pragma endregion
+
 #pragma region "CAMERA INPUTS"
 void APlayerCharacter::Look(const FInputActionValue& Value)
 {
@@ -247,8 +318,15 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 #pragma endregion
 
 #pragma region "GLIDER INPUTS"
-    void APlayerCharacter::ToggleGlideMode() { if (GliderComponent) GliderComponent->ToggleGliding(); }
-    void APlayerCharacter::ToggleDiveMode() { if (GliderComponent) GliderComponent->ToggleDiving(); }
+    void APlayerCharacter::ToggleGlideMode()
+    {
+        if (GliderComponent) GliderComponent->ToggleGliding();
+    }
+
+    void APlayerCharacter::ToggleDiveMode()
+    {
+        if (GliderComponent) GliderComponent->ToggleDiving();
+    }
 
     void APlayerCharacter::AlignToCamera()
     {
@@ -258,8 +336,6 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
             SetActorRotation(FRotator(0.f, CamRot.Yaw, 0.f));
         }
     }
-
-    bool APlayerCharacter::IsInSpecialMode() const { return (GliderComponent && GliderComponent->IsGliding()); }
 #pragma endregion
 
 #pragma region "INVENTORY INPUTS"
@@ -380,8 +456,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     }
 #pragma endregion
 
-
-#pragma region "HANDLERS"
+#pragma region "COMBAT HANDLERS"
     void APlayerCharacter::HandleAttackStart(FName)
     {
         bLockJumpCrouchFromCombat = true;
@@ -400,5 +475,31 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
             }
         }
         bJumpBuffered = false;
+    }
+#pragma endregion
+
+#pragma region "GLIDER HANDLERS"
+    void APlayerCharacter::OnGlideStart()
+    {
+        if (StateComponent)
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Gliding);
+    }
+
+    void APlayerCharacter::OnGlideStop()
+    {
+        if (StateComponent)
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
+    }
+
+    void APlayerCharacter::OnDiveStart()
+    {
+        if (StateComponent)
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Diving);
+    }
+
+    void APlayerCharacter::OnDiveStop()
+    {
+        if (StateComponent)
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
     }
 #pragma endregion
