@@ -355,12 +355,27 @@ void APlayerCharacter::HandleGroundedState()
 
 void APlayerCharacter::HandleAirborneState()
 {
+    if (!StateComponent || !GetWorld()) return;
+
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
         StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
         return;
 
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (Now < AirborneIgnoreUntil)
+        return;
+
     const FVector Velocity = GetVelocity();
-    if (Velocity.Z > 0.f)
+    const float JumpThresholdZ = 250.f;
+
+    if (StateComponent->WasInMovementState(EtheriaTags::State_Movement_Airborne_Diving) ||
+        StateComponent->WasInMovementState(EtheriaTags::State_Movement_Airborne_Gliding))
+    {
+        if (Velocity.Z > 0.f)
+            return;
+    }
+
+    if (Velocity.Z > JumpThresholdZ)
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
     else
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);

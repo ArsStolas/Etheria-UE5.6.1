@@ -16,6 +16,7 @@ void UCharacterStateComponent::SetMovementState(FGameplayTag NewState)
 {
 	if (CurrentMovementState != NewState)
 	{
+		PreviousMovementState = CurrentMovementState;
 		FGameplayTag Previous = CurrentMovementState;
 		CurrentMovementState = NewState;
 		OnMovementStateChanged.Broadcast(Previous, NewState);
@@ -26,6 +27,7 @@ void UCharacterStateComponent::SetCombatState(FGameplayTag NewState)
 {
 	if (CurrentCombatState != NewState)
 	{
+		PreviousCombatState = CurrentCombatState;
 		FGameplayTag Previous = CurrentCombatState;
 		CurrentCombatState = NewState;
 		OnCombatStateChanged.Broadcast(Previous, NewState);
@@ -36,6 +38,7 @@ void UCharacterStateComponent::SetLifeState(FGameplayTag NewState)
 {
 	if (CurrentLifeState != NewState)
 	{
+		PreviousLifeState = CurrentLifeState;
 		FGameplayTag Previous = CurrentLifeState;
 		CurrentLifeState = NewState;
 		OnLifeStateChanged.Broadcast(Previous, NewState);
@@ -70,4 +73,19 @@ bool UCharacterStateComponent::IsInCombatState(FGameplayTag QueryTag) const
 bool UCharacterStateComponent::IsInLifeState(FGameplayTag QueryTag) const
 {
 	return CurrentLifeState.MatchesTag(QueryTag);
+}
+
+bool UCharacterStateComponent::WasInMovementState(FGameplayTag QueryTag) const
+{
+	return PreviousMovementState.MatchesTag(QueryTag);
+}
+
+bool UCharacterStateComponent::WasInCombatState(FGameplayTag QueryTag) const
+{
+	return PreviousCombatState.MatchesTag(QueryTag);
+}
+
+bool UCharacterStateComponent::WasInLifeState(FGameplayTag QueryTag) const
+{
+	return PreviousLifeState.MatchesTag(QueryTag);
 }

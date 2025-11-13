@@ -41,7 +41,7 @@ void UGliderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 		HandleDive(DeltaTime);
 		if (IsGrounded())
 		{
-			StopDiving(false);
+			StopDiving(false, false);
 
 			if (OwnerCharacter && OwnerCharacter->GetStateComponent())
 			{
@@ -73,7 +73,7 @@ void UGliderComponent::ToggleGliding()
             StopGliding(true);
             break;
         case EGliderMode::Diving:
-            StopDiving(true);
+            StopDiving(true, true);
             break;
     }
 }
@@ -89,7 +89,7 @@ void UGliderComponent::ToggleDiving()
 		break;
 
 	case EGliderMode::Diving:
-		StopDiving(false);
+		StopDiving(false, true);
 		break;
 
 	default:
@@ -110,7 +110,7 @@ void UGliderComponent::StartGliding()
 	RecordOriginalSettings();
 
 	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
-	MoveComp->bOrientRotationToMovement = false; // Désactiver la rotation automatique
+	MoveComp->bOrientRotationToMovement = false;
 	MoveComp->RotationRate = FRotator(0.f, 250.f, 0.f);
 	MoveComp->GravityScale = 0.0f;
 	MoveComp->AirControl = 0.9f;
@@ -178,7 +178,6 @@ void UGliderComponent::StopDiving(bool bGoToGlide, bool bManualStop)
 
 	if (bGoToGlide)
 	{
-		// Passer en Gliding proprement
 		StartGliding();
 	}
 	else
@@ -198,7 +197,7 @@ void UGliderComponent::StopDiving(bool bGoToGlide, bool bManualStop)
 	}
 
 	CurrentDiveSpeed = MinDiveSpeed;
-	if (bManualStop)
+	if (bManualStop && !bGoToGlide)
 	{
 		OnDiveStop.Broadcast();
 	}

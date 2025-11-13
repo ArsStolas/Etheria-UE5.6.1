@@ -186,18 +186,23 @@ protected:
     UPROPERTY(EditAnywhere, Category = "Movement|Jump Buffer")
     float JumpBufferTime = 0.25f;
 
+    UPROPERTY(EditAnywhere, Category = "Movement|State")
+    float AirborneStateGraceDuration = 0.18f;
+
     bool  bJumpBuffered = false;
     float JumpBufferExpireAt = 0.f;
     bool  bLockJumpCrouchFromCombat = false;
 
 #pragma endregion
-
+    
 // ============================================================
 // STATE & AXIS TRACKING
 // ============================================================
 private:
     FAxisPressState Horizontal;
     FAxisPressState Vertical;
+
+    float AirborneIgnoreUntil = 0.f;
 
 // ============================================================
 // INTERNAL HANDLERS

@@ -48,32 +48,52 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
-	if (OwnerStateComponent)
-	{
-		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_TakingDamage);
-	}
+	if (!OwnerStateComponent.IsValid())
+		return;
 
 	if (IsDead())
 	{
 		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
 		OnDeath.Broadcast();
 	}
+	else
+	{
+		SetTemporaryLifeState(EtheriaTags::State_Life_TakingDamage, DamageStateDuration);
+	}
 }
 
-void UHealthComponent::Heal(const float HealAmount)
+void UHealthComponent::Heal(float HealAmount)
 {
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green,
-		FString::Printf(TEXT("Healing for %f"), HealAmount));
-	
 	if (HealAmount <= 0.f || IsDead()) return;
 
 	Health = FMath::Clamp(Health + HealAmount, 0.f, MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
-	if (OwnerStateComponent && !IsDead())
+	if (OwnerStateComponent.IsValid())
 	{
-		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_Healing);
+		SetTemporaryLifeState(EtheriaTags::State_Life_Healing, HealStateDuration);
 	}
+}
+
+void UHealthComponent::SetTemporaryLifeState(FGameplayTag TempState, float Duration)
+{
+	if (!OwnerStateComponent.IsValid()) return;
+
+	OwnerStateComponent->SetLifeState(TempState);
+
+	FTimerHandle ResetTimer;
+	GetWorld()->GetTimerManager().SetTimer(
+		ResetTimer,
+		[this]()
+		{
+			if (OwnerStateComponent.IsValid() && !IsDead())
+			{
+				OwnerStateComponent->ClearLifeState();
+			}
+		},
+		Duration,
+		false
+	);
 }
 
 float UHealthComponent::GetHealth() const

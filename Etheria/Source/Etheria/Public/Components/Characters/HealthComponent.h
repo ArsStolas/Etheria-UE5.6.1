@@ -11,6 +11,8 @@
 #include "Components/ActorComponent.h"
 #include "HealthComponent.generated.h"
 
+struct FGameplayTag;
+
 class ABaseCharacter;
 class UCharacterStateComponent;
 
@@ -27,7 +29,7 @@ public:
 	
 	UFUNCTION(BlueprintCallable, Category="Health")
 	void ResetHealth();
-
+	
 	UFUNCTION(BlueprintCallable, Category="Health")
 	void TakeDamage(const float DamageAmount);
 
@@ -49,8 +51,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Health")
 	FOnDeathSignature OnDeath;
 
-	ABaseCharacter* OwnerCharacter = nullptr;
-	UCharacterStateComponent* OwnerStateComponent = nullptr;
+	TWeakObjectPtr<ABaseCharacter> OwnerCharacter;
+	TWeakObjectPtr<UCharacterStateComponent> OwnerStateComponent;
 
 protected:
 	virtual void BeginPlay() override;
@@ -61,8 +63,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health", meta=(ClampMin="1.0"))
 	float MaxHealth = 100.f;
 
+	UPROPERTY(EditAnywhere, Category="State Timing")
+	float DamageStateDuration = 0.6f;
+
+	UPROPERTY(EditAnywhere, Category="State Timing")
+	float HealStateDuration = 0.8f;
+
 private:
 	UFUNCTION()
 	void HandleTakeAnyDamage(AActor* DamagedActor, const float Damage, const UDamageType* DamageType,
 	                         AController* InstigatedBy, AActor* DamageCauser);
+
+	void SetTemporaryLifeState(FGameplayTag TempState, float Duration);
 };

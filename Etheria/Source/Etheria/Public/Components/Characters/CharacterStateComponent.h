@@ -23,7 +23,7 @@ class ETHERIA_API UCharacterStateComponent : public UActorComponent
 public:
     UCharacterStateComponent();
 
-    // 🔸 Movement / Combat / Life
+    // Movement / Combat / Life
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "States")
     FGameplayTag CurrentMovementState = EtheriaTags::State_Movement_Grounded_Idle;
 
@@ -33,7 +33,13 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "States")
     FGameplayTag CurrentLifeState = EtheriaTags::State_Life;
 
-    // 🔹 Délégués d’événements
+    // États précédents
+    
+    FGameplayTag PreviousMovementState;
+    FGameplayTag PreviousCombatState;
+    FGameplayTag PreviousLifeState;
+
+    // Délégués d’événements
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnStateChanged OnMovementStateChanged;
 
@@ -71,5 +77,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "States")
     bool IsInLifeState(FGameplayTag QueryTag) const;
+ 
+    bool WasInMovementState(FGameplayTag QueryTag) const;
+    bool WasInCombatState(FGameplayTag QueryTag) const;
+    bool WasInLifeState(FGameplayTag QueryTag) const;
 };
 
