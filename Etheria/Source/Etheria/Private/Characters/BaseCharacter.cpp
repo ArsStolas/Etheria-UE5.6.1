@@ -18,14 +18,6 @@ ABaseCharacter::ABaseCharacter()
 
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
 
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MeshAsset(TEXT("/Game/Mannequin/Character/Mesh/SK_Mannequin.SK_Mannequin"));
-	if (MeshAsset.Succeeded())
-	{
-		GetMesh()->SetSkeletalMesh(MeshAsset.Object);
-		GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -96.f));
-		GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-	}
-
 	HealthComponent = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
 	StateComponent = CreateDefaultSubobject<UCharacterStateComponent>(TEXT("StateComponent"));
 	CombatComponent = CreateDefaultSubobject<UCombatComponent>(TEXT("BPC_Combat"));

@@ -212,71 +212,81 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 }
 
 #pragma region "MOVEMENT INPUTS"
-    void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
-    void APlayerCharacter::OnForwardCompleted(const FInputActionValue&){ Vertical.OnPosCompleted(); }
-    void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); }
-    void APlayerCharacter::OnBackCompleted(const FInputActionValue&)    { Vertical.OnNegCompleted(); }
-    void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); }
-    void APlayerCharacter::OnLeftCompleted(const FInputActionValue&)    { Horizontal.OnNegCompleted(); }
-    void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); }
-    void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal.OnPosCompleted(); }
+
+void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnForwardCompleted(const FInputActionValue&){ Vertical.OnPosCompleted(); }
+void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnBackCompleted(const FInputActionValue&)    { Vertical.OnNegCompleted(); }
+void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnLeftCompleted(const FInputActionValue&)    { Horizontal.OnNegCompleted(); }
+void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal.OnPosCompleted(); }
     
-    void APlayerCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
-    void APlayerCharacter::StopSprint()  { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
-    
-    void APlayerCharacter::OnJumpPressed()
+void APlayerCharacter::StartSprint()
+{
+    if (!StateComponent) return;
+
+    GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+}
+
+void APlayerCharacter::StopSprint()
+{
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+}
+
+void APlayerCharacter::OnJumpPressed()
+{
+    if (!CombatComponent) { Jump(); return; }
+    if (CombatComponent->IsJumpBlocked()) return;
+
+    if (CombatComponent->IsAttackActive())
     {
-        if (!CombatComponent) { Jump(); return; }
-        if (CombatComponent->IsJumpBlocked()) return;
-
-        if (CombatComponent->IsAttackActive())
-        {
-            bJumpBuffered = true;
-            JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
-            return;
-        }
-
-        Jump();
-
-        if (UCharacterStateComponent* StateComp = GetStateComponent())
-        {
-            StateComp->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
-        }
+        bJumpBuffered = true;
+        JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
+        return;
     }
 
-    void APlayerCharacter::Landed(const FHitResult& Hit)
+    Jump();
+
+    if (UCharacterStateComponent* StateComp = GetStateComponent())
     {
-        Super::Landed(Hit);
-
-        if (UCharacterStateComponent* StateComp = GetStateComponent())
-        {
-            StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
-        }
+        StateComp->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
     }
+}
 
-    void APlayerCharacter::OnCrouchPressed()
+void APlayerCharacter::Landed(const FHitResult& Hit)
+{
+    Super::Landed(Hit);
+
+    if (UCharacterStateComponent* StateComp = GetStateComponent())
     {
-        if (!CombatComponent) { Crouch(); return; }
-        if (CombatComponent->IsCrouchBlocked()) return;
-        if (CombatComponent->IsAttackActive()) return;
-
-        Crouch();
-
-        if (UCharacterStateComponent* StateComp = GetStateComponent())
-        {
-            StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
-        }
+        StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
     }
+}
 
-    void APlayerCharacter::StopCrouch()
+void APlayerCharacter::OnCrouchPressed()
+{
+    if (!CombatComponent) { Crouch(); return; }
+    if (CombatComponent->IsCrouchBlocked()) return;
+    if (CombatComponent->IsAttackActive()) return;
+
+    Crouch();
+
+    if (UCharacterStateComponent* StateComp = GetStateComponent())
     {
-        UnCrouch();
-
-        if (UCharacterStateComponent* StateComp = GetStateComponent())
-        {
-            StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
-        }
+        StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
     }
+}
+
+void APlayerCharacter::StopCrouch()
+{
+    UnCrouch();
+
+    if (UCharacterStateComponent* StateComp = GetStateComponent())
+    {
+        StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+    }
+}
 
 #pragma endregion
 
@@ -314,6 +324,13 @@ void APlayerCharacter::UpdateMovementState()
 
 void APlayerCharacter::HandleGroundedState()
 {
+
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
+    StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
+    {
+        return;
+    }
+    
     UCharacterMovementComponent* MoveComp = GetCharacterMovement();
     const int Hor = Horizontal.GetAxisValue();
     const int Ver = Vertical.GetAxisValue();
@@ -322,7 +339,7 @@ void APlayerCharacter::HandleGroundedState()
     {
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
     }
-    else if (MoveComp->MaxWalkSpeed == SprintSpeed)
+    else if (MoveComp->MaxWalkSpeed == SprintSpeed && (Hor != 0 || Ver != 0))
     {
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Sprinting);
     }
@@ -364,24 +381,26 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 #pragma endregion
 
 #pragma region "GLIDER INPUTS"
-    void APlayerCharacter::ToggleGlideMode()
-    {
-        if (GliderComponent) GliderComponent->ToggleGliding();
-    }
 
-    void APlayerCharacter::ToggleDiveMode()
-    {
-        if (GliderComponent) GliderComponent->ToggleDiving();
-    }
+void APlayerCharacter::ToggleGlideMode()
+{
+    if (GliderComponent) GliderComponent->ToggleGliding();
+}
 
-    void APlayerCharacter::AlignToCamera()
+void APlayerCharacter::ToggleDiveMode()
+{
+    if (GliderComponent) GliderComponent->ToggleDiving();
+}
+
+void APlayerCharacter::AlignToCamera()
+{
+    if (Controller)
     {
-        if (Controller)
-        {
-            FRotator CamRot = Controller->GetControlRotation();
-            SetActorRotation(FRotator(0.f, CamRot.Yaw, 0.f));
-        }
+        FRotator CamRot = Controller->GetControlRotation();
+        SetActorRotation(FRotator(0.f, CamRot.Yaw, 0.f));
     }
+}
+
 #pragma endregion
 
 #pragma region "GLIDER HANDLERS"
@@ -411,73 +430,97 @@ void APlayerCharacter::OnDiveStop()
 #pragma endregion
 
 #pragma region "COMBAT INPUTS"
-    // Light attack: try primary if idle, else request combo advance during combo window
-    void APlayerCharacter::OnAttackLightPressed()
+
+void APlayerCharacter::OnAttackLightPressed()
+{
+    if (!CombatComponent || !StateComponent) return;
+
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
+        StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
     {
-        if (!CombatComponent) return;
-
-        // If an attack is active or we are inside the hit window, just ask to advance combo.
-        if (CombatComponent->IsAttackActive() || CombatComponent->IsInAttackWindow())
-        {
-            CombatComponent->RequestComboAdvance();
-            return;
-        }
-
-        // Route by stance automatically: will pick Light Ground or Light Air variant based on IsFalling()
-        CombatComponent->TryAttackGroup(FName("Light"));
+        UE_LOG(LogTemp, Warning, TEXT("Can't attack while gliding or diving!"));
+        return;
     }
 
-    void APlayerCharacter::OnAttackLightReleased()
+    // Si une attaque est déjà active, on tente une avance de combo
+    if (CombatComponent->IsAttackActive() || CombatComponent->IsInAttackWindow())
     {
-        
-    }
-
-    // Heavy charge attack: use an explicit attack id, for example "Heavy"
-    void APlayerCharacter::OnAttackHeavyPressed()
-    {
-        if (!CombatComponent) return;
         CombatComponent->RequestComboAdvance();
-        if (!CombatComponent->IsAttackActive())
-        {
-            CombatComponent->TryAttackGroup(FName("Heavy"));
-        }
+        return;
     }
 
-    // Release the charge and execute at current level
-    void APlayerCharacter::OnAttackHeavyReleased()
+    // Attaque légère selon le contexte (au sol ou en l’air)
+    CombatComponent->TryAttackGroup(FName("Light"));
+}
+
+void APlayerCharacter::OnAttackLightReleased()
+{
+}
+
+void APlayerCharacter::OnAttackHeavyPressed()
+{
+    if (!CombatComponent || !StateComponent) return;
+
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
+        StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
     {
-        if (!CombatComponent) return;
-        // EndCharge(false) will compute level and release.
-        CombatComponent->EndCharge(false);
+        UE_LOG(LogTemp, Warning, TEXT("Can't attack while gliding or diving!"));
+        return;
     }
 
-    // Cancel the charge without releasing
-    void APlayerCharacter::OnAttackHeavyCanceled()
+    CombatComponent->RequestComboAdvance();
+    if (!CombatComponent->IsAttackActive())
     {
-        if (!CombatComponent) return;
-        CombatComponent->EndCharge(true);
+        CombatComponent->TryAttackGroup(FName("Heavy"));
+    }
+}
+
+void APlayerCharacter::OnAttackHeavyReleased()
+{
+    if (!CombatComponent) return;
+    CombatComponent->EndCharge(false);
+}
+
+void APlayerCharacter::OnAttackHeavyCanceled()
+{
+    if (!CombatComponent) return;
+    CombatComponent->EndCharge(true);
+}
+
+void APlayerCharacter::OnParryPressed()
+{
+    if (!CombatComponent || !StateComponent) return;
+
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
+        StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Can't parry while gliding or diving!"));
+        return;
     }
 
-    void APlayerCharacter::OnParryPressed()
+    CombatComponent->SetParryHeld(true);
+}
+
+void APlayerCharacter::OnParryReleased()
+{
+    if (!CombatComponent) return;
+    CombatComponent->SetParryHeld(false);
+}
+
+void APlayerCharacter::OnDodgePressed()
+{
+    if (!CombatComponent || !StateComponent) return;
+
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
+        StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
     {
-        if (!CombatComponent) return;
-        CombatComponent->SetParryHeld(true);
+        UE_LOG(LogTemp, Warning, TEXT("Can't dodge while gliding or diving!"));
+        return;
     }
 
-    void APlayerCharacter::OnParryReleased()
-    {
-        if (!CombatComponent) return;
-        CombatComponent->SetParryHeld(false);
-    }
+    CombatComponent->StartDodgeIFrames(-1.f);
+}
 
-    void APlayerCharacter::OnDodgePressed()
-    {
-        // Have to play a dodge montage that contains a notify to call StartDodgeIFrames
-        if (CombatComponent)
-        {
-            CombatComponent->StartDodgeIFrames(-1.f);
-        }
-    }
 #pragma endregion
 
 #pragma region "COMBAT HANDLERS"
@@ -529,25 +572,29 @@ void APlayerCharacter::OnLockSwitchRight()
 #pragma endregion
 
 #pragma region "INVENTORY INPUTS"
-    // INVENTORY INPUTS
-    void APlayerCharacter::Input_SelectNext() { if (InventoryComponent) { InventoryComponent->SelectNext(); } }
-    void APlayerCharacter::Input_SelectPrev() { if (InventoryComponent) { InventoryComponent->SelectPrevious(); } }
-    void APlayerCharacter::Input_UseItem() { if (InventoryComponent) { InventoryComponent->UseSelected(); } }
-    void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
+
+// INVENTORY INPUTS
+void APlayerCharacter::Input_SelectNext() { if (InventoryComponent) { InventoryComponent->SelectNext(); } }
+void APlayerCharacter::Input_SelectPrev() { if (InventoryComponent) { InventoryComponent->SelectPrevious(); } }
+void APlayerCharacter::Input_UseItem() { if (InventoryComponent) { InventoryComponent->UseSelected(); } }
+void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
+
 #pragma endregion
 
 #pragma region "INTERACTION INPUT"
-    // INTERACTION INPUT
-    void APlayerCharacter::Input_Interact()
+
+// INTERACTION INPUT
+void APlayerCharacter::Input_Interact()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
+    if (!InteractorComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
-        if (!InteractorComponent)
-        {
-            UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
-            return;
-        }
-        InteractorComponent->TryInteract();
+        UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
+        return;
     }
+    InteractorComponent->TryInteract();
+}
+
 #pragma endregion
 
 #pragma region "STATE LOGS"
