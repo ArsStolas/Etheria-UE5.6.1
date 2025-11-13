@@ -108,7 +108,7 @@ private:
     void StartGliding();
     void StopGliding(bool bManualStop);
     void StartDiving();
-    void StopDiving(bool bGoToGlide = false, bool bManualStop);
+    void StopDiving(bool bGoToGlide = false, bool bManualStop = false);
 
     bool CanStartGliding() const;
     bool IsGrounded() const;

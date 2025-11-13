@@ -6,11 +6,13 @@ UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded, "State.Movement.Gro
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded_Idle, "State.Movement.Grounded.Idle");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded_Walking, "State.Movement.Grounded.Walking");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded_Sprinting, "State.Movement.Grounded.Sprinting");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded_Crouching, "State.Movement.Grounded.Crouching");
 
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Airborne, "State.Movement.Airborne");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Airborne_Falling, "State.Movement.Airborne.Falling");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Airborne_Gliding, "State.Movement.Airborne.Gliding");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Airborne_Diving, "State.Movement.Airborne.Diving");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Airborne_Jumping, "State.Movement.Airborne.Jumping");
 
 // === Combat ===
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat, "State.Combat");

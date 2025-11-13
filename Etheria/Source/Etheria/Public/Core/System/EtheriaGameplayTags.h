@@ -14,11 +14,13 @@ namespace EtheriaTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Grounded_Idle);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Grounded_Walking);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Grounded_Sprinting);
+	ETHERIA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Grounded_Crouching);
 
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne_Falling);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne_Gliding);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne_Diving);
+	ETHERIA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne_Jumping);
 
 	// === Combat ===
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat);

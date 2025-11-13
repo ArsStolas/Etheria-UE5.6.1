@@ -108,29 +108,9 @@ void APlayerCharacter::BeginPlay()
 
 void APlayerCharacter::Tick(float DeltaTime)
 {
-    int Hor = Horizontal.GetAxisValue();
-    int Ver = Vertical.GetAxisValue();
-
-    if (Controller)
-    {
-        const FRotator Rotation = Controller->GetControlRotation();
-        const FRotator YawRotation(0, Rotation.Yaw, 0);
-        const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector Right   = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-        if (Ver != 0) AddMovementInput(Forward, static_cast<float>(Ver));
-        if (Hor != 0) AddMovementInput(Right, static_cast<float>(Hor));
-    }
-
-    if (GetCharacterMovement()->IsMovingOnGround() && StateComponent)
-    {
-        if (GetCharacterMovement()->MaxWalkSpeed == SprintSpeed)
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Sprinting);
-        else if (Hor != 0 || Ver != 0)
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Walking);
-        else
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
-    }
+    Super::Tick(DeltaTime);
+    HandleMovementInput();
+    UpdateMovementState();
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -229,56 +209,7 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         }
     #pragma endregion
     }
-    
 }
-
-#pragma region "STATE LOGS"
-
-void APlayerCharacter::LogMovementStateChanged(FGameplayTag Previous, FGameplayTag New)
-{
-    UE_LOG(LogTemp, Warning, TEXT("[%s] MovementState changed: %s -> %s"),
-           *GetName(), *Previous.ToString(), *New.ToString());
-}
-
-void APlayerCharacter::LogCombatStateChanged(FGameplayTag Previous, FGameplayTag New)
-{
-    UE_LOG(LogTemp, Warning, TEXT("[%s] CombatState changed: %s -> %s"),
-           *GetName(), *Previous.ToString(), *New.ToString());
-}
-
-void APlayerCharacter::LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New)
-{
-    UE_LOG(LogTemp, Warning, TEXT("[%s] LifeState changed: %s -> %s"),
-           *GetName(), *Previous.ToString(), *New.ToString());
-}
-
-void APlayerCharacter::LogHealthChanged(float NewHealth, float MaxHealth)
-{
-    UE_LOG(LogTemp, Warning, TEXT("[%s] Health changed: %f / %f"), *GetName(), NewHealth, MaxHealth);
-}
-
-void APlayerCharacter::LogDeath()
-{
-    UE_LOG(LogTemp, Warning, TEXT("[%s] Player DIED!"), *GetName());
-    if (StateComponent)
-    {
-        StateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
-    }
-}
-
-#pragma endregion
-
-#pragma region "CAMERA INPUTS"
-void APlayerCharacter::Look(const FInputActionValue& Value)
-{
-    const FVector2D LookAxis = Value.Get<FVector2D>();
-    if (Controller)
-    {
-        AddControllerYawInput(LookAxis.X);
-        AddControllerPitchInput(LookAxis.Y);
-    }
-}
-#pragma endregion
 
 #pragma region "MOVEMENT INPUTS"
     void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
@@ -293,15 +224,6 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     void APlayerCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
     void APlayerCharacter::StopSprint()  { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
     
-    void APlayerCharacter::OnCrouchPressed()
-    {
-        if (!CombatComponent) { Crouch(); return; }
-        if (CombatComponent->IsCrouchBlocked()) return;
-        if (CombatComponent->IsAttackActive()) return;
-        Crouch();
-    }
-    void APlayerCharacter::StopCrouch()  { UnCrouch(); }
-    
     void APlayerCharacter::OnJumpPressed()
     {
         if (!CombatComponent) { Jump(); return; }
@@ -313,8 +235,132 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
             JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
             return;
         }
+
         Jump();
+
+        if (UCharacterStateComponent* StateComp = GetStateComponent())
+        {
+            StateComp->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
+        }
     }
+
+    void APlayerCharacter::Landed(const FHitResult& Hit)
+    {
+        Super::Landed(Hit);
+
+        if (UCharacterStateComponent* StateComp = GetStateComponent())
+        {
+            StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+        }
+    }
+
+    void APlayerCharacter::OnCrouchPressed()
+    {
+        if (!CombatComponent) { Crouch(); return; }
+        if (CombatComponent->IsCrouchBlocked()) return;
+        if (CombatComponent->IsAttackActive()) return;
+
+        Crouch();
+
+        if (UCharacterStateComponent* StateComp = GetStateComponent())
+        {
+            StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
+        }
+    }
+
+    void APlayerCharacter::StopCrouch()
+    {
+        UnCrouch();
+
+        if (UCharacterStateComponent* StateComp = GetStateComponent())
+        {
+            StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+        }
+    }
+
+#pragma endregion
+
+#pragma region "MOVEMENT STATE HANDLERS"
+
+void APlayerCharacter::HandleMovementInput()
+{
+    if (!Controller) return;
+
+    const int Hor = Horizontal.GetAxisValue();
+    const int Ver = Vertical.GetAxisValue();
+
+    if (Hor == 0 && Ver == 0) return;
+
+    const FRotator Rotation = Controller->GetControlRotation();
+    const FRotator YawRotation(0, Rotation.Yaw, 0);
+    const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+    const FVector Right   = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+    if (Ver != 0) AddMovementInput(Forward, static_cast<float>(Ver));
+    if (Hor != 0) AddMovementInput(Right, static_cast<float>(Hor));
+}
+
+void APlayerCharacter::UpdateMovementState()
+{
+    if (!StateComponent || !GetCharacterMovement()) return;
+
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+
+    if (MoveComp->IsFalling())
+        HandleAirborneState();
+    else
+        HandleGroundedState();
+}
+
+void APlayerCharacter::HandleGroundedState()
+{
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    const int Hor = Horizontal.GetAxisValue();
+    const int Ver = Vertical.GetAxisValue();
+
+    if (bIsCrouched)
+    {
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
+    }
+    else if (MoveComp->MaxWalkSpeed == SprintSpeed)
+    {
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Sprinting);
+    }
+    else if (Hor != 0 || Ver != 0)
+    {
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Walking);
+    }
+    else
+    {
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+    }
+}
+
+void APlayerCharacter::HandleAirborneState()
+{
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
+        StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
+        return;
+
+    const FVector Velocity = GetVelocity();
+    if (Velocity.Z > 0.f)
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
+    else
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
+}
+
+#pragma endregion
+
+#pragma region "CAMERA INPUTS"
+void APlayerCharacter::Look(const FInputActionValue& Value)
+{
+    const FVector2D LookAxis = Value.Get<FVector2D>();
+    if (Controller)
+    {
+        AddControllerYawInput(LookAxis.X);
+        AddControllerPitchInput(LookAxis.Y);
+    }
+}
 #pragma endregion
 
 #pragma region "GLIDER INPUTS"
@@ -338,26 +384,30 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     }
 #pragma endregion
 
-#pragma region "INVENTORY INPUTS"
-    // INVENTORY INPUTS
-    void APlayerCharacter::Input_SelectNext() { if (InventoryComponent) { InventoryComponent->SelectNext(); } }
-    void APlayerCharacter::Input_SelectPrev() { if (InventoryComponent) { InventoryComponent->SelectPrevious(); } }
-    void APlayerCharacter::Input_UseItem() { if (InventoryComponent) { InventoryComponent->UseSelected(); } }
-    void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
-#pragma endregion
+#pragma region "GLIDER HANDLERS"
+void APlayerCharacter::OnGlideStart()
+{
+    if (StateComponent)
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Gliding);
+}
 
-#pragma region "INTERACTION INPUT"
-    // INTERACTION INPUT
-    void APlayerCharacter::Input_Interact()
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
-        if (!InteractorComponent)
-        {
-            UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
-            return;
-        }
-        InteractorComponent->TryInteract();
-    }
+void APlayerCharacter::OnGlideStop()
+{
+    if (StateComponent)
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
+}
+
+void APlayerCharacter::OnDiveStart()
+{
+    if (StateComponent)
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Diving);
+}
+
+void APlayerCharacter::OnDiveStop()
+{
+    if (StateComponent)
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
+}
 #pragma endregion
 
 #pragma region "COMBAT INPUTS"
@@ -430,76 +480,108 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
     }
 #pragma endregion
 
-#pragma region "LOCK TARGET INPUTS"
-    void APlayerCharacter::OnLockToggle()
-    {
-        if (LockTargetComponent)
-        {
-            LockTargetComponent->ToggleLock(nullptr);
-        }
-    }
-
-    void APlayerCharacter::OnLockSwitchLeft()
-    {
-        if (LockTargetComponent)
-        {
-            LockTargetComponent->SwitchTarget(false);
-        }
-    }
-
-    void APlayerCharacter::OnLockSwitchRight()
-    {
-        if (LockTargetComponent)
-        {
-            LockTargetComponent->SwitchTarget(true);
-        }
-    }
-#pragma endregion
-
 #pragma region "COMBAT HANDLERS"
-    void APlayerCharacter::HandleAttackStart(FName)
-    {
-        bLockJumpCrouchFromCombat = true;
-    }
+void APlayerCharacter::HandleAttackStart(FName)
+{
+    bLockJumpCrouchFromCombat = true;
+}
 
-    void APlayerCharacter::HandleAttackEnd(FName)
-    {
-        bLockJumpCrouchFromCombat = false;
+void APlayerCharacter::HandleAttackEnd(FName)
+{
+    bLockJumpCrouchFromCombat = false;
 
-        if (bJumpBuffered && GetWorld())
+    if (bJumpBuffered && GetWorld())
+    {
+        const float Now = GetWorld()->GetTimeSeconds();
+        if (Now <= JumpBufferExpireAt)
         {
-            const float Now = GetWorld()->GetTimeSeconds();
-            if (Now <= JumpBufferExpireAt)
-            {
-                Jump();
-            }
+            Jump();
         }
-        bJumpBuffered = false;
+    }
+    bJumpBuffered = false;
+}
+#pragma endregion
+
+#pragma region "LOCK TARGET INPUTS"
+void APlayerCharacter::OnLockToggle()
+{
+    if (LockTargetComponent)
+    {
+        LockTargetComponent->ToggleLock(nullptr);
+    }
+}
+
+void APlayerCharacter::OnLockSwitchLeft()
+{
+    if (LockTargetComponent)
+    {
+        LockTargetComponent->SwitchTarget(false);
+    }
+}
+
+void APlayerCharacter::OnLockSwitchRight()
+{
+    if (LockTargetComponent)
+    {
+        LockTargetComponent->SwitchTarget(true);
+    }
+}
+#pragma endregion
+
+#pragma region "INVENTORY INPUTS"
+    // INVENTORY INPUTS
+    void APlayerCharacter::Input_SelectNext() { if (InventoryComponent) { InventoryComponent->SelectNext(); } }
+    void APlayerCharacter::Input_SelectPrev() { if (InventoryComponent) { InventoryComponent->SelectPrevious(); } }
+    void APlayerCharacter::Input_UseItem() { if (InventoryComponent) { InventoryComponent->UseSelected(); } }
+    void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
+#pragma endregion
+
+#pragma region "INTERACTION INPUT"
+    // INTERACTION INPUT
+    void APlayerCharacter::Input_Interact()
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
+        if (!InteractorComponent)
+        {
+            UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
+            return;
+        }
+        InteractorComponent->TryInteract();
     }
 #pragma endregion
 
-#pragma region "GLIDER HANDLERS"
-    void APlayerCharacter::OnGlideStart()
-    {
-        if (StateComponent)
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Gliding);
-    }
+#pragma region "STATE LOGS"
 
-    void APlayerCharacter::OnGlideStop()
-    {
-        if (StateComponent)
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
-    }
+void APlayerCharacter::LogMovementStateChanged(FGameplayTag Previous, FGameplayTag New)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] MovementState changed: %s -> %s"),
+           *GetName(), *Previous.ToString(), *New.ToString());
+}
 
-    void APlayerCharacter::OnDiveStart()
-    {
-        if (StateComponent)
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Diving);
-    }
+void APlayerCharacter::LogCombatStateChanged(FGameplayTag Previous, FGameplayTag New)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] CombatState changed: %s -> %s"),
+           *GetName(), *Previous.ToString(), *New.ToString());
+}
 
-    void APlayerCharacter::OnDiveStop()
+void APlayerCharacter::LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] LifeState changed: %s -> %s"),
+           *GetName(), *Previous.ToString(), *New.ToString());
+}
+
+void APlayerCharacter::LogHealthChanged(float NewHealth, float MaxHealth)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] Health changed: %f / %f"), *GetName(), NewHealth, MaxHealth);
+}
+
+void APlayerCharacter::LogDeath()
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] Player DIED!"), *GetName());
+    if (StateComponent)
     {
-        if (StateComponent)
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
+        StateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
     }
+}
+
 #pragma endregion
