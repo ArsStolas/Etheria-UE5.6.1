@@ -2,9 +2,8 @@
  * Etheria's End Project, 2025
  * Created by: Zhailendra
  * Last Updated by: 0nnen
- * Class: APlayerCharacter - Header
+ * Class: PlayerCharacter - Header
  */
-
 #pragma once
 
 #include "CoreMinimal.h"

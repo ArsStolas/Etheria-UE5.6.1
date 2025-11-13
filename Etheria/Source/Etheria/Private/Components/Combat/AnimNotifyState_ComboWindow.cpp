@@ -1,8 +1,8 @@
 /**
-* Etheria's End Project, 2025
+ * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotifyState_ComboWindow" - Source
+ * Class: "AnimNotifyState_ComboWindow" - Source
  */
 #include "Components/Combat/AnimNotifyState_ComboWindow.h"
 #include "Components/Combat/CombatComponent.h"

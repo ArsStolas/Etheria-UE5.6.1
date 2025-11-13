@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotify_ApplyCombatImpulse" - Source
+ * Class: "AnimNotify_ApplyCombatImpulse" - Source
  */
 #include "Components/Combat/AnimNotify_ApplyCombatImpulse.h"
 #include "Components/Combat/CombatComponent.h"

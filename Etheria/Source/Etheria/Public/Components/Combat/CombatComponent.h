@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UCombatComponent" - Header
+ * Class: "CombatComponent" - Header
  */
 #pragma once
 
@@ -15,7 +15,7 @@ class ULockTargetComponent;
 class USkeletalMeshComponent;
 class UMaterialInterface;
 class UDecalComponent;
-class UEEWeaponData;
+class UWeaponData;
 class AActor;
 
 /* Basic enums */
@@ -148,10 +148,10 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void ClearAllComboCooldowns();
 
     // Weapon data hot-swap
-    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UEEWeaponData* InData);
+    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UWeaponData* InData);
     UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void ApplyWeaponData();
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UEEWeaponData* WeaponData = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UWeaponData* WeaponData = nullptr;
 
     // Combo buffer timeout (editor tweak)
     UPROPERTY(EditAnywhere, Category="Combat|Combo", meta=(ClampMin="0.0")) float MaxComboBufferTime = 1.0f; // seconds
