@@ -1,9 +1,10 @@
 /**
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
- * Last Updated by: "0nnen"
+ * Last Updated by: "Zhailendra"
  * Class: "UCombatComponent" - Source
  */
+
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTargetComponent.h"
 #include "Data/Weapons/EEWeaponData.h"
@@ -19,6 +20,8 @@
 #include "DrawDebugHelpers.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
+#include "Characters/BaseCharacter.h"
+#include "Components/Characters/CharacterStateComponent.h"
 
 UCombatComponent::UCombatComponent()
 {
@@ -57,13 +60,14 @@ void UCombatComponent::BeginPlay()
 bool UCombatComponent::ResolveOwnerRefs()
 {
     AActor* O = GetOwner();
-    OwnerCharacter = Cast<ACharacter>(O);
+    OwnerCharacter = Cast<ABaseCharacter>(O);
 
     // Prefer the character mesh if available
     if (OwnerCharacter.IsValid())
     {
         OwnerMesh = OwnerCharacter->GetMesh();
         MoveComp  = OwnerCharacter->GetCharacterMovement();
+        StateComp = OwnerCharacter->GetStateComponent();
     }
     else if (O)
     {
@@ -242,6 +246,12 @@ bool UCombatComponent::TryAttackById(FName AttackId)
 
             OwnerCharacter->PlayAnimMontage(Spec->Montage, 1.f, Spec->MontageSection);
         }
+
+        if (StateComp.IsValid())
+        {
+            StateComp->SetCombatState(EtheriaTags::State_Combat_Attacking_Charging);
+        }
+        
         return true;
     }
 
@@ -322,6 +332,11 @@ void UCombatComponent::ExecuteAttack(const FEEAttackSpec& Spec, float DamageScal
     OnCue.Broadcast(FName("AttackStart"), EEECombatCuePhase::Start);
     OnAttackStarted.Broadcast(Spec.AttackId);
 
+    if (StateComp.IsValid())
+    {
+        StateComp->SetCombatState(EtheriaTags::State_Combat_Attacking);
+    }
+
     if (OwnerCharacter.IsValid() && Spec.Montage)
     {
         PlayOrJumpMontageSection(Spec);
@@ -361,6 +376,11 @@ void UCombatComponent::CloseCurrentAttack()
     OnAttackEnded.Broadcast(CurrentAttackId);
     OnCue.Broadcast(FName("AttackEnd"), EEECombatCuePhase::End);
 
+    if (StateComp.IsValid())
+    {
+        StateComp->ClearCombatState();
+    }
+    
     LastAttackId = CurrentAttackId;
     CurrentAttackId = NAME_None;
 
@@ -798,6 +818,11 @@ void UCombatComponent::SetParryHeld(bool bHeld)
     if (bParryHeld == bHeld) return;
     bParryHeld = bHeld;
 
+    if (StateComp.IsValid())
+    {
+        StateComp->SetCombatState(bHeld ? EtheriaTags::State_Combat_Blocking : EtheriaTags::State_Combat);
+    }
+
     if (MoveComp.IsValid() && BaseWalkSpeed > 0.f)
     {
         const float Mult = bParryHeld ? ParryMoveSpeedMultiplier : 1.f;
@@ -824,6 +849,11 @@ void UCombatComponent::StartDodgeIFrames(float DurationOverride)
 
     const float Duration = (DurationOverride > 0.f) ? DurationOverride : DodgeIFrameDuration;
     OnCue.Broadcast(FName("DodgeIFrames"), EEECombatCuePhase::Start);
+
+    if (StateComp.IsValid())
+    {
+        StateComp->SetCombatState(EtheriaTags::State_Combat_Dodging);
+    }
 
     if (UWorld* W = GetWorld())
     {

@@ -11,6 +11,9 @@
 #include "Components/ActorComponent.h"
 #include "HealthComponent.generated.h"
 
+class ABaseCharacter;
+class UCharacterStateComponent;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHealthChangedSignature, float, NewHealth, float, MaxHealth);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeathSignature);
 
@@ -45,6 +48,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Health")
 	FOnDeathSignature OnDeath;
+
+	ABaseCharacter* OwnerCharacter = nullptr;
+	UCharacterStateComponent* OwnerStateComponent = nullptr;
 
 protected:
 	virtual void BeginPlay() override;

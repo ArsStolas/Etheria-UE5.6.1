@@ -17,7 +17,9 @@ UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Airborne_Jumping, "State.Move
 // === Combat ===
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat, "State.Combat");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat_Attacking, "State.Combat.Attacking");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat_Attacking_Charging, "State.Combat.Attacking.Charging");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat_Blocking, "State.Combat.Blocking");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat_Dodging, "State.Combat.Dodging");
 
 // === Life ===
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Life, "State.Life");

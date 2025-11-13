@@ -25,7 +25,9 @@ namespace EtheriaTags
 	// === Combat ===
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat_Attacking);
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat_Attacking_Charging);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat_Blocking);
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat_Dodging);
 
 	// === Life ===
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Life);

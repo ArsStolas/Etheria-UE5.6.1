@@ -6,6 +6,8 @@
 */
 
 #include "Components/Characters/HealthComponent.h"
+#include "Characters/BaseCharacter.h"
+#include "Components/Characters/CharacterStateComponent.h"
 
 UHealthComponent::UHealthComponent()
 {
@@ -20,7 +22,9 @@ void UHealthComponent::BeginPlay()
 
 	if (AActor* Owner = GetOwner())
 	{
-		Owner->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
+		OwnerCharacter = Cast<ABaseCharacter>(Owner);
+		OwnerCharacter->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
+		OwnerStateComponent = OwnerCharacter->GetStateComponent();
 	}
 }
 
@@ -44,18 +48,32 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
+	if (OwnerStateComponent)
+	{
+		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_TakingDamage);
+	}
+
 	if (IsDead())
 	{
+		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
 		OnDeath.Broadcast();
 	}
 }
 
 void UHealthComponent::Heal(const float HealAmount)
 {
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green,
+		FString::Printf(TEXT("Healing for %f"), HealAmount));
+	
 	if (HealAmount <= 0.f || IsDead()) return;
 
 	Health = FMath::Clamp(Health + HealAmount, 0.f, MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
+
+	if (OwnerStateComponent && !IsDead())
+	{
+		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_Healing);
+	}
 }
 
 float UHealthComponent::GetHealth() const
