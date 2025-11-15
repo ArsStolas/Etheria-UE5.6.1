@@ -6,6 +6,8 @@
 */
 
 #include "Components/Characters/HealthComponent.h"
+#include "Characters/BaseCharacter.h"
+#include "Components/Characters/CharacterStateComponent.h"
 
 UHealthComponent::UHealthComponent()
 {
@@ -20,7 +22,9 @@ void UHealthComponent::BeginPlay()
 
 	if (AActor* Owner = GetOwner())
 	{
-		Owner->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
+		OwnerCharacter = Cast<ABaseCharacter>(Owner);
+		OwnerCharacter->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
+		OwnerStateComponent = OwnerCharacter->GetStateComponent();
 	}
 }
 
@@ -42,27 +46,54 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 	if (DamageAmount <= 0.f || IsDead()) return;
 
 	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
-	
 	OnHealthChanged.Broadcast(Health, MaxHealth);
+
+	if (!OwnerStateComponent.IsValid())
+		return;
 
 	if (IsDead())
 	{
+		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
 		OnDeath.Broadcast();
-
-		if (AActor* Owner = GetOwner())
-		{
-			
-		}
+	}
+	else
+	{
+		SetTemporaryLifeState(EtheriaTags::State_Life_TakingDamage, DamageStateDuration);
 	}
 }
 
-
-void UHealthComponent::Heal(const float HealAmount)
+void UHealthComponent::Heal(float HealAmount)
 {
 	if (HealAmount <= 0.f || IsDead()) return;
 
 	Health = FMath::Clamp(Health + HealAmount, 0.f, MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
+
+	if (OwnerStateComponent.IsValid())
+	{
+		SetTemporaryLifeState(EtheriaTags::State_Life_Healing, HealStateDuration);
+	}
+}
+
+void UHealthComponent::SetTemporaryLifeState(FGameplayTag TempState, float Duration)
+{
+	if (!OwnerStateComponent.IsValid()) return;
+
+	OwnerStateComponent->SetLifeState(TempState);
+
+	FTimerHandle ResetTimer;
+	GetWorld()->GetTimerManager().SetTimer(
+		ResetTimer,
+		[this]()
+		{
+			if (OwnerStateComponent.IsValid() && !IsDead())
+			{
+				OwnerStateComponent->ClearLifeState();
+			}
+		},
+		Duration,
+		false
+	);
 }
 
 float UHealthComponent::GetHealth() const

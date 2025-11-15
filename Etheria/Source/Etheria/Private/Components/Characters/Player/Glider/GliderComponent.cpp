@@ -7,8 +7,9 @@
 
 #include "Components/Characters/Player/Glider/GliderComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
+#include "Core/System/EtheriaGameplayTags.h"
+#include "Components/Characters/CharacterStateComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "Engine/Engine.h"
 
 UGliderComponent::UGliderComponent()
@@ -33,20 +34,27 @@ void UGliderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 	case EGliderMode::Gliding:
 		HandleDescent(DeltaTime);
 		if (OwnerCharacter->GetCharacterMovement()->IsWalking())
-			StopGliding();
+			StopGliding(false);
 		break;
 
 	case EGliderMode::Diving:
 		HandleDive(DeltaTime);
-		// En mode Flying, IsWalking() ne fonctionne pas, donc on vérifie avec un raycast
 		if (IsGrounded())
 		{
-			StopDiving();
-			// Forcer le retour au sol en mode Walking
-			OwnerCharacter->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+			StopDiving(false, false);
+
+			if (OwnerCharacter && OwnerCharacter->GetStateComponent())
+			{
+				int Hor = OwnerCharacter->GetHorizontalAxis();
+				int Ver = OwnerCharacter->GetVerticalAxis();
+
+				if (Hor != 0 || Ver != 0)
+					OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Grounded_Walking);
+				else
+					OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+			}
 		}
 		break;
-
 	default:
 		break;
 	}
@@ -62,10 +70,10 @@ void UGliderComponent::ToggleGliding()
             StartGliding();
             break;
         case EGliderMode::Gliding:
-            StopGliding();
+            StopGliding(true);
             break;
         case EGliderMode::Diving:
-            StopDiving(true);
+            StopDiving(true, true);
             break;
     }
 }
@@ -81,7 +89,7 @@ void UGliderComponent::ToggleDiving()
 		break;
 
 	case EGliderMode::Diving:
-		StopDiving(false);
+		StopDiving(false, true);
 		break;
 
 	default:
@@ -102,7 +110,7 @@ void UGliderComponent::StartGliding()
 	RecordOriginalSettings();
 
 	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
-	MoveComp->bOrientRotationToMovement = false; // Désactiver la rotation automatique
+	MoveComp->bOrientRotationToMovement = false;
 	MoveComp->RotationRate = FRotator(0.f, 250.f, 0.f);
 	MoveComp->GravityScale = 0.0f;
 	MoveComp->AirControl = 0.9f;
@@ -110,9 +118,11 @@ void UGliderComponent::StartGliding()
 	MoveComp->MaxAcceleration = 1024.f;
 	MoveComp->MaxWalkSpeed = 640.f;
 	MoveComp->bUseControllerDesiredRotation = true;
+
+	OnGlideStart.Broadcast();
 }
 
-void UGliderComponent::StopGliding()
+void UGliderComponent::StopGliding(bool bManualStop)
 {
 	if (!OwnerCharacter) return;
 
@@ -122,6 +132,10 @@ void UGliderComponent::StopGliding()
 		OwnerCharacter->GetGliderVisual()->SetVisibility(false);
 
 	ApplyOriginalSettings();
+	if (bManualStop)
+	{
+		OnGlideStop.Broadcast();
+	}
 }
 
 void UGliderComponent::StartDiving()
@@ -143,9 +157,10 @@ void UGliderComponent::StartDiving()
 	MoveComp->BrakingDecelerationFalling = 0.f;
 
 	MoveComp->SetMovementMode(MOVE_Flying);
+	OnDiveStart.Broadcast();
 }
 
-void UGliderComponent::StopDiving(bool bGoToGlide)
+void UGliderComponent::StopDiving(bool bGoToGlide, bool bManualStop)
 {
 	if (!OwnerCharacter || CurrentMode != EGliderMode::Diving) return;
 
@@ -163,7 +178,6 @@ void UGliderComponent::StopDiving(bool bGoToGlide)
 
 	if (bGoToGlide)
 	{
-		// Passer en Gliding proprement
 		StartGliding();
 	}
 	else
@@ -183,6 +197,10 @@ void UGliderComponent::StopDiving(bool bGoToGlide)
 	}
 
 	CurrentDiveSpeed = MinDiveSpeed;
+	if (bManualStop && !bGoToGlide)
+	{
+		OnDiveStop.Broadcast();
+	}
 }
 
 bool UGliderComponent::CanStartGliding() const
@@ -209,7 +227,7 @@ bool UGliderComponent::IsGrounded() const
 
 	FHitResult Hit;
 	FVector Start = OwnerCharacter->GetActorLocation();
-	FVector End = Start - FVector(0.f, 0.f, 150.f);
+	FVector End = Start - FVector(0.f, 0.f, 100.f);
 
 	FCollisionQueryParams QueryParams;
 	QueryParams.AddIgnoredActor(OwnerCharacter);
@@ -301,31 +319,29 @@ void UGliderComponent::HandleDive(float DeltaTime)
 
     UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
 
-    // Lire les axes du PlayerCharacter
+    // Lire les axes
     const int Hor = OwnerCharacter->GetHorizontalAxis();
     const int Ver = OwnerCharacter->GetVerticalAxis();
 
-    // === PITCH (avant/arrière) ===
+    // === PITCH / ROLL ===
     float TargetPitch = FMath::Clamp(-Ver * MaxPitchAngle, -MaxPitchAngle, MaxPitchAngle);
+    float TargetRoll  = FMath::Clamp(Hor * MaxRollAngle, -MaxRollAngle, MaxRollAngle);
 
-    // === ROLL (gauche/droite) ===
-    float TargetRoll = FMath::Clamp(Hor * MaxRollAngle, -MaxRollAngle, MaxRollAngle);
-
-    // === Interpolation de la rotation ===
+    // Interpolation de la rotation
     FRotator CurrentRot = OwnerCharacter->GetActorRotation();
-    FRotator TargetRot = FRotator(TargetPitch, CurrentRot.Yaw, TargetRoll);
-    FRotator NewRot = FMath::RInterpTo(CurrentRot, TargetRot, DeltaTime, 3.f);
+    FRotator TargetRot  = FRotator(TargetPitch, CurrentRot.Yaw, TargetRoll);
+    FRotator NewRot     = FMath::RInterpTo(CurrentRot, TargetRot, DeltaTime, 3.f);
     OwnerCharacter->SetActorRotation(NewRot);
 
-    // === Gestion de la vitesse ===
+    // === Gestion de la vitesse scalaire ===
     float PitchFactor = NewRot.Pitch / MaxPitchAngle;
 
-    if (PitchFactor < -0.1f) // pique vers le bas → accélère fort
-        CurrentDiveSpeed += DiveAcceleration * 1.2f * FMath::Abs(PitchFactor) * DeltaTime;
-    else if (PitchFactor > 0.1f) // monte → perd un peu de vitesse
-        CurrentDiveSpeed -= DiveDeceleration * 0.8f * PitchFactor * DeltaTime;
-    else // vol horizontal/stable
-        CurrentDiveSpeed -= DiveDeceleration * 0.1f * DeltaTime;
+    if (PitchFactor < -0.1f) // pique → accélère
+        CurrentDiveSpeed += DiveAcceleration * (1.0f + 0.2f * FMath::Abs(PitchFactor)) * DeltaTime;
+    else if (PitchFactor > 0.1f) // cabré → perd de la vitesse
+        CurrentDiveSpeed -= DiveDeceleration * (0.6f + 0.4f * PitchFactor) * DeltaTime;
+    else // à plat → légère perte
+        CurrentDiveSpeed -= DiveDeceleration * 0.15f * DeltaTime;
 
     CurrentDiveSpeed = FMath::Clamp(CurrentDiveSpeed, MinDiveSpeed, MaxDiveSpeed * 1.3f);
 
@@ -333,47 +349,67 @@ void UGliderComponent::HandleDive(float DeltaTime)
     float RollFactor = NewRot.Roll / MaxRollAngle;
     if (FMath::Abs(RollFactor) > 0.1f)
     {
-        float TurnRate = RollFactor * TurnRateDive;
-        float SpeedBonus = FMath::Clamp(CurrentDiveSpeed / MaxDiveSpeed, 0.8f, 2.0f);
+        float SpeedScale = FMath::Clamp(CurrentDiveSpeed / MaxDiveSpeed, 0.6f, 2.0f);
+        float TurnRate   = RollFactor * TurnRateDive * SpeedScale;
 
-        FRotator NewYawRot = OwnerCharacter->GetActorRotation();
-        NewYawRot.Yaw += TurnRate * SpeedBonus * DeltaTime;
-        OwnerCharacter->SetActorRotation(FRotator(NewRot.Pitch, NewYawRot.Yaw, NewRot.Roll));
+        FRotator YawRot = OwnerCharacter->GetActorRotation();
+        YawRot.Yaw += TurnRate * DeltaTime;
+        OwnerCharacter->SetActorRotation(FRotator(NewRot.Pitch, YawRot.Yaw, NewRot.Roll));
+        NewRot = OwnerCharacter->GetActorRotation();
     }
 
-    // === Vélocité ===
-    FRotator HorizontalRot(0.f, OwnerCharacter->GetActorRotation().Yaw, 0.f);
-    FVector HorizontalDir = FRotationMatrix(HorizontalRot).GetUnitAxis(EAxis::X);
-    FVector TargetVelocity = HorizontalDir * CurrentDiveSpeed;
+    // === Direction horizontale ===
+    FRotator HorizontalRot(0.f, NewRot.Yaw, 0.f);
+    FVector ForwardDir = FRotationMatrix(HorizontalRot).GetUnitAxis(EAxis::X);
 
-    float VerticalSpeed = PitchFactor * CurrentDiveSpeed * LiftFactor;
-    TargetVelocity.Z = VerticalSpeed + DiveGravity;
+    FVector Velocity = MoveComp->Velocity;
+    Velocity.X = ForwardDir.X * CurrentDiveSpeed;
+    Velocity.Y = ForwardDir.Y * CurrentDiveSpeed;
 
-    MoveComp->Velocity = FMath::VInterpTo(MoveComp->Velocity, TargetVelocity, DeltaTime, 2.5f);
+    // === Gravité arcade + portance ===
+    const float GravityStrength = 400.f;        // gravité réduite pour arcade
+    const float StallSpeed      = MaxDiveSpeed * 0.4f; // seuil de décrochage
+    const float MaxLiftCoeff    = LiftFactor * 1.8f;   // portance boostée
+
+    float LiftCoeff = 0.f;
+    if (CurrentDiveSpeed > StallSpeed)
+    {
+        float SpeedRatio = (CurrentDiveSpeed - StallSpeed) / (MaxDiveSpeed - StallSpeed);
+        SpeedRatio = FMath::Clamp(SpeedRatio, 0.f, 1.f);
+        LiftCoeff = MaxLiftCoeff * SpeedRatio;
+    }
+
+    float LiftAccelZ = 0.f;
+    if (PitchFactor > 0.f && LiftCoeff > 0.f)
+    {
+        float PitchGain = FMath::Clamp(PitchFactor, 0.f, 1.f);
+        LiftAccelZ = LiftCoeff * PitchGain * (CurrentDiveSpeed * 0.5f);
+    }
+
+    // Accélération verticale finale
+    float AccelZ = LiftAccelZ - GravityStrength;
+    Velocity.Z += AccelZ * DeltaTime;
+
+    // Clamp pour éviter les abus
+    Velocity.Z = FMath::Clamp(Velocity.Z, -2400.f, 900.f);
+
+    MoveComp->Velocity = Velocity;
 
     // === Debug ===
     if (GEngine)
     {
-        float CurrentVerticalSpeed = MoveComp->Velocity.Z;
-        FString VerticalState = (CurrentVerticalSpeed > 50.f) ? TEXT("↑ MONTÉE")
-                               : (CurrentVerticalSpeed < -50.f) ? TEXT("↓ DESCENTE")
-                               : TEXT("→ STABLE");
-
         FString Msg = FString::Printf(
-            TEXT("Alt: %.0f | VZ: %.0f %s | Speed: %.0f (%.0f%%) | P: %.1f° R: %.1f° Y: %.1f°"),
+            TEXT("Alt: %.0f | VZ: %.0f | Speed: %.0f | Stall: %.0f | LiftCoeff: %.2f | Pitch: %.1f°"),
             OwnerCharacter->GetActorLocation().Z,
-            CurrentVerticalSpeed,
-            *VerticalState,
+            Velocity.Z,
             CurrentDiveSpeed,
-            (CurrentDiveSpeed / (MaxDiveSpeed*1.3f)) * 100.f,
-            NewRot.Pitch,
-            NewRot.Roll,
-            OwnerCharacter->GetActorRotation().Yaw
+            StallSpeed,
+            LiftCoeff,
+            NewRot.Pitch
         );
 
-        FColor DebugColor = FColor::White;
-        if (CurrentVerticalSpeed > 50.f) DebugColor = FColor::Green;
-        else if (CurrentVerticalSpeed < -50.f) DebugColor = FColor::Red;
+        FColor DebugColor = (Velocity.Z > 50.f) ? FColor::Green :
+                            (Velocity.Z < -50.f) ? FColor::Red : FColor::White;
 
         GEngine->AddOnScreenDebugMessage(1, 0.f, DebugColor, Msg);
     }

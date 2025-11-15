@@ -1,14 +1,16 @@
 /**
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
- * Last Updated by: "0nnen"
- * Class: "CombatComponent" - Header
+ * Last Updated by: "Zhailendra"
+ * Class: "UCombatComponent" - Header
  */
+
 #pragma once
 
 #include "Components/ActorComponent.h"
 #include "CombatComponent.generated.h"
 
+class ABaseCharacter;
 class UCharacterMovementComponent;
 class UAnimMontage;
 class ULockTargetComponent;
@@ -17,6 +19,7 @@ class UMaterialInterface;
 class UDecalComponent;
 class UWeaponData;
 class AActor;
+class UCharacterStateComponent;
 
 /* Basic enums */
 UENUM(BlueprintType) enum class EEEStance : uint8 { Both=0, GroundOnly=1, AirOnly=2 };
@@ -324,10 +327,11 @@ private:
 #pragma endregion
 
 #pragma region "Cached"
-    TWeakObjectPtr<class ACharacter> OwnerCharacter;
+    TWeakObjectPtr<ABaseCharacter> OwnerCharacter;
     TWeakObjectPtr<USkeletalMeshComponent> OwnerMesh;
     TWeakObjectPtr<UCharacterMovementComponent> MoveComp;
     TWeakObjectPtr<ULockTargetComponent> LockComp;
+    TWeakObjectPtr<UCharacterStateComponent> StateComp;
     float BaseWalkSpeed = -1.f;
     float BaseGlobalAnimRate = 1.f;
 #pragma endregion
