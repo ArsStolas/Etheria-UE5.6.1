@@ -7,7 +7,7 @@
 
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTargetComponent.h"
-#include "Data/Weapons/EEWeaponData.h"
+#include "Data/Weapons/WeaponData.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/DecalComponent.h"
 #include "GameFramework/Character.h"
@@ -85,7 +85,7 @@ bool UCombatComponent::ResolveOwnerRefs()
     void UCombatComponent::SetAttacks(const TArray<FEEAttackSpec>& InAttacks) { Attacks = InAttacks; }
     void UCombatComponent::SetCombos(const TArray<FEEComboSpec>& InCombos) { Combos = InCombos; }
 
-    void UCombatComponent::SetWeaponData(UEEWeaponData* InData)
+    void UCombatComponent::SetWeaponData(UWeaponData* InData)
     {
         WeaponData = InData;
         ApplyWeaponData();

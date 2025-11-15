@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotifyState_InputLock" - Header
+ * Class: "AnimNotifyState_InputLock" - Header
  */
 #pragma once
 

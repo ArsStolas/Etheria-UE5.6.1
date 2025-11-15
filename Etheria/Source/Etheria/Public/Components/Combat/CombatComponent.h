@@ -4,6 +4,7 @@
  * Last Updated by: "Zhailendra"
  * Class: "UCombatComponent" - Header
  */
+
 #pragma once
 
 #include "Components/ActorComponent.h"
@@ -16,7 +17,7 @@ class ULockTargetComponent;
 class USkeletalMeshComponent;
 class UMaterialInterface;
 class UDecalComponent;
-class UEEWeaponData;
+class UWeaponData;
 class AActor;
 class UCharacterStateComponent;
 
@@ -150,10 +151,10 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void ClearAllComboCooldowns();
 
     // Weapon data hot-swap
-    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UEEWeaponData* InData);
+    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UWeaponData* InData);
     UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void ApplyWeaponData();
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UEEWeaponData* WeaponData = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UWeaponData* WeaponData = nullptr;
 
     // Combo buffer timeout (editor tweak)
     UPROPERTY(EditAnywhere, Category="Combat|Combo", meta=(ClampMin="0.0")) float MaxComboBufferTime = 1.0f; // seconds
