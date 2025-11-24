@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: BaseCharacter - Header
 */
 
@@ -13,6 +13,7 @@
 
 class UHealthComponent;
 class UCombatComponent;
+class UCharacterStateComponent;
 
 UCLASS()
 class ETHERIA_API ABaseCharacter : public ACharacter
@@ -24,24 +25,22 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Combat")
 	UCombatComponent* GetCombatComponent() const { return CombatComponent; }
-	
+
+	UFUNCTION(BlueprintPure, Category="States")
+	UCharacterStateComponent* GetStateComponent() const { return StateComponent; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
 	UHealthComponent* HealthComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual")
-	USkeletalMeshComponent* CharacterMesh;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
+	UCharacterStateComponent* StateComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta=(AllowPrivateAccess="true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components", meta=(AllowPrivateAccess="true"))
 	UCombatComponent* CombatComponent;
 
 private:
-	UFUNCTION()
-	void HandleDeath();
-	
-	UFUNCTION()
-	void HandleHealthChanged(const float NewHealth, const float MaxHealth);
 };

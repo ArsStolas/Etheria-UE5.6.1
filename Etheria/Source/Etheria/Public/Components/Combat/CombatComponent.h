@@ -1,22 +1,25 @@
 /**
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
- * Last Updated by: "0nnen"
+ * Last Updated by: "Zhailendra"
  * Class: "UCombatComponent" - Header
  */
+
 #pragma once
 
 #include "Components/ActorComponent.h"
 #include "CombatComponent.generated.h"
 
+class ABaseCharacter;
 class UCharacterMovementComponent;
 class UAnimMontage;
 class ULockTargetComponent;
 class USkeletalMeshComponent;
 class UMaterialInterface;
 class UDecalComponent;
-class UEEWeaponData;
+class UWeaponData;
 class AActor;
+class UCharacterStateComponent;
 
 /* Basic enums */
 UENUM(BlueprintType) enum class EEEStance : uint8 { Both=0, GroundOnly=1, AirOnly=2 };
@@ -148,10 +151,10 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void ClearAllComboCooldowns();
 
     // Weapon data hot-swap
-    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UEEWeaponData* InData);
+    UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UWeaponData* InData);
     UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void ApplyWeaponData();
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UEEWeaponData* WeaponData = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UWeaponData* WeaponData = nullptr;
 
     // Combo buffer timeout (editor tweak)
     UPROPERTY(EditAnywhere, Category="Combat|Combo", meta=(ClampMin="0.0")) float MaxComboBufferTime = 1.0f; // seconds
@@ -324,10 +327,11 @@ private:
 #pragma endregion
 
 #pragma region "Cached"
-    TWeakObjectPtr<class ACharacter> OwnerCharacter;
+    TWeakObjectPtr<ABaseCharacter> OwnerCharacter;
     TWeakObjectPtr<USkeletalMeshComponent> OwnerMesh;
     TWeakObjectPtr<UCharacterMovementComponent> MoveComp;
     TWeakObjectPtr<ULockTargetComponent> LockComp;
+    TWeakObjectPtr<UCharacterStateComponent> StateComp;
     float BaseWalkSpeed = -1.f;
     float BaseGlobalAnimRate = 1.f;
 #pragma endregion

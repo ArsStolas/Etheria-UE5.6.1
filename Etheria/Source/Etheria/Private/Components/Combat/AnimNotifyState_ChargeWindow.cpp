@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotifyState_ChargeWindow" - Source
+ * Class: "AnimNotifyState_ChargeWindow" - Source
  */
 #include "Components/Combat/AnimNotifyState_ChargeWindow.h"
 #include "Components/Combat/CombatComponent.h"

@@ -1,8 +1,8 @@
 /**
-* Etheria's End Project, 2025
+ * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotifyState_InputLock" - Source
+ * Class: "AnimNotifyState_InputLock" - Source
  */
 #include "Components/Combat/AnimNotifyState_InputLock.h"
 #include "Components/Combat/CombatComponent.h"

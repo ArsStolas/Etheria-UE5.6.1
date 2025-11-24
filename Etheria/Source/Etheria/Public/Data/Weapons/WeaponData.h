@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UEEWeaponData" - Header
+ * Class: "WeaponData" - Header
  */
 #pragma once
 
@@ -10,16 +10,14 @@
 // Forward include to reuse combat structs in the data asset
 // We include the header here because this data asset only stores data types declared there.
 #include "Components/Combat/CombatComponent.h"
-#include "EEWeaponData.generated.h"
-
-
+#include "WeaponData.generated.h"
 
 /**
  * Data asset that defines the full attack and combo configuration for a weapon.
  * This allows swapping weapon behavior without touching the component.
  */
 UCLASS(BlueprintType)
-class ETHERIA_API UEEWeaponData : public UDataAsset
+class ETHERIA_API UWeaponData : public UDataAsset
 {
     GENERATED_BODY()
 public:

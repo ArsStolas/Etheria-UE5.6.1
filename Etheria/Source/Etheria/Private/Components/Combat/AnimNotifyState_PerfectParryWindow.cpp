@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by:  "0nnen"
  * Last Updated by: "0nnen"
- * Class: "UAnimNotifyState_PerfectParryWindow" - Source
+ * Class: "AnimNotifyState_PerfectParryWindow" - Source
  */
 #include "Components/Combat/AnimNotifyState_PerfectParryWindow.h"
 #include "Components/Combat/CombatComponent.h"
