@@ -21,18 +21,19 @@ class UWeaponData;
 class AActor;
 class UCharacterStateComponent;
 
+#pragma region STRUCT ET ENUM
 /* Basic enums */
-UENUM(BlueprintType) enum class EEEStance : uint8 { Both=0, GroundOnly=1, AirOnly=2 };
-UENUM(BlueprintType) enum class EEEAttackType : uint8 { Melee=0, Ranged=1, AoE=2 };
-UENUM(BlueprintType) enum class EEETraceShape : uint8 { Line=0, Sphere=1, Capsule=2 };
-UENUM(BlueprintType) enum class EEEPerfectKind : uint8 { None=0, Parry=1, Dodge=2 };
-UENUM(BlueprintType) enum class EEECombatCuePhase : uint8 { Start=0, Impact=1, End=2 };
-UENUM(BlueprintType) enum class EEEChargeShape : uint8 { None=0, Radial=1, FrontalRect=2 };
-UENUM(BlueprintType) enum class EEERangedMode : uint8 { None=0, Line=1 };
+UENUM(BlueprintType) enum class EStance : uint8 { Both=0, GroundOnly=1, AirOnly=2 };
+UENUM(BlueprintType) enum class EAttackType : uint8 { Melee=0, Ranged=1, AoE=2 };
+UENUM(BlueprintType) enum class ETraceShape : uint8 { Line=0, Sphere=1, Capsule=2 };
+UENUM(BlueprintType) enum class EPerfectKind : uint8 { None=0, Parry=1, Dodge=2 };
+UENUM(BlueprintType) enum class ECombatCuePhase : uint8 { Start=0, Impact=1, End=2 };
+UENUM(BlueprintType) enum class EChargeShape : uint8 { None=0, Radial=1, FrontalRect=2 };
+UENUM(BlueprintType) enum class ERangedMode : uint8 { None=0, Line=1 };
 
 /* Charge structs */
 USTRUCT(BlueprintType)
-struct FEEChargeLevel
+struct FChargeLevelConfig
 {
     GENERATED_BODY()
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") float Time = 0.5f;
@@ -41,46 +42,46 @@ struct FEEChargeLevel
 };
 
 USTRUCT(BlueprintType)
-struct FEEChargeSpec
+struct FChargeSpecConfig
 {
     GENERATED_BODY()
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") bool bChargeable = false;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") EEEChargeShape Shape = EEEChargeShape::Radial;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") EChargeShape Shape = EChargeShape::Radial;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") bool bShowTelegraph = true;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") float MaxRadius = 400.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") float MaxLength = 600.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") float MaxWidth = 300.f;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") TArray<FEEChargeLevel> Levels;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") TArray<FChargeLevelConfig> Levels;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") TArray<UAnimMontage*> ReleaseMontages;
 };
 
 /* Attack spec */
 USTRUCT(BlueprintType)
-struct FEEAttackSpec
+struct FAttackSpecConfig
 {
     GENERATED_BODY()
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") FName Group = NAME_None; // "Light", "Heavy"
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") EEEStance Stance = EEEStance::GroundOnly;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") EStance Stance = EStance::GroundOnly;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") FName AttackId = NAME_None;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") EEEAttackType AttackType = EEEAttackType::Melee;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Attack") EAttackType AttackType = EAttackType::Melee;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Damage") float BaseDamage = 25.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Damage") float CritChance = 0.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Damage") float CritMultiplier = 1.5f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float HitStartDelay = 0.0f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float HitWindow = 0.0f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0")) float Cooldown = 0.0f;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") EEETraceShape TraceShape = EEETraceShape::Sphere;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") ETraceShape TraceShape = ETraceShape::Sphere;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") float Range = 220.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") float Radius = 35.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Melee Trace") float CapsuleHalfHeight = 45.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Animation") UAnimMontage* Montage = nullptr;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Animation") FName MontageSection = NAME_None;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") FEEChargeSpec Charge;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Charge") FChargeSpecConfig Charge;
 };
 
 /* Combo spec */
 USTRUCT(BlueprintType)
-struct FEEComboStep
+struct FComboStepConfig
 {
     GENERATED_BODY()
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo") FName AttackId = NAME_None;
@@ -90,21 +91,22 @@ struct FEEComboStep
 };
 
 USTRUCT(BlueprintType)
-struct FEEComboSpec
+struct FComboSpecConfig
 {
     GENERATED_BODY()
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo") FName ComboId = NAME_None;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo") TArray<FEEComboStep> Steps;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo") TArray<FComboStepConfig> Steps;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo", meta=(ClampMin="0.1")) float ResetDelay = 1.0f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combo", meta=(ClampMin="0.0")) float Cooldown = 0.0f;
 };
+#pragma endregion
 
 /* Delegates */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEEOnCue, FName, CueName, EEECombatCuePhase, Phase);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEEOnCue, FName, CueName, ECombatCuePhase, Phase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEEOnAttackEvent, FName, AttackId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEEOnHitEvent, AActor*, HitActor, float, Damage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEEOnHitCritEvent, AActor*, HitActor, float, Damage);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEEOnPerfectEvent, EEEPerfectKind, PerfectKind);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEEOnPerfectEvent, EPerfectKind, PerfectKind);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API UCombatComponent : public UActorComponent
@@ -113,14 +115,24 @@ class ETHERIA_API UCombatComponent : public UActorComponent
 
 public:
     UCombatComponent();
+    
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    
+    const TArray<FAttackSpecConfig>& GetAttacks() const { return Attacks; }
+    const TArray<FComboSpecConfig>& GetCombos() const { return Combos; }
 
-    const TArray<FEEAttackSpec>& GetAttacks() const { return Attacks; }
-    const TArray<FEEComboSpec>& GetCombos() const { return Combos; }
-
-    UFUNCTION(BlueprintCallable, Category="Combat") void SetAttacks(const TArray<FEEAttackSpec>& InAttacks);
-    UFUNCTION(BlueprintCallable, Category="Combat") void SetCombos(const TArray<FEEComboSpec>& InCombos);
+    /** Returns the currently active weapon data if any. */
+    UPROPERTY() UWeaponData* CurrentWeaponData = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    FORCEINLINE UWeaponData* GetCurrentWeaponData() const { return CurrentWeaponData; }
+    
+    /** Sets a new weapon data (called by Equipment or Inventory). */
+    void SetCurrentWeaponData(UWeaponData* NewWeaponData);
+    
+    UFUNCTION(BlueprintCallable, Category="Combat") void SetAttacks(const TArray<FAttackSpecConfig>& InAttacks);
+    UFUNCTION(BlueprintCallable, Category="Combat") void SetCombos(const TArray<FComboSpecConfig>& InCombos);
     UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackPrimary();
-    UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackById(FName AttackId);
+    UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackById(FName AttackId, float ChargeLevel = 0.f);
     UFUNCTION(BlueprintCallable, Category="Combat") bool TryAttackGroup(FName GroupId); // picks ground/air variant automatically
     
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void RequestComboAdvance();
@@ -197,21 +209,49 @@ public:
     void HandleMontageEnded_RestoreAnimClass(class UAnimMontage* Montage, bool bInterrupted);
 
     // Called before any Montage_Play / JumpToSection to ensure a valid Slot
-    void PrePlayMontageSafety(const FEEAttackSpec& Spec);
+    void PrePlayMontageSafety(const FAttackSpecConfig& Spec);
 
+#pragma region RANGED COMBAT
+    
+    /** Start and stop auto fire depending on weapon type. */
+    void StartRangedFire();
+    void StopRangedFire();
+    
+#pragma endregion
+    
 protected:
     virtual void BeginPlay() override;
 
+#pragma region RANGED COMBAT
+
+    /** Timer for auto fire control. */
+    FTimerHandle AutoFireHandle;
+
+    /** Internal fire helper */
+    void PerformRangedFire();
+    
+    /** Called every frame to handle charge build-up for bow */
+    void UpdateCharge(float DeltaTime);
+
+    /** For bow charge (0–1 range) */
+    float CurrentChargeLevel = 0.f;
+
+    /** True if charging is active (for bow) */
+    bool bIsCharging = false;
+
+#pragma endregion
+
 private:
+    
 #pragma region "Internal execution"
     bool ResolveOwnerRefs();
     bool CanExecuteAttack(const FName AttackId) const;
-    void ExecuteAttack(const FEEAttackSpec& Spec, float DamageScale = 1.f, float RangeScale = 1.f);
-    void OpenWindowWithTimers(const FEEAttackSpec& Spec);
+    void ExecuteAttack(const FAttackSpecConfig& Spec, float DamageScale = 1.f, float RangeScale = 1.f);
+    void OpenWindowWithTimers(const FAttackSpecConfig& Spec);
     void CloseCurrentAttack();
-    void PerformMeleeTrace(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
-    void PerformAoE(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
-    void PerformFrontalRect(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
+    void PerformMeleeTrace(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale);
+    void PerformAoE(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale);
+    void PerformFrontalRect(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale);
 #pragma endregion
 
 #pragma region "Facing and target assist"
@@ -225,15 +265,13 @@ private:
     float ComputeFinalDamageForTarget(AActor* Victim, float RawDamage, bool& bOutCrit, float CritChance, float CritMultiplier) const;
 #pragma endregion
 
-// Hooks region removed.
-
 #pragma region "Perfect boosts"
-    void ApplyPerfectBoost(EEEPerfectKind Kind);
+    void ApplyPerfectBoost(EPerfectKind Kind);
     void RestoreBoosts();
 #pragma endregion
 
 #pragma region "Search helpers"
-    const FEEAttackSpec* FindAttack(FName AttackId) const;
+    const FAttackSpecConfig* FindAttack(FName AttackId) const;
 #pragma endregion
 
 #pragma region "Combo runtime helpers"
@@ -248,13 +286,13 @@ private:
 
 #pragma region "Utils"
     TArray<AActor*> UniqueActorsFromHits(const TArray<FHitResult>& Hits) const;
-    void PlayOrJumpMontageSection(const FEEAttackSpec& Spec);
-    void PerformRangedLine(const FEEAttackSpec& Spec, float DamageScale, float RangeScale);
+    void PlayOrJumpMontageSection(const FAttackSpecConfig& Spec);
+    void PerformRangedLine(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale);
 #pragma endregion
 
 #pragma region "Config"
-    UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FEEAttackSpec> Attacks;
-    UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FEEComboSpec> Combos;
+    UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FAttackSpecConfig> Attacks;
+    UPROPERTY(EditAnywhere, Category="Combat|Config") TArray<FComboSpecConfig> Combos;
     UPROPERTY(EditAnywhere, Category="Combat|Config") TEnumAsByte<ECollisionChannel> DamageTraceChannel = ECC_Pawn;
     UPROPERTY(EditAnywhere, Category="Combat|Config") bool bIgnoreOwner = true;
     UPROPERTY(EditAnywhere, Category="Combat|Magnetism", meta=(ClampMin="0.0", ClampMax="90.0")) float MagnetismAngleDeg = 35.f;
@@ -264,7 +302,7 @@ private:
 #pragma endregion
 
 #pragma region "Ranged"
-    UPROPERTY(EditAnywhere, Category="Combat|Ranged") EEERangedMode RangedMode = EEERangedMode::Line;
+    UPROPERTY(EditAnywhere, Category="Combat|Ranged") ERangedMode RangedMode = ERangedMode::Line;
     UPROPERTY(EditAnywhere, Category="Combat|Ranged") FName MuzzleSocketName = "Muzzle";
 #pragma endregion
     

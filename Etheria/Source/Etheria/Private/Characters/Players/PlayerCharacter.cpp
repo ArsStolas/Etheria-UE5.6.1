@@ -19,6 +19,7 @@
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTargetComponent.h"
 #include "Core/System/EtheriaGameplayTags.h"
+#include "Data/Weapons/WeaponData.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -59,7 +60,10 @@ APlayerCharacter::APlayerCharacter()
 void APlayerCharacter::BeginPlay()
 {
     Super::BeginPlay();
-
+    
+    BaseArmLength = CameraBoom->TargetArmLength;
+    BaseFOV = FollowCamera->FieldOfView;
+    
     if (APlayerController* PC = Cast<APlayerController>(Controller))
     {
         if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
@@ -109,8 +113,34 @@ void APlayerCharacter::BeginPlay()
 void APlayerCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    
     HandleMovementInput();
     UpdateMovementState();
+
+    // Keep camera updated if player stays aiming (smooth interpolation)
+    if (bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
+    {
+        const FWeaponRangedConfig& Ranged = CombatComponent->GetCurrentWeaponData()->Ranged;
+        CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, Ranged.AimArmLength, DeltaTime, 8.f);
+        FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, Ranged.AimFOV, DeltaTime, 8.f));
+    }
+    else
+    {
+        // Restore default FOV gradually when not aiming
+        CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, BaseArmLength, DeltaTime, 6.f);
+        FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, BaseFOV, DeltaTime, 6.f));
+    }
+}
+
+void UCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Handle charge level if bow
+    if (bIsCharging && CurrentWeaponData && CurrentWeaponData->Ranged.bUseChargeOnAim)
+    {
+        UpdateCharge(DeltaTime);
+    }
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -210,6 +240,129 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     #pragma endregion
     }
 }
+
+#pragma region AIMING
+
+void APlayerCharacter::ToggleAiming(bool bEnable)
+{
+    if (!CombatComponent || !CombatComponent->GetCurrentWeaponData()) return;
+
+    const UWeaponData* CurrentWeaponData = CombatComponent->GetCurrentWeaponData();
+    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
+
+    // If weapon is not ranged, aiming makes no sense.
+    if (!Ranged.bIsRangedWeapon)
+        return;
+
+    bIsAiming = bEnable;
+
+    const float TargetArm = bEnable ? Ranged.AimArmLength : BaseArmLength;
+    const float TargetFOV = bEnable ? Ranged.AimFOV : BaseFOV;
+
+    // Smoothly interpolate camera transition
+    CameraBoom->TargetArmLength = FMath::FInterpTo(
+        CameraBoom->TargetArmLength, TargetArm, GetWorld()->GetDeltaSeconds(), 10.f);
+
+    FollowCamera->SetFieldOfView(FMath::FInterpTo(
+        FollowCamera->FieldOfView, TargetFOV, GetWorld()->GetDeltaSeconds(), 10.f));
+
+    // Optional: you can reduce movement speed while aiming
+    GetCharacterMovement()->MaxWalkSpeed = bEnable ? 250.f : 500.f;
+}
+
+void APlayerCharacter::OnAimPressed()
+{
+    ToggleAiming(true);
+}
+
+void APlayerCharacter::OnAimReleased()
+{
+    ToggleAiming(false);
+}
+
+#pragma endregion
+
+#pragma region RANGED COMBAT
+
+void UCombatComponent::StartRangedFire()
+{
+    if (!OwnerCharacter.IsValid() || !CurrentWeaponData) return;
+    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
+    if (!Ranged.bIsRangedWeapon) return;
+
+    // BOW → start charge
+    if (Ranged.bUseChargeOnAim && Ranged.WeaponKind == EWeaponRangedType::Bow)
+    {
+        bIsCharging = true;
+        CurrentChargeLevel = 0.f;
+        UE_LOG(LogTemp, Log, TEXT("Started bow charge"));
+        return;
+    }
+
+    // SEMI / FULL AUTO
+    PerformRangedFire();
+
+    if (Ranged.WeaponKind == EWeaponRangedType::FullAuto)
+    {
+        const float Interval = 1.f / Ranged.FullAutoRate;
+        GetWorld()->GetTimerManager().SetTimer(AutoFireHandle, this, &UCombatComponent::PerformRangedFire, Interval, true);
+    }
+}
+
+void UCombatComponent::StopRangedFire()
+{
+    if (!OwnerCharacter.IsValid() || !CurrentWeaponData) return;
+    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
+    if (!Ranged.bIsRangedWeapon) return;
+
+    // Stop auto fire
+    GetWorld()->GetTimerManager().ClearTimer(AutoFireHandle);
+
+    // If bow: release shot
+    if (Ranged.bUseChargeOnAim && Ranged.WeaponKind == EWeaponRangedType::Bow && bIsCharging)
+    {
+        bIsCharging = false;
+        PerformRangedFire();
+        UE_LOG(LogTemp, Log, TEXT("Released bow shot at charge level %.2f"), CurrentChargeLevel);
+    }
+}
+
+void UCombatComponent::UpdateCharge(float DeltaTime)
+{
+    if (!CurrentWeaponData) return;
+    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
+
+    CurrentChargeLevel += DeltaTime / 1.0f; // 1 sec to full
+    CurrentChargeLevel = FMath::Clamp(CurrentChargeLevel, 0.f, 1.f);
+}
+
+void UCombatComponent::PerformRangedFire()
+{
+    if (!OwnerCharacter.IsValid() || !CurrentWeaponData) return;
+
+    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
+    if (!Ranged.bIsRangedWeapon) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[Combat] Fire from %s | WeaponKind: %d | AimAttackId: %s"),
+        *OwnerCharacter->GetName(),
+        (int)Ranged.WeaponKind,
+        *Ranged.AimAttackId.ToString());
+
+    // Example: you can later replace this with SpawnBowProjectileAndFire or PerformRangedLine()
+    TryAttackById(Ranged.AimAttackId);
+}
+
+#pragma endregion
+
+#pragma region WEAPON DATA
+
+void UCombatComponent::SetCurrentWeaponData(UWeaponData* NewWeaponData)
+{
+    if (CurrentWeaponData == NewWeaponData) return;
+    CurrentWeaponData = NewWeaponData;
+}
+
+#pragma endregion
 
 #pragma region "MOVEMENT INPUTS"
 
@@ -452,11 +605,14 @@ void APlayerCharacter::OnAttackLightPressed()
 
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
         StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
+        return;
+
+    if (bIsAiming && CombatComponent->GetCurrentWeaponData() && CombatComponent->GetCurrentWeaponData()->Ranged.bIsRangedWeapon)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Can't attack while gliding or diving!"));
+        CombatComponent->StartRangedFire();
         return;
     }
-
+    
     // Si une attaque est déjà active, on tente une avance de combo
     if (CombatComponent->IsAttackActive() || CombatComponent->IsInAttackWindow())
     {
@@ -470,6 +626,11 @@ void APlayerCharacter::OnAttackLightPressed()
 
 void APlayerCharacter::OnAttackLightReleased()
 {
+    if (bIsAiming && CombatComponent->GetCurrentWeaponData() && CombatComponent->GetCurrentWeaponData()->Ranged.bIsRangedWeapon)
+    {
+        CombatComponent->StopRangedFire();
+        return;
+    }
 }
 
 void APlayerCharacter::OnAttackHeavyPressed()
@@ -478,11 +639,19 @@ void APlayerCharacter::OnAttackHeavyPressed()
 
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
         StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
+        return;
+
+    if (CombatComponent->GetCurrentWeaponData() && CombatComponent->GetCurrentWeaponData()->Ranged.bIsRangedWeapon)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Can't attack while gliding or diving!"));
+        ToggleAiming(true);
         return;
     }
-
+    if (CombatComponent && bIsAiming)
+    {
+        CombatComponent->StartRangedFire();
+        return;
+    }
+    
     CombatComponent->RequestComboAdvance();
     if (!CombatComponent->IsAttackActive())
     {
@@ -493,6 +662,18 @@ void APlayerCharacter::OnAttackHeavyPressed()
 void APlayerCharacter::OnAttackHeavyReleased()
 {
     if (!CombatComponent) return;
+    
+    if (CombatComponent->GetCurrentWeaponData() && CombatComponent->GetCurrentWeaponData()->Ranged.bIsRangedWeapon)
+    {
+        ToggleAiming(false);
+        return;
+    }
+    if (CombatComponent && bIsAiming)
+    {
+        CombatComponent->StopRangedFire();
+        return;
+    }
+    
     CombatComponent->EndCharge(false);
 }
 

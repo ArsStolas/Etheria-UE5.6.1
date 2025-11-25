@@ -16,7 +16,7 @@ void UAnimNotify_CombatCue::Notify(USkeletalMeshComponent* MeshComp, UAnimSequen
     {
         if (UCombatComponent* Combat = Owner->FindComponentByClass<UCombatComponent>())
         {
-            Combat->OnCue.Broadcast(CueName, EEECombatCuePhase::Impact);
+            Combat->OnCue.Broadcast(CueName, ECombatCuePhase::Impact);
         }
     }
 }

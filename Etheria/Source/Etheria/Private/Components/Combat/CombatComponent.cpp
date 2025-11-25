@@ -82,8 +82,8 @@ bool UCombatComponent::ResolveOwnerRefs()
 }
 
 #pragma region "Set data"
-    void UCombatComponent::SetAttacks(const TArray<FEEAttackSpec>& InAttacks) { Attacks = InAttacks; }
-    void UCombatComponent::SetCombos(const TArray<FEEComboSpec>& InCombos) { Combos = InCombos; }
+    void UCombatComponent::SetAttacks(const TArray<FAttackSpecConfig>& InAttacks) { Attacks = InAttacks; }
+    void UCombatComponent::SetCombos(const TArray<FComboSpecConfig>& InCombos) { Combos = InCombos; }
 
     void UCombatComponent::SetWeaponData(UWeaponData* InData)
     {
@@ -134,6 +134,7 @@ void UCombatComponent::PopInputLock(FName LockId)
     CrouchLocks.Remove(LockId);
 }
 
+#pragma region TARGET 
 void UCombatComponent::SetExternalTarget(AActor* InTarget) { ExternalTarget = InTarget; }
 
 AActor* UCombatComponent::GetCurrentTarget() const
@@ -144,10 +145,13 @@ AActor* UCombatComponent::GetCurrentTarget() const
     }
     return ExternalTarget.Get();
 }
+#pragma endregion
 
-const FEEAttackSpec* UCombatComponent::FindAttack(FName AttackId) const
+#pragma region ATTACK
+
+const FAttackSpecConfig* UCombatComponent::FindAttack(FName AttackId) const
 {
-    return Attacks.FindByPredicate([&](const FEEAttackSpec& S){ return S.AttackId == AttackId; });
+    return Attacks.FindByPredicate([&](const FAttackSpecConfig& S){ return S.AttackId == AttackId; });
 }
 
 bool UCombatComponent::TryAttackGroup(FName GroupId)
@@ -159,12 +163,12 @@ bool UCombatComponent::TryAttackGroup(FName GroupId)
          OwnerCharacter->GetCharacterMovement() &&
          OwnerCharacter->GetCharacterMovement()->IsFalling());
 
-    const FEEAttackSpec* Chosen = nullptr;
-    for (const FEEAttackSpec& S : Attacks)
+    const FAttackSpecConfig* Chosen = nullptr;
+    for (const FAttackSpecConfig& S : Attacks)
     {
         if (S.Group != GroupId) continue;
-        if (S.Stance == EEEStance::AirOnly   && !bInAir) continue;
-        if (S.Stance == EEEStance::GroundOnly &&  bInAir) continue;
+        if (S.Stance == EStance::AirOnly   && !bInAir) continue;
+        if (S.Stance == EStance::GroundOnly &&  bInAir) continue;
         Chosen = &S; break; // first match wins
     }
     if (!Chosen) return false;
@@ -177,17 +181,17 @@ bool UCombatComponent::TryAttackPrimary()
     return TryAttackById(Attacks[0].AttackId);
 }
 
-bool UCombatComponent::TryAttackById(FName AttackId)
+bool UCombatComponent::TryAttackById(FName AttackId, float ChargeLevel)
 {
     if (IsInCooldown()) return false;
-    const FEEAttackSpec* Spec = FindAttack(AttackId);
+    const FAttackSpecConfig* Spec = FindAttack(AttackId);
     if (!Spec) return false;
     if (!CanExecuteAttack(AttackId)) return false;
 
     // Combo start cooldown gating (per combo)
     {
-        const FEEComboSpec* GateCombo = nullptr;
-        for (const FEEComboSpec& C : Combos)
+        const FComboSpecConfig* GateCombo = nullptr;
+        for (const FComboSpecConfig& C : Combos)
         {
             if (C.Steps.Num() > 0 && C.Steps[0].AttackId == AttackId) { GateCombo = &C; break; }
         }
@@ -213,9 +217,9 @@ bool UCombatComponent::TryAttackById(FName AttackId)
 
     // Seed combo state to the index of this attack if it belongs to a combo.
     {
-        const FEEComboSpec* FoundCombo = nullptr;
+        const FComboSpecConfig* FoundCombo = nullptr;
         int32 FoundIndex = -1;
-        for (const FEEComboSpec& C : Combos)
+        for (const FComboSpecConfig& C : Combos)
         {
             for (int32 i=0;i<C.Steps.Num();++i)
             {
@@ -264,7 +268,11 @@ bool UCombatComponent::CanExecuteAttack(const FName AttackId) const
     return !IsInCooldown();
 }
 
-void UCombatComponent::PrePlayMontageSafety(const FEEAttackSpec& Spec)
+#pragma endregion
+
+#pragma region MONTAGES
+
+void UCombatComponent::PrePlayMontageSafety(const FAttackSpecConfig& Spec)
 {
     if (!bForceFallbackAnimBPForMontages) return;
     if (!OwnerCharacter.IsValid() || !Spec.Montage) return;
@@ -306,7 +314,7 @@ void UCombatComponent::HandleMontageEnded_RestoreAnimClass(UAnimMontage* Montage
     SavedAnimClass = nullptr;
 }
 
-void UCombatComponent::PlayOrJumpMontageSection(const FEEAttackSpec& Spec)
+void UCombatComponent::PlayOrJumpMontageSection(const FAttackSpecConfig& Spec)
 {
     if (!OwnerCharacter.IsValid() || !Spec.Montage) return;
 
@@ -327,9 +335,11 @@ void UCombatComponent::PlayOrJumpMontageSection(const FEEAttackSpec& Spec)
     OwnerCharacter->PlayAnimMontage(Spec.Montage, 1.f, Spec.MontageSection);
 }
 
-void UCombatComponent::ExecuteAttack(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
+#pragma endregion
+
+void UCombatComponent::ExecuteAttack(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale)
 {
-    OnCue.Broadcast(FName("AttackStart"), EEECombatCuePhase::Start);
+    OnCue.Broadcast(FName("AttackStart"), ECombatCuePhase::Start);
     OnAttackStarted.Broadcast(Spec.AttackId);
 
     if (StateComp.IsValid())
@@ -354,7 +364,7 @@ void UCombatComponent::ExecuteAttack(const FEEAttackSpec& Spec, float DamageScal
     }
 }
 
-void UCombatComponent::OpenWindowWithTimers(const FEEAttackSpec& Spec)
+void UCombatComponent::OpenWindowWithTimers(const FAttackSpecConfig& Spec)
 {
     if (UWorld* W = GetWorld())
     {
@@ -374,7 +384,7 @@ void UCombatComponent::OpenWindowWithTimers(const FEEAttackSpec& Spec)
 void UCombatComponent::CloseCurrentAttack()
 {
     OnAttackEnded.Broadcast(CurrentAttackId);
-    OnCue.Broadcast(FName("AttackEnd"), EEECombatCuePhase::End);
+    OnCue.Broadcast(FName("AttackEnd"), ECombatCuePhase::End);
 
     if (StateComp.IsValid())
     {
@@ -390,9 +400,9 @@ void UCombatComponent::CloseCurrentAttack()
 void UCombatComponent::BeginAttackWindow()
 {
     bInAttackWindow = true;
-    OnCue.Broadcast(FName("HitWindow"), EEECombatCuePhase::Start);
+    OnCue.Broadcast(FName("HitWindow"), ECombatCuePhase::Start);
 
-    const FEEAttackSpec* Spec = FindAttack(CurrentAttackId);
+    const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
     if (!Spec) return;
 
     FVector Fwd;
@@ -404,9 +414,9 @@ void UCombatComponent::BeginAttackWindow()
 
     switch (Spec->AttackType)
     {
-        case EEEAttackType::Melee:  PerformMeleeTrace(*Spec, 1.f, 1.f);  break;
-        case EEEAttackType::AoE:    PerformAoE(*Spec, 1.f, 1.f);        break;
-        case EEEAttackType::Ranged: PerformRangedLine(*Spec, 1.f, 1.f); break;
+        case EAttackType::Melee:  PerformMeleeTrace(*Spec, 1.f, 1.f);  break;
+        case EAttackType::AoE:    PerformAoE(*Spec, 1.f, 1.f);        break;
+        case EAttackType::Ranged: PerformRangedLine(*Spec, 1.f, 1.f); break;
         default: break;
     }
 }
@@ -414,7 +424,7 @@ void UCombatComponent::BeginAttackWindow()
 void UCombatComponent::EndAttackWindow()
 {
     bInAttackWindow = false;
-    OnCue.Broadcast(FName("HitWindow"), EEECombatCuePhase::End);
+    OnCue.Broadcast(FName("HitWindow"), ECombatCuePhase::End);
     CloseCurrentAttack();
 }
 
@@ -552,9 +562,9 @@ float UCombatComponent::ComputeFinalDamageForTarget(AActor* Victim, float RawDam
             Damage = 0.f;
             if (VictimCombat->bPerfectDodgeWindow)
             {
-                const_cast<UCombatComponent*>(VictimCombat)->OnPerfect.Broadcast(EEEPerfectKind::Dodge);
-                const_cast<UCombatComponent*>(VictimCombat)->ApplyPerfectBoost(EEEPerfectKind::Dodge);
-                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("PerfectDodge"), EEECombatCuePhase::Impact);
+                const_cast<UCombatComponent*>(VictimCombat)->OnPerfect.Broadcast(EPerfectKind::Dodge);
+                const_cast<UCombatComponent*>(VictimCombat)->ApplyPerfectBoost(EPerfectKind::Dodge);
+                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("PerfectDodge"), ECombatCuePhase::Impact);
             }
         }
         else if (VictimCombat->bParryHeld)
@@ -562,14 +572,14 @@ float UCombatComponent::ComputeFinalDamageForTarget(AActor* Victim, float RawDam
             if (VictimCombat->bPerfectParryWindow)
             {
                 Damage = 0.f;
-                const_cast<UCombatComponent*>(VictimCombat)->OnPerfect.Broadcast(EEEPerfectKind::Parry);
-                const_cast<UCombatComponent*>(VictimCombat)->ApplyPerfectBoost(EEEPerfectKind::Parry);
-                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("PerfectParry"), EEECombatCuePhase::Impact);
+                const_cast<UCombatComponent*>(VictimCombat)->OnPerfect.Broadcast(EPerfectKind::Parry);
+                const_cast<UCombatComponent*>(VictimCombat)->ApplyPerfectBoost(EPerfectKind::Parry);
+                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("PerfectParry"), ECombatCuePhase::Impact);
             }
             else
             {
                 Damage *= FMath::Clamp(VictimCombat->ParryDamageFactorWhileHeld, 0.f, 1.f);
-                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("ParryGuard"), EEECombatCuePhase::Impact);
+                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("ParryGuard"), ECombatCuePhase::Impact);
 
                 if (VictimCombat->ParryHitReactionMontages.Num() > 0 && VictimCombat->OwnerCharacter.IsValid())
                 {
@@ -585,8 +595,9 @@ float UCombatComponent::ComputeFinalDamageForTarget(AActor* Victim, float RawDam
 
     return Damage;
 }
-
-void UCombatComponent::PerformMeleeTrace(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
+/* ================= Perform Trace Attacks ================= */
+#pragma region PERFORM TRACE
+void UCombatComponent::PerformMeleeTrace(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale)
 {
     if (!GetWorld()) return;
 
@@ -605,17 +616,17 @@ void UCombatComponent::PerformMeleeTrace(const FEEAttackSpec& Spec, float Damage
 
     switch (Spec.TraceShape)
     {
-        case EEETraceShape::Line:
+        case ETraceShape::Line:
         {
             FHitResult H;
             if (GetWorld()->LineTraceSingleByObjectType(H, Start, End, Obj, Params)) Hits.Add(H);
         } break;
-        case EEETraceShape::Sphere:
+        case ETraceShape::Sphere:
         {
             const float R = Spec.Radius * RangeScale;
             GetWorld()->SweepMultiByObjectType(Hits, Start, End, FQuat::Identity, Obj, FCollisionShape::MakeSphere(R), Params);
         } break;
-        case EEETraceShape::Capsule:
+        case ETraceShape::Capsule:
         {
             const float R = Spec.Radius * RangeScale;
             const float HH = Spec.CapsuleHalfHeight * RangeScale;
@@ -643,13 +654,13 @@ void UCombatComponent::PerformMeleeTrace(const FEEAttackSpec& Spec, float Damage
         UGameplayStatics::ApplyPointDamage(Other, FinalDamage, Fwd, Dummy, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage); else OnHit.Broadcast(Other, FinalDamage);
-        OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+        OnCue.Broadcast(FName("Impact"), ECombatCuePhase::Impact);
 
         PushRecentHitActor(Other);
     }
 }
 
-void UCombatComponent::PerformRangedLine(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
+void UCombatComponent::PerformRangedLine(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale)
 {
     if (!GetWorld()) return;
 
@@ -714,12 +725,12 @@ void UCombatComponent::PerformRangedLine(const FEEAttackSpec& Spec, float Damage
     if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage);
     else       OnHit.Broadcast(Other, FinalDamage);
 
-    OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+    OnCue.Broadcast(FName("Impact"), ECombatCuePhase::Impact);
     
     PushRecentHitActor(Other);
 }
 
-void UCombatComponent::PerformAoE(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
+void UCombatComponent::PerformAoE(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale)
 {
     if (!GetWorld()) return;
     AActor* Owner = GetOwner(); if (!Owner) return;
@@ -756,13 +767,13 @@ void UCombatComponent::PerformAoE(const FEEAttackSpec& Spec, float DamageScale, 
         UGameplayStatics::ApplyPointDamage(Other, FinalDamage, FVector::UpVector, Dummy, Owner->GetInstigatorController(), Owner, nullptr);
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage); else OnHit.Broadcast(Other, FinalDamage);
-        OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+        OnCue.Broadcast(FName("Impact"), ECombatCuePhase::Impact);
         
         PushRecentHitActor(Other);
     }
 }
 
-void UCombatComponent::PerformFrontalRect(const FEEAttackSpec& Spec, float DamageScale, float RangeScale)
+void UCombatComponent::PerformFrontalRect(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale)
 {
     if (!GetWorld()) return;
     AActor* Owner = GetOwner(); if (!Owner) return;
@@ -798,7 +809,7 @@ void UCombatComponent::PerformFrontalRect(const FEEAttackSpec& Spec, float Damag
         UGameplayStatics::ApplyPointDamage(Other, FinalDamage, Fwd, Dummy, Owner->GetInstigatorController(), Owner, nullptr);
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage); else OnHit.Broadcast(Other, FinalDamage);
-        OnCue.Broadcast(FName("Impact"), EEECombatCuePhase::Impact);
+        OnCue.Broadcast(FName("Impact"), ECombatCuePhase::Impact);
         
         PushRecentHitActor(Other);
     }
@@ -810,6 +821,8 @@ void UCombatComponent::PerformFrontalRect(const FEEAttackSpec& Spec, float Damag
     }
 #endif
 }
+
+#pragma endregion
 
 /* ================= Parry / Dodge ================= */
 #pragma region "PARRY / DODGE"
@@ -833,13 +846,13 @@ void UCombatComponent::SetParryHeld(bool bHeld)
 void UCombatComponent::BeginPerfectParryWindow()
 {
     bPerfectParryWindow = true;
-    OnCue.Broadcast(FName("PerfectParryWindow"), EEECombatCuePhase::Start);
+    OnCue.Broadcast(FName("PerfectParryWindow"), ECombatCuePhase::Start);
 }
 
 void UCombatComponent::EndPerfectParryWindow()
 {
     bPerfectParryWindow = false;
-    OnCue.Broadcast(FName("PerfectParryWindow"), EEECombatCuePhase::End);
+    OnCue.Broadcast(FName("PerfectParryWindow"), ECombatCuePhase::End);
 }
 
 void UCombatComponent::StartDodgeIFrames(float DurationOverride)
@@ -848,7 +861,7 @@ void UCombatComponent::StartDodgeIFrames(float DurationOverride)
     bInDodgeIFrames = true;
 
     const float Duration = (DurationOverride > 0.f) ? DurationOverride : DodgeIFrameDuration;
-    OnCue.Broadcast(FName("DodgeIFrames"), EEECombatCuePhase::Start);
+    OnCue.Broadcast(FName("DodgeIFrames"), ECombatCuePhase::Start);
 
     if (StateComp.IsValid())
     {
@@ -861,7 +874,7 @@ void UCombatComponent::StartDodgeIFrames(float DurationOverride)
         W->GetTimerManager().SetTimer(H, [this]()
         {
             bInDodgeIFrames = false;
-            OnCue.Broadcast(FName("DodgeIFrames"), EEECombatCuePhase::End);
+            OnCue.Broadcast(FName("DodgeIFrames"), ECombatCuePhase::End);
         }, Duration, false);
     }
 }
@@ -869,16 +882,16 @@ void UCombatComponent::StartDodgeIFrames(float DurationOverride)
 void UCombatComponent::BeginPerfectDodgeWindow()
 {
     bPerfectDodgeWindow = true;
-    OnCue.Broadcast(FName("PerfectDodgeWindow"), EEECombatCuePhase::Start);
+    OnCue.Broadcast(FName("PerfectDodgeWindow"), ECombatCuePhase::Start);
 }
 
 void UCombatComponent::EndPerfectDodgeWindow()
 {
     bPerfectDodgeWindow = false;
-    OnCue.Broadcast(FName("PerfectDodgeWindow"), EEECombatCuePhase::End);
+    OnCue.Broadcast(FName("PerfectDodgeWindow"), ECombatCuePhase::End);
 }
 
-void UCombatComponent::ApplyPerfectBoost(EEEPerfectKind Kind)
+void UCombatComponent::ApplyPerfectBoost(EPerfectKind Kind)
 {
     if (MoveComp.IsValid() && BaseWalkSpeed > 0.f)
     {
@@ -920,7 +933,7 @@ void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
         else AttackId = CurrentAttackId;
     }
 
-    const FEEAttackSpec* Spec = FindAttack(AttackId);
+    const FAttackSpecConfig* Spec = FindAttack(AttackId);
     if (!Spec || !Spec->Charge.bChargeable) return;
 
     CurrentAttackId = AttackId;
@@ -937,7 +950,7 @@ void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
         UpdateTelegraph(0.f);
     }
 
-    OnCue.Broadcast(FName("ChargeStart"), EEECombatCuePhase::Start);
+    OnCue.Broadcast(FName("ChargeStart"), ECombatCuePhase::Start);
 }
 
 void UCombatComponent::UpdateChargeProgress(float DeltaTime)
@@ -948,7 +961,7 @@ void UCombatComponent::UpdateChargeProgress(float DeltaTime)
     const float Alpha = FMath::Clamp(ChargeAccumulated / FMath::Max(0.001f, ChargeExpectedDuration), 0.f, 1.f);
     UpdateTelegraph(Alpha);
 
-    const FEEAttackSpec* Spec = FindAttack(CurrentAttackId);
+    const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
     if (!Spec) return;
     int32 NewObserved = -1;
     for (int32 i=0; i<Spec->Charge.Levels.Num(); ++i)
@@ -961,7 +974,7 @@ void UCombatComponent::UpdateChargeProgress(float DeltaTime)
         if (ObservedChargeLevel >= 0)
         {
             const FName Cue = FName(*FString::Printf(TEXT("ChargeLevel_%d"), ObservedChargeLevel + 1));
-            OnCue.Broadcast(Cue, EEECombatCuePhase::Start);
+            OnCue.Broadcast(Cue, ECombatCuePhase::Start);
         }
     }
 }
@@ -971,7 +984,7 @@ void UCombatComponent::EndCharge(bool bCanceled)
     if (!bCharging) return;
     bCharging = false;
 
-    const FEEAttackSpec* Spec = FindAttack(CurrentAttackId);
+    const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
     if (!Spec) { DestroyTelegraph(); return; }
 
     float Elapsed = ChargeAccumulated;
@@ -997,11 +1010,11 @@ void UCombatComponent::EndCharge(bool bCanceled)
 
     if (bCanceled)
     {
-        OnCue.Broadcast(FName("ChargeCancel"), EEECombatCuePhase::End);
+        OnCue.Broadcast(FName("ChargeCancel"), ECombatCuePhase::End);
         return;
     }
 
-    OnCue.Broadcast(FName("ChargeRelease"), EEECombatCuePhase::Impact);
+    OnCue.Broadcast(FName("ChargeRelease"), ECombatCuePhase::Impact);
 
     if (OwnerCharacter.IsValid() && Spec->Montage && ChargeLevelIndex >= 0 && Spec->Charge.ReleaseMontages.Num() == 0)
     {
@@ -1023,12 +1036,12 @@ void UCombatComponent::EndCharge(bool bCanceled)
         ExecuteAttack(*Spec, DamageScale, RangeScale);
     }
 
-    if (Spec->Charge.Shape == EEEChargeShape::Radial)
+    if (Spec->Charge.Shape == EChargeShape::Radial)
     {
-        FEEAttackSpec Copy = *Spec; Copy.AttackType = EEEAttackType::AoE; Copy.Radius = Spec->Charge.MaxRadius;
+        FAttackSpecConfig Copy = *Spec; Copy.AttackType = EAttackType::AoE; Copy.Radius = Spec->Charge.MaxRadius;
         PerformAoE(Copy, DamageScale, RangeScale);
     }
-    else if (Spec->Charge.Shape == EEEChargeShape::FrontalRect)
+    else if (Spec->Charge.Shape == EChargeShape::FrontalRect)
     {
         PerformFrontalRect(*Spec, DamageScale, RangeScale);
     }
@@ -1041,12 +1054,12 @@ void UCombatComponent::SpawnTelegraph()
     DestroyTelegraph();
     if (!GetOwner()) return;
 
-    const FEEAttackSpec* Spec = FindAttack(CurrentAttackId);
+    const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
     if (!Spec || !Spec->Charge.bShowTelegraph) return;
 
     UMaterialInterface* Mat = nullptr;
-    if (Spec->Charge.Shape == EEEChargeShape::Radial) Mat = RadialDecalMaterial;
-    else if (Spec->Charge.Shape == EEEChargeShape::FrontalRect) Mat = RectDecalMaterial;
+    if (Spec->Charge.Shape == EChargeShape::Radial) Mat = RadialDecalMaterial;
+    else if (Spec->Charge.Shape == EChargeShape::FrontalRect) Mat = RectDecalMaterial;
 
     if (!Mat) return;
 
@@ -1067,17 +1080,17 @@ void UCombatComponent::SpawnTelegraph()
 void UCombatComponent::UpdateTelegraph(float Alpha)
 {
     if (!ActiveDecal) return;
-    const FEEAttackSpec* Spec = FindAttack(CurrentAttackId);
+    const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
     if (!Spec) return;
 
     Alpha = FMath::Clamp(Alpha, 0.f, 1.f);
 
-    if (Spec->Charge.Shape == EEEChargeShape::Radial)
+    if (Spec->Charge.Shape == EChargeShape::Radial)
     {
         const float R = FMath::Lerp(0.f, Spec->Charge.MaxRadius, Alpha);
         ActiveDecal->DecalSize = FVector(1.f, R, R);
     }
-    else if (Spec->Charge.Shape == EEEChargeShape::FrontalRect)
+    else if (Spec->Charge.Shape == EChargeShape::FrontalRect)
     {
         const float L = FMath::Lerp(0.f, Spec->Charge.MaxLength, Alpha);
         const float W = FMath::Lerp(0.f, Spec->Charge.MaxWidth, Alpha);
@@ -1136,16 +1149,16 @@ void UCombatComponent::AdvanceComboIfRequested()
         }
     }
 
-    const FEEComboSpec* Combo = nullptr;
+    const FComboSpecConfig* Combo = nullptr;
 
     if (ActiveComboId != NAME_None)
     {
-        Combo = Combos.FindByPredicate([&](const FEEComboSpec& C){ return C.ComboId == ActiveComboId; });
+        Combo = Combos.FindByPredicate([&](const FComboSpecConfig& C){ return C.ComboId == ActiveComboId; });
     }
 
     if (!Combo)
     {
-        Combo = Combos.FindByPredicate([&](const FEEComboSpec& C)
+        Combo = Combos.FindByPredicate([&](const FComboSpecConfig& C)
         {
             return C.Steps.Num() > 0 && C.Steps[0].AttackId == LastAttackId;
         });
@@ -1166,11 +1179,11 @@ void UCombatComponent::AdvanceComboIfRequested()
     }
     ActiveComboStep = NextIndex;
 
-    const FEEComboStep& Step = Combo->Steps[ActiveComboStep];
-    const FEEAttackSpec* Spec = FindAttack(Step.AttackId);
+    const FComboStepConfig& Step = Combo->Steps[ActiveComboStep];
+    const FAttackSpecConfig* Spec = FindAttack(Step.AttackId);
     if (!Spec) { bComboAdvanceRequested = false; return; }
 
-    FEEAttackSpec Local = *Spec;
+    FAttackSpecConfig Local = *Spec;
     if (Step.DamageOverride > 0.f)        Local.BaseDamage = Step.DamageOverride;
     if (Step.CritChanceOverride >= 0.f)   Local.CritChance = Step.CritChanceOverride;
     if (Step.CritMultiplierOverride >= 0.f) Local.CritMultiplier = Step.CritMultiplierOverride;
