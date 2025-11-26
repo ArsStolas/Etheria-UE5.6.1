@@ -124,7 +124,7 @@ public:
     /** Returns the currently active weapon data if any. */
     UPROPERTY() UWeaponData* CurrentWeaponData = nullptr;
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    FORCEINLINE UWeaponData* GetCurrentWeaponData() const { return CurrentWeaponData; }
+    FORCEINLINE UWeaponData* GetCurrentWeaponData() const { return CurrentWeaponData ? CurrentWeaponData : WeaponData; }
     
     /** Sets a new weapon data (called by Equipment or Inventory). */
     void SetCurrentWeaponData(UWeaponData* NewWeaponData);

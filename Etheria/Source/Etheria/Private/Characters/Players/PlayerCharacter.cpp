@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: 0nnen
  * Class: PlayerCharacter - Source
  */
 
@@ -132,16 +132,6 @@ void APlayerCharacter::Tick(float DeltaTime)
     }
 }
 
-void UCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Handle charge level if bow
-    if (bIsCharging && CurrentWeaponData && CurrentWeaponData->Ranged.bUseChargeOnAim)
-    {
-        UpdateCharge(DeltaTime);
-    }
-}
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -245,30 +235,57 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 void APlayerCharacter::ToggleAiming(bool bEnable)
 {
-    if (!CombatComponent || !CombatComponent->GetCurrentWeaponData()) return;
+    // Allow disabling aim even if weapon data is missing (e.g., during weapon swap).
+    if (!bEnable)
+    {
+        bIsAiming = false;
 
-    const UWeaponData* CurrentWeaponData = CombatComponent->GetCurrentWeaponData();
-    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
+        // Restore camera targets (Tick already interpolates smoothly toward these).
+        CameraBoom->TargetArmLength = BaseArmLength;
+        FollowCamera->SetFieldOfView(BaseFOV);
 
-    // If weapon is not ranged, aiming makes no sense.
-    if (!Ranged.bIsRangedWeapon)
+        // Restore locomotion defaults.
+        bUseControllerRotationYaw = false;
+        if (UCharacterMovementComponent* Move = GetCharacterMovement())
+        {
+            Move->bOrientRotationToMovement = true;
+            Move->MaxWalkSpeed = WalkSpeed;
+        }
+
+        UE_LOG(LogTemp, Verbose, TEXT("[Aiming] OFF"));
         return;
+    }
 
-    bIsAiming = bEnable;
+    if (!CombatComponent) return;
 
-    const float TargetArm = bEnable ? Ranged.AimArmLength : BaseArmLength;
-    const float TargetFOV = bEnable ? Ranged.AimFOV : BaseFOV;
+    const UWeaponData* WeaponData = CombatComponent->GetCurrentWeaponData();
+    if (!WeaponData) return;
 
-    // Smoothly interpolate camera transition
-    CameraBoom->TargetArmLength = FMath::FInterpTo(
-        CameraBoom->TargetArmLength, TargetArm, GetWorld()->GetDeltaSeconds(), 10.f);
+    const FWeaponRangedConfig& Ranged = WeaponData->Ranged;
 
-    FollowCamera->SetFieldOfView(FMath::FInterpTo(
-        FollowCamera->FieldOfView, TargetFOV, GetWorld()->GetDeltaSeconds(), 10.f));
+    // Only ranged weapons can aim.
+    if (!Ranged.bIsRangedWeapon) return;
 
-    // Optional: you can reduce movement speed while aiming
-    GetCharacterMovement()->MaxWalkSpeed = bEnable ? 250.f : 500.f;
+    bIsAiming = true;
+
+    // Camera targets.
+    CameraBoom->TargetArmLength = Ranged.AimArmLength;
+    FollowCamera->SetFieldOfView(Ranged.AimFOV);
+
+    // While aiming, rotate character with control rotation so ranged traces match the camera direction.
+    bUseControllerRotationYaw = true;
+    if (UCharacterMovementComponent* Move = GetCharacterMovement())
+    {
+        Move->bOrientRotationToMovement = false;
+        Move->MaxWalkSpeed = WalkSpeed * Ranged.AimMoveSpeedMultiplier;
+    }
+
+    // Snap once so yaw immediately matches camera when entering aim.
+    AlignToCamera();
+
+    UE_LOG(LogTemp, Log, TEXT("[Aiming] ON | Arm=%.0f FOV=%.0f"), Ranged.AimArmLength, Ranged.AimFOV);
 }
+
 
 void APlayerCharacter::OnAimPressed()
 {
@@ -278,88 +295,6 @@ void APlayerCharacter::OnAimPressed()
 void APlayerCharacter::OnAimReleased()
 {
     ToggleAiming(false);
-}
-
-#pragma endregion
-
-#pragma region RANGED COMBAT
-
-void UCombatComponent::StartRangedFire()
-{
-    if (!OwnerCharacter.IsValid() || !CurrentWeaponData) return;
-    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
-    if (!Ranged.bIsRangedWeapon) return;
-
-    // BOW → start charge
-    if (Ranged.bUseChargeOnAim && Ranged.WeaponKind == EWeaponRangedType::Bow)
-    {
-        bIsCharging = true;
-        CurrentChargeLevel = 0.f;
-        UE_LOG(LogTemp, Log, TEXT("Started bow charge"));
-        return;
-    }
-
-    // SEMI / FULL AUTO
-    PerformRangedFire();
-
-    if (Ranged.WeaponKind == EWeaponRangedType::FullAuto)
-    {
-        const float Interval = 1.f / Ranged.FullAutoRate;
-        GetWorld()->GetTimerManager().SetTimer(AutoFireHandle, this, &UCombatComponent::PerformRangedFire, Interval, true);
-    }
-}
-
-void UCombatComponent::StopRangedFire()
-{
-    if (!OwnerCharacter.IsValid() || !CurrentWeaponData) return;
-    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
-    if (!Ranged.bIsRangedWeapon) return;
-
-    // Stop auto fire
-    GetWorld()->GetTimerManager().ClearTimer(AutoFireHandle);
-
-    // If bow: release shot
-    if (Ranged.bUseChargeOnAim && Ranged.WeaponKind == EWeaponRangedType::Bow && bIsCharging)
-    {
-        bIsCharging = false;
-        PerformRangedFire();
-        UE_LOG(LogTemp, Log, TEXT("Released bow shot at charge level %.2f"), CurrentChargeLevel);
-    }
-}
-
-void UCombatComponent::UpdateCharge(float DeltaTime)
-{
-    if (!CurrentWeaponData) return;
-    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
-
-    CurrentChargeLevel += DeltaTime / 1.0f; // 1 sec to full
-    CurrentChargeLevel = FMath::Clamp(CurrentChargeLevel, 0.f, 1.f);
-}
-
-void UCombatComponent::PerformRangedFire()
-{
-    if (!OwnerCharacter.IsValid() || !CurrentWeaponData) return;
-
-    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
-    if (!Ranged.bIsRangedWeapon) return;
-
-    UE_LOG(LogTemp, Log, TEXT("[Combat] Fire from %s | WeaponKind: %d | AimAttackId: %s"),
-        *OwnerCharacter->GetName(),
-        (int)Ranged.WeaponKind,
-        *Ranged.AimAttackId.ToString());
-
-    // Example: you can later replace this with SpawnBowProjectileAndFire or PerformRangedLine()
-    TryAttackById(Ranged.AimAttackId);
-}
-
-#pragma endregion
-
-#pragma region WEAPON DATA
-
-void UCombatComponent::SetCurrentWeaponData(UWeaponData* NewWeaponData)
-{
-    if (CurrentWeaponData == NewWeaponData) return;
-    CurrentWeaponData = NewWeaponData;
 }
 
 #pragma endregion

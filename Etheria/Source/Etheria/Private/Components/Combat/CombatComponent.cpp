@@ -15,6 +15,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "Engine/EngineTypes.h"
 #include "Animation/AnimInstance.h"
 #include "DrawDebugHelpers.h"
@@ -25,7 +26,8 @@
 
 UCombatComponent::UCombatComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
 }
 
 void UCombatComponent::BeginPlay()
@@ -53,9 +55,131 @@ void UCombatComponent::BeginPlay()
     // Auto-apply weapon data if provided
     if (WeaponData)
     {
-        ApplyWeaponData();
+        // Keep current weapon data in sync so aiming/ranged systems can read Ranged config.
+        SetCurrentWeaponData(WeaponData);
     }
 }
+
+void UCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Bow charge build-up (0..1). This only runs while the player is holding "fire" for a bow.
+    if (bIsCharging)
+    {
+        const UWeaponData* Data = GetCurrentWeaponData();
+        if (Data && Data->Ranged.bIsRangedWeapon && Data->Ranged.bUseChargeOnAim && Data->Ranged.WeaponKind == EWeaponRangedType::Bow)
+        {
+            UpdateCharge(DeltaTime);
+        }
+    }
+}
+
+void UCombatComponent::SetCurrentWeaponData(UWeaponData* NewWeaponData)
+{
+    if (CurrentWeaponData == NewWeaponData) return;
+
+    // Stop any ongoing ranged behavior when swapping weapons.
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(AutoFireHandle);
+    }
+    bIsCharging = false;
+    CurrentChargeLevel = 0.f;
+
+    CurrentWeaponData = NewWeaponData;
+    WeaponData = NewWeaponData;
+
+    ApplyWeaponData();
+}
+
+#pragma region RANGED COMBAT
+
+void UCombatComponent::StartRangedFire()
+{
+    if (!GetWorld()) return;
+    if (!OwnerCharacter.IsValid()) ResolveOwnerRefs();
+
+    UWeaponData* Data = GetCurrentWeaponData();
+    if (!Data) return;
+
+    const FWeaponRangedConfig& Ranged = Data->Ranged;
+    if (!Ranged.bIsRangedWeapon) return;
+
+    // Bow: hold to charge, release to fire
+    if (Ranged.bUseChargeOnAim && Ranged.WeaponKind == EWeaponRangedType::Bow)
+    {
+        bIsCharging = true;
+        CurrentChargeLevel = 0.f;
+        UE_LOG(LogTemp, Verbose, TEXT("[Combat] Bow charge started"));
+        return;
+    }
+
+    // Semi / Full auto fire
+    PerformRangedFire();
+
+    if (Ranged.WeaponKind == EWeaponRangedType::FullAuto)
+    {
+        const float SafeRate = FMath::Max(0.1f, Ranged.FullAutoRate);
+        const float Interval = 1.f / SafeRate;
+
+        GetWorld()->GetTimerManager().SetTimer(
+            AutoFireHandle, this, &UCombatComponent::PerformRangedFire, Interval, true);
+    }
+}
+
+void UCombatComponent::StopRangedFire()
+{
+    if (!GetWorld()) return;
+
+    UWeaponData* Data = GetCurrentWeaponData();
+    if (!Data) return;
+
+    const FWeaponRangedConfig& Ranged = Data->Ranged;
+    if (!Ranged.bIsRangedWeapon) return;
+
+    // Stop auto fire
+    GetWorld()->GetTimerManager().ClearTimer(AutoFireHandle);
+
+    // Bow: release shot
+    if (Ranged.bUseChargeOnAim && Ranged.WeaponKind == EWeaponRangedType::Bow && bIsCharging)
+    {
+        bIsCharging = false;
+        PerformRangedFire();
+        UE_LOG(LogTemp, Verbose, TEXT("[Combat] Bow shot released (Charge=%.2f)"), CurrentChargeLevel);
+    }
+}
+
+void UCombatComponent::UpdateCharge(float DeltaTime)
+{
+    // 1 second to full charge (simple version). You can make this data-driven later.
+    CurrentChargeLevel = FMath::Clamp(CurrentChargeLevel + (DeltaTime / 1.0f), 0.f, 1.f);
+}
+
+void UCombatComponent::PerformRangedFire()
+{
+    if (!OwnerCharacter.IsValid()) ResolveOwnerRefs();
+
+    UWeaponData* Data = GetCurrentWeaponData();
+    if (!Data) return;
+
+    const FWeaponRangedConfig& Ranged = Data->Ranged;
+    if (!Ranged.bIsRangedWeapon) return;
+
+    const float Charge = (Ranged.bUseChargeOnAim && Ranged.WeaponKind == EWeaponRangedType::Bow) ? CurrentChargeLevel : 0.f;
+
+    UE_LOG(LogTemp, Log, TEXT("[Combat] RangedFire | AimAttackId=%s | Charge=%.2f"),
+        *Ranged.AimAttackId.ToString(), Charge);
+
+    // Charge level is forwarded so damage/VFX can scale in your attack execution later.
+    TryAttackById(Ranged.AimAttackId, Charge);
+
+    // Reset for next shot
+    CurrentChargeLevel = 0.f;
+}
+
+#pragma endregion
+
 
 bool UCombatComponent::ResolveOwnerRefs()
 {
@@ -86,27 +210,29 @@ bool UCombatComponent::ResolveOwnerRefs()
     void UCombatComponent::SetCombos(const TArray<FComboSpecConfig>& InCombos) { Combos = InCombos; }
 
     void UCombatComponent::SetWeaponData(UWeaponData* InData)
-    {
-        WeaponData = InData;
-        ApplyWeaponData();
-    }
+{
+    // For backwards compatibility, SetWeaponData also updates CurrentWeaponData.
+    SetCurrentWeaponData(InData);
+}
 
     void UCombatComponent::ApplyWeaponData()
-    {
-        if (!WeaponData) return;
-        Attacks = WeaponData->Attacks;
-        Combos  = WeaponData->Combos;
+{
+    UWeaponData* Data = GetCurrentWeaponData();
+    if (!Data) return;
 
-        if (WeaponData->DamageTraceChannelOverride != ECC_MAX)
-        {
-            DamageTraceChannel = WeaponData->DamageTraceChannelOverride;
-        }
-        if (WeaponData->bOverrideMagnetism)
-        {
-            MagnetismAngleDeg   = WeaponData->MagnetismAngleDeg;
-            MagnetismStrength   = WeaponData->MagnetismStrength;
-        }
+    Attacks = Data->Attacks;
+    Combos  = Data->Combos;
+
+    if (Data->DamageTraceChannelOverride != ECC_MAX)
+    {
+        DamageTraceChannel = Data->DamageTraceChannelOverride;
     }
+    if (Data->bOverrideMagnetism)
+    {
+        MagnetismAngleDeg = Data->MagnetismAngleDeg;
+        MagnetismStrength = Data->MagnetismStrength;
+    }
+}
 #pragma endregion
 
 #pragma region "State"
