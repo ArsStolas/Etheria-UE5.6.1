@@ -108,9 +108,6 @@ public:
 
     // Optional tuning overrides
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Tuning")
-    TEnumAsByte<ECollisionChannel> DamageTraceChannelOverride = ECC_MAX; // ECC_MAX means "do not override"
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Tuning")
     bool bOverrideMagnetism = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Tuning", meta=(EditCondition="bOverrideMagnetism"))
@@ -118,4 +115,7 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Tuning", meta=(EditCondition="bOverrideMagnetism"))
     float MagnetismStrength = 0.55f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Tuning")
+    TEnumAsByte<ECollisionChannel> DamageTraceChannelOverride = ECC_MAX; // ECC_MAX means "do not override"
 };
