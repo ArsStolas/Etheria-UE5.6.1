@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: 0nnen
  * Class: PlayerCharacter - Header
  */
 
@@ -117,6 +117,8 @@ protected:
     // --- CAMERA ---
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Camera")
     UInputAction* LookAction;
+    void OnAimPressed();
+    void OnAimReleased();
 
     // --- MOVEMENT ---
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
@@ -192,6 +194,29 @@ protected:
     bool  bJumpBuffered = false;
     float JumpBufferExpireAt = 0.f;
     bool  bLockJumpCrouchFromCombat = false;
+
+#pragma endregion
+
+// ============================================================
+// AIMING 
+// ============================================================
+#pragma region AIMING
+
+    /** True when the player is aiming (right click held). */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aiming")
+    bool bIsAiming = false;
+
+    /** Base FOV for normal gameplay (cached at BeginPlay). */
+    float BaseFOV = 90.f;
+
+    /** Base arm length for normal camera (cached at BeginPlay). */
+    float BaseArmLength = 350.f;
+
+    /** Called to enable or disable aiming mode. */
+    void ToggleAiming(bool bEnable);
+
+    /** Simple accessor. */
+    bool IsAiming() const { return bIsAiming; }
 
 #pragma endregion
     

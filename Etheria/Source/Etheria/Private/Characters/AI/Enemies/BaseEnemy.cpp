@@ -41,7 +41,7 @@ void ABaseEnemy::Tick(float DeltaTime)
         float AttackRange = 0.f;
         if (CombatComponent && CombatComponent->IsValidLowLevel())
         {
-            const TArray<FEEAttackSpec>& Attacks = CombatComponent->GetAttacks();
+            const TArray<FAttackSpecConfig>& Attacks = CombatComponent->GetAttacks();
             if (Attacks.Num() > 0)
                 AttackRange = Attacks[0].Range;
         }
@@ -133,11 +133,11 @@ void ABaseEnemy::StartAttackCycle()
 
     if (!CombatComponent) { StopAttackCycle(); return; }
 
-    const TArray<FEEComboSpec>& Combos = CombatComponent->GetCombos();
+    const TArray<FComboSpecConfig>& Combos = CombatComponent->GetCombos();
     // UE_LOG(LogTemp, Warning, TEXT("[ENEMY] StartAttackCycle: BP combo count: %d"), Combos.Num());
 
-    TArray<const FEEComboSpec*> ValidCombos;
-    for (const FEEComboSpec& Combo : Combos)
+    TArray<const FComboSpecConfig*> ValidCombos;
+    for (const FComboSpecConfig& Combo : Combos)
     {
         // UE_LOG(LogTemp, Warning, TEXT("[ENEMY] Combo BP found: %s (steps: %d)"), *Combo.ComboId.ToString(), Combo.Steps.Num());
         if (Combo.Steps.Num() > 0) ValidCombos.Add(&Combo);
@@ -153,7 +153,7 @@ void ABaseEnemy::StartAttackCycle()
     if (bShouldDoCombo)
     {
         int32 ComboIdx = FMath::RandRange(0, ValidCombos.Num()-1);
-        const FEEComboSpec* ChosenCombo = ValidCombos[ComboIdx];
+        const FComboSpecConfig* ChosenCombo = ValidCombos[ComboIdx];
         SelectedComboId = ChosenCombo->ComboId;
         ComboLength = ChosenCombo->Steps.Num();
         // UE_LOG(LogTemp, Warning, TEXT("[ENEMY] Choose RANDOM COMBO '%s' (steps: %d)"), *SelectedComboId.ToString(), ComboLength);
@@ -181,7 +181,7 @@ void ABaseEnemy::AttackEnemy()
     float AttackRange = 0.f;
     if (CombatComponent && CombatComponent->IsValidLowLevel())
     {
-        const TArray<FEEAttackSpec>& Attacks = CombatComponent->GetAttacks();
+        const TArray<FAttackSpecConfig>& Attacks = CombatComponent->GetAttacks();
         if (Attacks.Num() > 0)
             AttackRange = Attacks[0].Range;
     }
@@ -205,8 +205,8 @@ void ABaseEnemy::AttackEnemy()
 
     if (bComboInProgress && SelectedComboId != NAME_None)
     {
-        const TArray<FEEComboSpec>& Combos = CombatComponent->GetCombos();
-        const FEEComboSpec* Combo = Combos.FindByPredicate([this](const FEEComboSpec& CS){return CS.ComboId==SelectedComboId;});
+        const TArray<FComboSpecConfig>& Combos = CombatComponent->GetCombos();
+        const FComboSpecConfig* Combo = Combos.FindByPredicate([this](const FComboSpecConfig& CS){return CS.ComboId==SelectedComboId;});
         if (!Combo || Combo->Steps.Num() == 0)
         {
             StopAttackCycle();
@@ -236,7 +236,7 @@ void ABaseEnemy::AttackEnemy()
         // UE_LOG(LogTemp, Warning, TEXT("[ENEMY] TryAttackById Single/FirstComboStep '%s': %s"),
         //     *SingleAttackId.ToString(), DidAttack?TEXT("YES"):TEXT("NO"));
         float Delay = 0.5f;
-        const TArray<FEEAttackSpec>& Attacks = CombatComponent->GetAttacks();
+        const TArray<FAttackSpecConfig>& Attacks = CombatComponent->GetAttacks();
         if (Attacks.Num() > 0) Delay = FMath::Max(Attacks[0].Cooldown, 0.5f);
         GetWorld()->GetTimerManager().SetTimer(EnemyAttackTimerHandle, [this]() {
             StopAttackCycle(); StartAttackCycle();
@@ -274,7 +274,7 @@ void ABaseEnemy::TryComboAttackStep()
     float AttackRange = 0.f;
     if (CombatComponent && CombatComponent->IsValidLowLevel())
     {
-        const TArray<FEEAttackSpec>& Attacks = CombatComponent->GetAttacks();
+        const TArray<FAttackSpecConfig>& Attacks = CombatComponent->GetAttacks();
         if (Attacks.Num() > 0)
             AttackRange = Attacks[0].Range;
     }
