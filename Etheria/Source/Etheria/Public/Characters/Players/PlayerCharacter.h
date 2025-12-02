@@ -20,7 +20,7 @@ class UInputMappingContext;
 class UInputAction;
 class UGliderComponent;
 class UInventoryComponent;
-class UInteractorComponent;
+//class UInteractionComponent;
 class ULockTargetComponent;
 
 // ============================================================
@@ -97,8 +97,8 @@ protected:
     UInventoryComponent* InventoryComponent;
 
     // --- INTERACTOR ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interactor", meta=(AllowPrivateAccess="true"))
-    UInteractorComponent* InteractorComponent;
+    //UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction", meta=(AllowPrivateAccess="true"))
+    //UInteractionComponent* InteractionComponent;
 
     // --- LOCK TARGET ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))

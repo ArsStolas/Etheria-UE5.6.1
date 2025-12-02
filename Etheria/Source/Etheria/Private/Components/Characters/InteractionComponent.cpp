@@ -31,7 +31,11 @@ void UInteractionComponent::BeginPlay()
 	UInputComponent* InputComponent = Owner->FindComponentByClass<UInputComponent>();
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(InputComponent)) {
-		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Triggered, this, &UInteractionComponent::Interact);
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &UInteractionComponent::Interact);
+		if (GEngine != nullptr)
+		{
+			GEngine->AddOnScreenDebugMessage(NULL, 3.f, FColor::Green, TEXT("Enhanced Input Component"));
+		}
 	}
 }
 
@@ -104,7 +108,17 @@ void UInteractionComponent::CheckInteraction()
 }
 
 void UInteractionComponent::Interact() {
-	if (InteractableActor != nullptr && InteractableActor->GetClass()->ImplementsInterface(UInteraction::StaticClass())) {
+	if (GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(NULL, 3.f, FColor::Green, TEXT("pressed"));
+	}
+	
+	if (InteractableActor != nullptr && InteractableActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
+	{
+		if (GEngine != nullptr)
+		{
+			GEngine->AddOnScreenDebugMessage(NULL, 3.f, FColor::Green, TEXT("Interact"));
+		}
 		IInteraction::Execute_Interact(InteractableActor, GetOwner());
 	}
 }

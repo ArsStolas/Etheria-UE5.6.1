@@ -76,3 +76,17 @@ bool AItemPickup::OnPickedBy(UInventoryComponent* Inventory)
 	}
 	return false;
 }
+
+void AItemPickup::Interact_Implementation(AActor* Interactor)
+{
+	UInventoryComponent* Inv = Interactor->FindComponentByClass<UInventoryComponent>();
+	if (!Inv) return;
+
+	OnPickedBy(Inv);
+	
+	if (GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(NULL, 3.f, FColor::Emerald, TEXT("Picked up"));
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Interact_Implementation exécuté par %s"), *Interactor->GetName());
+}

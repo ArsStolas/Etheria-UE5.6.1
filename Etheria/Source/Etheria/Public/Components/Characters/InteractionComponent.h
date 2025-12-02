@@ -25,7 +25,7 @@ public:
 	UPROPERTY(EditAnywhere, Category="Interaction")
 	UMaterialInterface* OverlayMaterial;
 
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	class UInputAction* InteractAction;
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction")

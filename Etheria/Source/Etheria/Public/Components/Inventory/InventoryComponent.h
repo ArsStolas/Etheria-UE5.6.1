@@ -15,6 +15,8 @@
 class UItemDefinition;
 class AItemPickup;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemAdded, const UItemDefinition*, ItemDef, int32, SlotIndex);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemRemoved, const UItemDefinition*, ItemDef, int32, SlotIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInventorySlotChanged, int32, SlotIndex, const FItemStack&, NewStack);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedIndexChanged, int32, NewIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemUsed, const UItemDefinition*, ItemDef, bool, bConsumed);
@@ -40,6 +42,8 @@ protected:
 
 public:
 	// ---- Events (UI & Gameplay can bind)
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnItemAdded OnItemAdded;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnItemRemoved OnItemRemoved;
 	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnInventorySlotChanged OnInventorySlotChanged;
 	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnSelectedIndexChanged OnSelectedIndexChanged;
 	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnItemUsed OnItemUsed;
