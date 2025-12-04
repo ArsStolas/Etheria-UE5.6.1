@@ -1,5 +1,5 @@
 /**
- * Etheria's End Project, 2025
+* Etheria's End Project, 2025
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
  * Class: FlightModeBase - Source
@@ -12,11 +12,14 @@
 void UFlightModeBase::Initialize(APlayerCharacter* InOwner)
 {
 	Owner = InOwner;
-	Move = Owner->GetCharacterMovement();
+	if (Owner)
+		Move = Owner->GetCharacterMovement();
 }
 
 void UFlightModeBase::StoreMovementSettings()
 {
+	if (!Move) return;
+
 	bOriRot     = Move->bOrientRotationToMovement;
 	Gravity     = Move->GravityScale;
 	AirCtrl     = Move->AirControl;
@@ -24,18 +27,28 @@ void UFlightModeBase::StoreMovementSettings()
 	Decel       = Move->BrakingDecelerationFalling;
 	MaxSpeed    = Move->MaxWalkSpeed;
 	bDesiredRot = Move->bUseControllerDesiredRotation;
+	RotRate     = Move->RotationRate;
+	MovementMode = Move->MovementMode;
 }
 
 void UFlightModeBase::RestoreMovementSettings()
 {
-	Move->bOrientRotationToMovement  = bOriRot;
-	Move->GravityScale               = Gravity;
-	Move->AirControl                 = AirCtrl;
-	Move->MaxAcceleration            = Accel;
-	Move->BrakingDecelerationFalling = Decel;
-	Move->MaxWalkSpeed               = MaxSpeed;
+	if (!Move) return;
+
+	Move->bOrientRotationToMovement     = bOriRot;
+	Move->GravityScale                  = Gravity;
+	Move->AirControl                    = AirCtrl;
+	Move->MaxAcceleration               = Accel;
+	Move->BrakingDecelerationFalling    = Decel;
+	Move->MaxWalkSpeed                  = MaxSpeed;
 	Move->bUseControllerDesiredRotation = bDesiredRot;
-	Move->SetMovementMode(MOVE_Falling);
+	Move->RotationRate                  = RotRate;
+
+	// Retour au mode correct selon la situation
+	if (Move->IsMovingOnGround())
+		Move->SetMovementMode(MOVE_Walking);
+	else
+		Move->SetMovementMode(MOVE_Falling);
 }
 
 void UFlightModeBase::Enter() {}

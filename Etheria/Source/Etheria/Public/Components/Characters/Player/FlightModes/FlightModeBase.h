@@ -1,5 +1,5 @@
 /**
- * Etheria's End Project, 2025
+* Etheria's End Project, 2025
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
  * Class: FlightModeBase - Header
@@ -8,7 +8,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "UObject/NoExportTypes.h"
 #include "FlightModeBase.generated.h"
 
 class APlayerCharacter;
@@ -34,7 +34,7 @@ protected:
 	APlayerCharacter* Owner = nullptr;
 	UCharacterMovementComponent* Move = nullptr;
 
-	// Backup
+	// Backup des paramètres de mouvement
 	bool bOriRot;
 	float Gravity;
 	float AirCtrl;
@@ -42,4 +42,6 @@ protected:
 	float Decel;
 	float MaxSpeed;
 	bool bDesiredRot;
+	FRotator RotRate;
+	EMovementMode MovementMode;
 };

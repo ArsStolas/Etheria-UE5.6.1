@@ -13,7 +13,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "Components/Characters/CharacterStateComponent.h"
 #include "Components/Characters/HealthComponent.h"
-#include "Components/Characters/Player/Glider/GliderComponent.h"
+#include "Components/Characters/Player/FlightModes/FlightComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
@@ -43,7 +43,7 @@ APlayerCharacter::APlayerCharacter()
     GetCharacterMovement()->bOrientRotationToMovement = true;
 
     // --- GLIDER COMPONENT ---
-    GliderComponent = CreateDefaultSubobject<UGliderComponent>(TEXT("GliderComponent"));
+    FlightComponent = CreateDefaultSubobject<UFlightComponent>(TEXT("FlightComponent"));
     GliderVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GliderVisual"));
     GliderVisual->SetupAttachment(RootComponent);
 
@@ -101,12 +101,12 @@ void APlayerCharacter::BeginPlay()
     }
 
     // --- Glider Delegates ---
-    if (GliderComponent && StateComponent)
+    if (FlightComponent && StateComponent)
     {
-        GliderComponent->OnGlideStart.AddDynamic(this, &APlayerCharacter::OnGlideStart);
-        GliderComponent->OnGlideStop.AddDynamic(this, &APlayerCharacter::OnGlideStop);
-        GliderComponent->OnDiveStart.AddDynamic(this, &APlayerCharacter::OnDiveStart);
-        GliderComponent->OnDiveStop.AddDynamic(this, &APlayerCharacter::OnDiveStop);
+        FlightComponent->OnGlideStart.AddDynamic(this, &APlayerCharacter::OnGlideStart);
+        FlightComponent->OnGlideStop.AddDynamic(this, &APlayerCharacter::OnGlideStop);
+        FlightComponent->OnDiveStart.AddDynamic(this, &APlayerCharacter::OnDiveStart);
+        FlightComponent->OnDiveStop.AddDynamic(this, &APlayerCharacter::OnDiveStop);
     }
 }
 
@@ -163,7 +163,7 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         EIC->BindAction(JumpAction,   ETriggerEvent::Started,   this, &APlayerCharacter::OnJumpPressed);
     #pragma endregion
 
-    #pragma region "GLIDER BINDS"
+    #pragma region "FLIGHT MODE BINDS"
         // GLIDER BINDS
         EIC->BindAction(GliderAction, ETriggerEvent::Started,   this, &APlayerCharacter::ToggleGlideMode);
         EIC->BindAction(DiveAction,   ETriggerEvent::Started,   this, &APlayerCharacter::ToggleDiveMode);
@@ -229,6 +229,22 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         }
     #pragma endregion
     }
+}
+
+bool APlayerCharacter::IsGrounded() const
+{
+    FHitResult Hit;
+    FVector Start = this->GetActorLocation();
+    FVector End = Start - FVector(0.f, 0.f, 100.f);
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+
+    bool bHit = this->GetWorld()->LineTraceSingleByChannel(
+        Hit, Start, End, ECC_Visibility, QueryParams
+    );
+
+    return bHit;
 }
 
 #pragma region AIMING
@@ -315,6 +331,35 @@ void APlayerCharacter::StartSprint()
     if (!StateComponent) return;
 
     GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+
+    // --- Double-tap = Dodge ---
+    if (!CombatComponent) return;
+
+    const int Hor = Horizontal.GetAxisValue();
+    const int Ver = Vertical.GetAxisValue();
+
+    // Check direction
+    if (Hor == 0 && Ver == 0)
+    {
+        return;
+    }
+
+    if (!Controller)
+    {
+        return;
+    }
+
+    const FRotator Rotation   = Controller->GetControlRotation();
+    const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
+    const FVector Forward     = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+    const FVector Right       = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+    const FVector WorldDir = (Forward * static_cast<float>(Ver) + Right * static_cast<float>(Hor)).GetSafeNormal();
+    if (!WorldDir.IsNearlyZero())
+    {
+        // Check first or second tap
+        //CombatComponent->HandleDodgeInputTap(WorldDir);
+    }
 }
 
 void APlayerCharacter::StopSprint()
@@ -483,16 +528,39 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 }
 #pragma endregion
 
-#pragma region "GLIDER INPUTS"
+#pragma region "FLIGHT MODE INPUTS"
 
 void APlayerCharacter::ToggleGlideMode()
 {
-    if (GliderComponent) GliderComponent->ToggleGliding();
+    if (!FlightComponent) return;
+
+    if (FlightComponent->IsInMode(EFlightMode::Glide))
+    {
+        FlightComponent->StopMode();
+    }
+    else if (FlightComponent->IsInMode(EFlightMode::Dive))
+    {
+        FlightComponent->StopMode();
+        FlightComponent->StartGlide();
+    }
+    else
+    {
+        FlightComponent->StartGlide();
+    }
 }
 
 void APlayerCharacter::ToggleDiveMode()
 {
-    if (GliderComponent) GliderComponent->ToggleDiving();
+    if (!FlightComponent) return;
+
+    if (FlightComponent->IsInMode(EFlightMode::Dive))
+    {
+        FlightComponent->StopMode();
+    }
+    else if (FlightComponent->IsInMode(EFlightMode::Glide))
+    {
+        FlightComponent->StartDive();
+    }
 }
 
 void APlayerCharacter::AlignToCamera()
@@ -506,7 +574,7 @@ void APlayerCharacter::AlignToCamera()
 
 #pragma endregion
 
-#pragma region "GLIDER HANDLERS"
+#pragma region "FLIGHT MODE HANDLERS"
 void APlayerCharacter::OnGlideStart()
 {
     if (StateComponent)
@@ -649,7 +717,42 @@ void APlayerCharacter::OnDodgePressed()
         return;
     }
 
-    CombatComponent->StartDodgeIFrames(-1.f);
+    const int Hor = Horizontal.GetAxisValue();
+    const int Ver = Vertical.GetAxisValue();
+
+    FVector WorldDir = FVector::ZeroVector;
+
+    if (Controller && (Hor != 0 || Ver != 0))
+    {
+        const FRotator Rotation   = Controller->GetControlRotation();
+        const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
+        const FVector Forward     = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+        const FVector Right       = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+        WorldDir = (Forward * static_cast<float>(Ver) + Right * static_cast<float>(Hor)).GetSafeNormal();
+    }
+
+    if (!WorldDir.IsNearlyZero())
+    {
+        // Dodge with the movement direction
+        //CombatComponent->TryDodgeWorldDirection(WorldDir);
+    }
+    else
+    {
+        // No input = Backward dash
+        if (Controller)
+        {
+            const FRotator Rotation   = Controller->GetControlRotation();
+            const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
+            const FVector Forward     = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+
+            //CombatComponent->TryDodgeWorldDirection(-Forward);
+        }
+        else
+        {
+            //CombatComponent->TryDodgeDirection(EDodgeDirection::Backward);
+        }
+    }
 }
 
 #pragma endregion
