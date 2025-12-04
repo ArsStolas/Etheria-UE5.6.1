@@ -18,7 +18,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
-class UGliderComponent;
+class UFlightComponent;
 class UInventoryComponent;
 class UInteractorComponent;
 class ULockTargetComponent;
@@ -66,13 +66,15 @@ public:
     FORCEINLINE UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
     FORCEINLINE int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
-    FORCEINLINE UGliderComponent* GetGliderComponent() const { return GliderComponent; }
+    FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
 
+    bool IsGrounded() const;
+    
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
-
+    
 // ============================================================
 // COMPONENTS
 // ============================================================
@@ -85,11 +87,11 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     UCameraComponent* FollowCamera;
 
-    // --- GLIDER ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
-    UGliderComponent* GliderComponent;
+    // --- FLIGHT MODE ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode")
+    UFlightComponent* FlightComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode|Glider|Visual")
     UStaticMeshComponent* GliderVisual;
 
     // --- INVENTORY ---
