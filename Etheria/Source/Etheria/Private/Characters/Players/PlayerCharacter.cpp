@@ -315,6 +315,35 @@ void APlayerCharacter::StartSprint()
     if (!StateComponent) return;
 
     GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+
+    // --- Double-tap = Dodge ---
+    if (!CombatComponent) return;
+
+    const int Hor = Horizontal.GetAxisValue();
+    const int Ver = Vertical.GetAxisValue();
+
+    // Check direction
+    if (Hor == 0 && Ver == 0)
+    {
+        return;
+    }
+
+    if (!Controller)
+    {
+        return;
+    }
+
+    const FRotator Rotation   = Controller->GetControlRotation();
+    const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
+    const FVector Forward     = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+    const FVector Right       = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+    const FVector WorldDir = (Forward * static_cast<float>(Ver) + Right * static_cast<float>(Hor)).GetSafeNormal();
+    if (!WorldDir.IsNearlyZero())
+    {
+        // Check first or second tap
+        CombatComponent->HandleDodgeInputTap(WorldDir);
+    }
 }
 
 void APlayerCharacter::StopSprint()
@@ -649,7 +678,42 @@ void APlayerCharacter::OnDodgePressed()
         return;
     }
 
-    CombatComponent->StartDodgeIFrames(-1.f);
+    const int Hor = Horizontal.GetAxisValue();
+    const int Ver = Vertical.GetAxisValue();
+
+    FVector WorldDir = FVector::ZeroVector;
+
+    if (Controller && (Hor != 0 || Ver != 0))
+    {
+        const FRotator Rotation   = Controller->GetControlRotation();
+        const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
+        const FVector Forward     = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+        const FVector Right       = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+        WorldDir = (Forward * static_cast<float>(Ver) + Right * static_cast<float>(Hor)).GetSafeNormal();
+    }
+
+    if (!WorldDir.IsNearlyZero())
+    {
+        // Dodge with the movement direction
+        CombatComponent->TryDodgeWorldDirection(WorldDir);
+    }
+    else
+    {
+        // No input = Backward dash
+        if (Controller)
+        {
+            const FRotator Rotation   = Controller->GetControlRotation();
+            const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
+            const FVector Forward     = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+
+            CombatComponent->TryDodgeWorldDirection(-Forward);
+        }
+        else
+        {
+            CombatComponent->TryDodgeDirection(EDodgeDirection::Backward);
+        }
+    }
 }
 
 #pragma endregion

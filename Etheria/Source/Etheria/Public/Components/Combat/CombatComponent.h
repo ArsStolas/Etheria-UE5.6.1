@@ -80,12 +80,19 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Parry") void BeginPerfectParryWindow();
     /** Summary: Closes the perfect-parry timing window. */
     UFUNCTION(BlueprintCallable, Category="Combat|Parry") void EndPerfectParryWindow();
+    
     /** Summary: Starts dodge i-frames (optional duration override). */
     UFUNCTION(BlueprintCallable, Category="Combat|Dodge") void StartDodgeIFrames(float DurationOverride = -1.f);
     /** Summary: Opens the perfect-dodge timing window. */
     UFUNCTION(BlueprintCallable, Category="Combat|Dodge") void BeginPerfectDodgeWindow();
     /** Summary: Closes the perfect-dodge timing window. */
     UFUNCTION(BlueprintCallable, Category="Combat|Dodge") void EndPerfectDodgeWindow();
+    /** Summary: Handles a dodge tap (sprint double-tap) using a world-space movement direction. */
+    UFUNCTION(BlueprintCallable, Category="Combat|Dodge") void HandleDodgeInputTap(const FVector& WorldDirection);
+    /** Summary: Tries to start a directional dodge using a world-space direction (player / AI). */
+    UFUNCTION(BlueprintCallable, Category="Combat|Dodge") bool TryDodgeWorldDirection(const FVector& WorldDirection);
+    /** Summary: Tries to start a directional dodge for a given enum direction. */
+    UFUNCTION(BlueprintCallable, Category="Combat|Dodge") bool TryDodgeDirection(EDodgeDirection DodgeDirection);
     UFUNCTION(BlueprintPure,   Category="Combat|Dodge") bool IsInIFrames() const { return bInDodgeIFrames; }
 
     UFUNCTION(BlueprintCallable, Category="Combat|Charge") void BeginCharge(FName AttackId, float ExpectedDuration);
@@ -98,7 +105,6 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void BeginComboWindow(FName ComboId);
     /** Summary: Closes the combo input window for a combo id. */
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void EndComboWindow(FName ComboId);
-
     /** Summary: Returns remaining cooldown time for a given combo id. */
     UFUNCTION(BlueprintPure, Category="Combat|Combo") float GetComboCooldownRemaining(FName ComboId) const;
     /** Summary: Clears all combo cooldowns (debug / reset). */
@@ -228,6 +234,9 @@ private:
 
     void ApplyPerfectBoost(EPerfectKind Kind);
     void RestoreBoosts();
+
+    bool CanStartDodge() const;
+    UAnimMontage* GetDodgeMontage(EDodgeDirection Direction) const;
 #pragma endregion
 
 #pragma region SEARCH HELPERS
@@ -257,7 +266,31 @@ private:
 #pragma endregion
 
 #pragma region DODGE
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge", meta=(ClampMin="0.05")) float DodgeIFrameDuration = 0.35f;
+#pragma region DODGE
+    /** Base dodge i-frame duration if no override is provided. */
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge", meta=(ClampMin="0.05"))
+    float DodgeIFrameDuration = 0.35f;
+
+    /** Maximum delay between two sprint taps to trigger a dodge (Shift double-tap). */
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Input", meta=(ClampMin="0.05"))
+    float DodgeDoubleTapMaxDelay = 0.30f;
+
+    /** Minimum input magnitude required to consider the movement direction valid. */
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Input", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float DodgeMinInputThreshold = 0.25f;
+
+    /** Directional dodge montages. */
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
+    UAnimMontage* DodgeForwardMontage = nullptr;
+
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
+    UAnimMontage* DodgeBackwardMontage = nullptr;
+
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
+    UAnimMontage* DodgeLeftMontage = nullptr;
+
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
+    UAnimMontage* DodgeRightMontage = nullptr;
 #pragma endregion
 
 #pragma region TELEGRAPH
@@ -280,6 +313,12 @@ private:
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bPerfectParryWindow = false;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bPerfectDodgeWindow = false;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bInDodgeIFrames = false;
+
+    /** Dodge double-tap detection runtime state. */
+    UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool  bDodgeTapPending = false;
+    UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") float LastDodgeTapTime = 0.f;
+    UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") FVector LastDodgeDirection = FVector::ZeroVector;
+
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") TWeakObjectPtr<AActor> ExternalTarget;
     TArray<TWeakObjectPtr<AActor>> RecentHitActors;
     TSet<FName> JumpLocks;

@@ -15,6 +15,16 @@ class UAnimMontage;
 class AActor;
 
 #pragma region STRUCT & ENUM
+/** Direction used for directional dodge selection. */
+UENUM(BlueprintType)
+enum class EDodgeDirection : uint8
+{
+    Forward  UMETA(DisplayName="Forward"),
+    Backward UMETA(DisplayName="Backward"),
+    Left     UMETA(DisplayName="Left"),
+    Right    UMETA(DisplayName="Right")
+};
+
 /* Basic enums */
 UENUM(BlueprintType) enum class EStance : uint8 { Both=0, GroundOnly=1, AirOnly=2 };
 UENUM(BlueprintType) enum class EAttackType : uint8 { Melee=0, Ranged=1, AoE=2 };
