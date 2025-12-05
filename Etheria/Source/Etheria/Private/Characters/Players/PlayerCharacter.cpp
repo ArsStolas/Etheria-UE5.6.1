@@ -358,7 +358,7 @@ void APlayerCharacter::StartSprint()
     if (!WorldDir.IsNearlyZero())
     {
         // Check first or second tap
-        //CombatComponent->HandleDodgeInputTap(WorldDir);
+        CombatComponent->HandleDodgeInputTap(WorldDir);
     }
 }
 
@@ -735,7 +735,7 @@ void APlayerCharacter::OnDodgePressed()
     if (!WorldDir.IsNearlyZero())
     {
         // Dodge with the movement direction
-        //CombatComponent->TryDodgeWorldDirection(WorldDir);
+        CombatComponent->TryDodgeWorldDirection(WorldDir);
     }
     else
     {
@@ -746,11 +746,11 @@ void APlayerCharacter::OnDodgePressed()
             const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
             const FVector Forward     = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 
-            //CombatComponent->TryDodgeWorldDirection(-Forward);
+            CombatComponent->TryDodgeWorldDirection(-Forward);
         }
         else
         {
-            //CombatComponent->TryDodgeDirection(EDodgeDirection::Backward);
+            CombatComponent->TryDodgeDirection(EDodgeDirection::Backward);
         }
     }
 }
