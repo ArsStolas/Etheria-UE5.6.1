@@ -18,20 +18,29 @@ void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
 {
     if (AttackId == NAME_None)
     {
-        if (CurrentAttackId == NAME_None && Attacks.Num() > 0) AttackId = Attacks[0].AttackId;
-        else AttackId = CurrentAttackId;
+        if (CurrentAttackId == NAME_None && Attacks.Num() > 0)
+        {
+            AttackId = Attacks[0].AttackId;
+        }
+        else
+        {
+            AttackId = CurrentAttackId;
+        }
     }
 
     const FAttackSpecConfig* Spec = FindAttack(AttackId);
-    if (!Spec || !Spec->Charge.bChargeable) return;
+    if (!Spec || !Spec->Charge.bChargeable)
+    {
+        return;
+    }
 
-    CurrentAttackId = AttackId;
-    bCharging = true;
-    ChargeStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-    ChargeExpectedDuration = FMath::Max(0.1f, ExpectedDuration);
-    ChargeAccumulated = 0.f;
-    ChargeLevelIndex = -1;
-    ObservedChargeLevel = -1;
+    CurrentAttackId         = AttackId;
+    bCharging               = true;
+    ChargeStartTime         = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+    ChargeExpectedDuration  = FMath::Max(0.1f, ExpectedDuration);
+    ChargeAccumulated       = 0.f;
+    ChargeLevelIndex        = -1;
+    ObservedChargeLevel     = -1;
 
     if (Spec->Charge.bShowTelegraph)
     {
@@ -44,19 +53,36 @@ void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
 
 void UCombatComponent::UpdateChargeProgress(float DeltaTime)
 {
-    if (!bCharging) return;
+    if (!bCharging)
+    {
+        return;
+    }
+
     ChargeAccumulated += FMath::Max(0.f, DeltaTime);
 
-    const float Alpha = FMath::Clamp(ChargeAccumulated / FMath::Max(0.001f, ChargeExpectedDuration), 0.f, 1.f);
+    const float Alpha =
+        FMath::Clamp(
+            ChargeAccumulated / FMath::Max(0.001f, ChargeExpectedDuration),
+            0.f,
+            1.f
+        );
+
+    // Visual telegraph update (handled in CombatComponent_Telegraph.cpp).
     UpdateTelegraph(Alpha);
 
     const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
-    if (!Spec) return;
+    if (!Spec)
+    {
+        return;
+    }
 
     int32 NewObserved = -1;
     for (int32 i = 0; i < Spec->Charge.Levels.Num(); ++i)
     {
-        if (ChargeAccumulated >= Spec->Charge.Levels[i].Time) NewObserved = i;
+        if (ChargeAccumulated >= Spec->Charge.Levels[i].Time)
+        {
+            NewObserved = i;
+        }
     }
 
     if (NewObserved != ObservedChargeLevel)
@@ -64,7 +90,8 @@ void UCombatComponent::UpdateChargeProgress(float DeltaTime)
         ObservedChargeLevel = NewObserved;
         if (ObservedChargeLevel >= 0)
         {
-            const FName Cue = FName(*FString::Printf(TEXT("ChargeLevel_%d"), ObservedChargeLevel + 1));
+            const FName Cue =
+                FName(*FString::Printf(TEXT("ChargeLevel_%d"), ObservedChargeLevel + 1));
             OnCue.Broadcast(Cue, ECombatCuePhase::Start);
         }
     }
@@ -72,7 +99,11 @@ void UCombatComponent::UpdateChargeProgress(float DeltaTime)
 
 void UCombatComponent::EndCharge(bool bCanceled)
 {
-    if (!bCharging) return;
+    if (!bCharging)
+    {
+        return;
+    }
+
     bCharging = false;
 
     const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
@@ -82,25 +113,31 @@ void UCombatComponent::EndCharge(bool bCanceled)
         return;
     }
 
-    float Elapsed = ChargeAccumulated;
-    int32 Level = -1;
-    float DamageScale = 1.f;
-    float RangeScale  = 1.f;
+    const float Elapsed = ChargeAccumulated;
+    int32      Level    = -1;
+    float      DamageScale = 1.f;
+    float      RangeScale  = 1.f;
 
     if (Spec->Charge.Levels.Num() > 0)
     {
         for (int32 i = 0; i < Spec->Charge.Levels.Num(); ++i)
         {
-            if (Elapsed >= Spec->Charge.Levels[i].Time) { Level = i; }
+            if (Elapsed >= Spec->Charge.Levels[i].Time)
+            {
+                Level = i;
+            }
         }
+
         if (Level >= 0)
         {
             DamageScale = Spec->Charge.Levels[Level].DamageMultiplier;
             RangeScale  = Spec->Charge.Levels[Level].RangeMultiplier;
         }
     }
+
     ChargeLevelIndex = Level;
 
+    // Remove any active telegraph decal now that the charge has ended.
     DestroyTelegraph();
 
     if (bCanceled)
@@ -111,12 +148,20 @@ void UCombatComponent::EndCharge(bool bCanceled)
 
     OnCue.Broadcast(FName("ChargeRelease"), ECombatCuePhase::Impact);
 
-    // Optional: montage "Release_Lx" section jump
-    if (OwnerCharacter.IsValid() && Spec->Montage && ChargeLevelIndex >= 0 && Spec->Charge.ReleaseMontages.Num() == 0)
+    // Optional: montage "Release_Lx" section jump if no explicit ReleaseMontages are defined.
+    if (OwnerCharacter.IsValid()
+        && Spec->Montage
+        && ChargeLevelIndex >= 0
+        && Spec->Charge.ReleaseMontages.Num() == 0)
     {
-        if (UAnimInstance* Anim = OwnerCharacter->GetMesh() ? OwnerCharacter->GetMesh()->GetAnimInstance() : nullptr)
+        USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+        UAnimInstance* Anim = Mesh ? Mesh->GetAnimInstance() : nullptr;
+
+        if (Anim)
         {
-            const FName ReleaseSection = FName(*FString::Printf(TEXT("Release_L%d"), ChargeLevelIndex + 1));
+            const FName ReleaseSection =
+                FName(*FString::Printf(TEXT("Release_L%d"), ChargeLevelIndex + 1));
+
             if (Anim->Montage_IsPlaying(Spec->Montage))
             {
                 Anim->Montage_JumpToSection(ReleaseSection, Spec->Montage);
@@ -137,84 +182,12 @@ void UCombatComponent::EndCharge(bool bCanceled)
     {
         FAttackSpecConfig Copy = *Spec;
         Copy.AttackType = EAttackType::AoE;
-        Copy.Radius = Spec->Charge.MaxRadius;
+        Copy.Radius     = Spec->Charge.MaxRadius;
         PerformAoE(Copy, DamageScale, RangeScale);
     }
     else if (Spec->Charge.Shape == EChargeShape::FrontalRect)
     {
         PerformFrontalRect(*Spec, DamageScale, RangeScale);
-    }
-}
-
-#pragma endregion
-
-#pragma region TELEGRAPH VISUALS
-
-void UCombatComponent::SpawnTelegraph()
-{
-    DestroyTelegraph();
-    if (!GetOwner()) return;
-
-    const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
-    if (!Spec || !Spec->Charge.bShowTelegraph) return;
-
-    UMaterialInterface* Mat = nullptr;
-    if (Spec->Charge.Shape == EChargeShape::Radial)       Mat = RadialDecalMaterial;
-    else if (Spec->Charge.Shape == EChargeShape::FrontalRect) Mat = RectDecalMaterial;
-
-    if (!Mat) return;
-
-    ActiveDecal = NewObject<UDecalComponent>(GetOwner(), UDecalComponent::StaticClass(), NAME_None);
-    if (!ActiveDecal) return;
-
-    ActiveDecal->RegisterComponent();
-    ActiveDecal->SetDecalMaterial(Mat);
-    ActiveDecal->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
-
-    FVector Loc = GetOwner()->GetActorLocation();
-    FRotator Rot = GetOwner()->GetActorRotation();
-    Rot.Pitch = -90.f;
-
-    ActiveDecal->SetWorldLocationAndRotation(Loc, Rot);
-    ActiveDecal->SetFadeScreenSize(0.0001f);
-}
-
-void UCombatComponent::UpdateTelegraph(float Alpha)
-{
-    if (!ActiveDecal) return;
-
-    const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
-    if (!Spec) return;
-
-    Alpha = FMath::Clamp(Alpha, 0.f, 1.f);
-
-    if (Spec->Charge.Shape == EChargeShape::Radial)
-    {
-        const float R = FMath::Lerp(0.f, Spec->Charge.MaxRadius, Alpha);
-        ActiveDecal->DecalSize = FVector(1.f, R, R);
-    }
-    else if (Spec->Charge.Shape == EChargeShape::FrontalRect)
-    {
-        const float L = FMath::Lerp(0.f, Spec->Charge.MaxLength, Alpha);
-        const float W = FMath::Lerp(0.f, Spec->Charge.MaxWidth, Alpha);
-
-        ActiveDecal->DecalSize = FVector(1.f, L * 0.5f, W * 0.5f);
-
-        FVector Fwd = GetOwner()->GetActorForwardVector();
-        FVector Loc = GetOwner()->GetActorLocation() + Fwd * (L * 0.5f);
-        FRotator Rot = GetOwner()->GetActorRotation();
-        Rot.Pitch = -90.f;
-
-        ActiveDecal->SetWorldLocationAndRotation(Loc, Rot);
-    }
-}
-
-void UCombatComponent::DestroyTelegraph()
-{
-    if (ActiveDecal)
-    {
-        ActiveDecal->DestroyComponent();
-        ActiveDecal = nullptr;
     }
 }
 

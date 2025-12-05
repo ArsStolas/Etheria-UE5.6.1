@@ -268,39 +268,44 @@ private:
 #pragma region DODGE
 #pragma region DODGE
     /** Base dodge i-frame duration if no override is provided. */
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge", meta=(ClampMin="0.05"))
-    float DodgeIFrameDuration = 0.35f;
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge", meta=(ClampMin="0.05")) float DodgeIFrameDuration = 0.35f;
 
     /** Maximum delay between two sprint taps to trigger a dodge (Shift double-tap). */
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Input", meta=(ClampMin="0.05"))
-    float DodgeDoubleTapMaxDelay = 0.30f;
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Input", meta=(ClampMin="0.05")) float DodgeDoubleTapMaxDelay = 0.30f;
 
     /** Minimum input magnitude required to consider the movement direction valid. */
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Input", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float DodgeMinInputThreshold = 0.25f;
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Input", meta=(ClampMin="0.0", ClampMax="1.0")) float DodgeMinInputThreshold = 0.25f;
 
     /** Directional dodge montages. */
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
-    UAnimMontage* DodgeForwardMontage = nullptr;
-
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
-    UAnimMontage* DodgeBackwardMontage = nullptr;
-
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
-    UAnimMontage* DodgeLeftMontage = nullptr;
-
-    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation")
-    UAnimMontage* DodgeRightMontage = nullptr;
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation") UAnimMontage* DodgeForwardMontage = nullptr;
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation") UAnimMontage* DodgeBackwardMontage = nullptr;
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation") UAnimMontage* DodgeLeftMontage = nullptr;
+    UPROPERTY(EditAnywhere, Category="Combat|Dodge|Animation") UAnimMontage* DodgeRightMontage = nullptr;
 #pragma endregion
 
 #pragma region TELEGRAPH
+    /** Material used for radial telegraph decals (circular AoE). */
     UPROPERTY(EditAnywhere, Category="Combat|Telegraph") UMaterialInterface* RadialDecalMaterial = nullptr;
-    UPROPERTY(EditAnywhere, Category="Combat|Telegraph") UMaterialInterface* RectDecalMaterial = nullptr;
-
-    void SpawnTelegraph();
-    void UpdateTelegraph(float Alpha);
-    void DestroyTelegraph();
     
+    /** Material used for frontal telegraph decals (rectangular AoE). */
+    UPROPERTY(EditAnywhere, Category="Combat|Telegraph") UMaterialInterface* RectDecalMaterial = nullptr;
+    
+    /** Thickness of the decal box along the projection direction (X). */
+    UPROPERTY(EditAnywhere, Category="Combat|Telegraph", meta=(ClampMin="1.0")) float TelegraphDecalThickness = 256.f;
+
+    /** Vertical offset so the telegraph is projected onto the ground instead of mid-air. */
+    UPROPERTY(EditAnywhere, Category="Combat|Telegraph") float TelegraphHeightOffset = 80.f;
+
+    /** Spawns the decal component for the current charged attack, if any. */
+    void SpawnTelegraph();
+
+    /** Updates decal size and position based on current charge alpha. */
+    void UpdateTelegraph(float Alpha);
+
+    /** Destroys the active telegraph decal, if present. */
+    void DestroyTelegraph();
+
+    /** Runtime decal component currently used for telegraph visuals. */
     UDecalComponent* ActiveDecal = nullptr;
 #pragma endregion
 
