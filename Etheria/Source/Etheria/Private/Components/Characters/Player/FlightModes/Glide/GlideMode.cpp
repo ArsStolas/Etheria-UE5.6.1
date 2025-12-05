@@ -1,0 +1,100 @@
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: GlideMode - Source
+*/
+
+#include "Components/Characters/Player/FlightModes/Glide/GlideMode.h"
+#include "Characters/Players/PlayerCharacter.h"
+#include "GameFramework/CharacterMovementComponent.h"
+
+void UGlideMode::Enter()
+{
+	if (!Owner || !Move) return;
+
+	StoreMovementSettings();
+
+	Move->GravityScale = 0.f;
+	Move->AirControl = 0.9f;
+	Move->BrakingDecelerationFalling = 350.f;
+	Move->MaxAcceleration = 1024.f;
+	Move->MaxWalkSpeed = 640.f;
+	Move->bOrientRotationToMovement = false;
+	Move->bUseControllerDesiredRotation = true;
+	Move->RotationRate = FRotator(0.f, 250.f, 0.f);
+
+	if (Owner->GetGliderVisual())
+		Owner->GetGliderVisual()->SetVisibility(true);
+}
+
+void UGlideMode::Exit()
+{
+	if (!Owner || !Move) return;
+
+	RestoreMovementSettings();
+
+	if (Owner->GetGliderVisual())
+		Owner->GetGliderVisual()->SetVisibility(false);
+}
+
+bool UGlideMode::CanStartGliding() const
+{
+	if (!Owner) return false;
+
+	FHitResult Hit;
+	FVector TraceStart = Owner->GetActorLocation();
+	FVector TraceEnd = TraceStart - Owner->GetActorUpVector() * MinimumHeight;
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(Owner);
+
+	bool bHit = Owner->GetWorld()->LineTraceSingleByChannel(
+		Hit, TraceStart, TraceEnd, ECC_Visibility, QueryParams
+	);
+
+	return (!bHit && Owner->GetCharacterMovement()->IsFalling());
+}
+
+void UGlideMode::TickMode(float DeltaTime)
+{
+	if (!Owner || !Move) return;
+
+	const int Hor = Owner->GetHorizontalAxis();
+	const int Ver = Owner->GetVerticalAxis();
+
+	const FRotator CamRot(0.f, Owner->GetControlRotation().Yaw, 0.f);
+	const FVector Forward = FRotationMatrix(CamRot).GetUnitAxis(EAxis::X);
+	const FVector Right   = FRotationMatrix(CamRot).GetUnitAxis(EAxis::Y);
+
+	FVector InputDir = (Forward * Ver + Right * Hor).GetSafeNormal();
+	FVector Vel = Move->Velocity;
+
+	// === Horizontal ===
+	if (!InputDir.IsNearlyZero())
+	{
+		FVector TargetHorizontal = InputDir * GlideSpeed;
+		FVector CurrentHorizontal(Vel.X, Vel.Y, 0.f);
+		FVector NewHorizontal = FMath::VInterpTo(CurrentHorizontal, TargetHorizontal, DeltaTime, GlideInterp);
+
+		Vel.X = NewHorizontal.X;
+		Vel.Y = NewHorizontal.Y;
+
+		FRotator TargetRotation = InputDir.Rotation();
+		FRotator NewRotation = FMath::RInterpTo(Owner->GetActorRotation(), TargetRotation, DeltaTime, 4.f);
+		Owner->SetActorRotation(FRotator(0.f, NewRotation.Yaw, 0.f));
+	}
+	else
+	{
+		// Décélération progressive sans input
+		FVector CurrentHorizontal(Vel.X, Vel.Y, 0.f);
+		FVector NewHorizontal = FMath::VInterpTo(CurrentHorizontal, FVector::ZeroVector, DeltaTime, 1.5f);
+		Vel.X = NewHorizontal.X;
+		Vel.Y = NewHorizontal.Y;
+	}
+
+	// === Vertical (descente) ===
+	Vel.Z = FMath::FInterpTo(Vel.Z, -DescendRate, DeltaTime, DescentInterp);
+
+	Move->Velocity = Vel;
+}

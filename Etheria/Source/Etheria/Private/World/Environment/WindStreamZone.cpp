@@ -8,10 +8,10 @@
 #include "World/Environment/WindStreamZone.h"
 #include "Components/BoxComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
-#include "Components/Characters/Player/Glider/GliderComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
+#include "Components/Characters/Player/FlightModes/FlightComponent.h"
 #include "Engine/Engine.h"
 
 AWindStreamZone::AWindStreamZone()
@@ -53,7 +53,7 @@ void AWindStreamZone::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor
 	if (bOneTimeUse && ActivePlayers.Num() > 0) return;
 
 	// Optionnel : check dive mode
-	if (bAffectOnlyDive && !Player->GetGliderComponent()->IsDiving())
+	if (bAffectOnlyDive && !Player->GetFlightComponent()->IsInMode(EFlightMode::Dive))
 		return;
 
 	// Timer répétitif pour appliquer le mouvement
