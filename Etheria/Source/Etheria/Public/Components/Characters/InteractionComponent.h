@@ -39,6 +39,9 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	bool LineTrace(FHitResult& HitResult);
+	void ApplyMesh();
+	void RemoveMesh();
 	void CheckInteraction();
 	void Interact();
 
