@@ -22,6 +22,7 @@ class UFlightComponent;
 class UInventoryComponent;
 class UInteractorComponent;
 class ULockTargetComponent;
+class ULockVisualComponent;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -105,6 +106,8 @@ protected:
     // --- LOCK TARGET ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
     ULockTargetComponent* LockTargetComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
+    ULockVisualComponent* LockVisualComponent;
 
 #pragma endregion
 

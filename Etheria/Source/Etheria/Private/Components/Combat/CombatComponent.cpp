@@ -1,13 +1,13 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
- * Last Updated by: "0nnen"
+ * Created by:  0nnen
+ * Last Updated by: 0nnen
  * Class: "CombatComponent - Source (Core)"
  * Notes: Lifecycle, owner references, and common runtime helpers.
  */
 
 #include "Components/Combat/CombatComponent.h"
-#include "Components/Combat/LockTargetComponent.h"
+#include "Components/Combat/LockTarget/LockTargetComponent.h"
 #include "Data/Weapons/WeaponData.h"
 #include "Characters/BaseCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
