@@ -10,6 +10,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/Inventory/InventoryTypes.h"
+#include "Interfaces/Interaction.h"
 #include "ItemPickup.generated.h"
 
 class USphereComponent;
@@ -18,7 +19,7 @@ class UNiagaraComponent;
 class UNiagaraSystem;
 
 UCLASS()
-class ETHERIA_API AItemPickup : public AActor
+class ETHERIA_API AItemPickup : public AActor, public IInteraction
 {
 	GENERATED_BODY()
 public:
@@ -58,4 +59,6 @@ public:
 	bool OnPickedBy(class UInventoryComponent* Inventory);
 
 	virtual void OnConstruction(const FTransform& Transform) override;
+
+	virtual void Interact_Implementation(AActor* Interactor) override;
 };

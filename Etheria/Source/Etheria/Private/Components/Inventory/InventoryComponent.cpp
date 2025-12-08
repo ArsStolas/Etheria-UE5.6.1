@@ -71,6 +71,7 @@ bool UInventoryComponent::AddToEmptySlot(const UItemDefinition* Def, int32& InOu
 			slots[i].stack.quantity = toPlace;
 			InOutQuantity -= toPlace;
 			BroadcastSlot(i);
+			OnItemAdded.Broadcast(Def, i);
 			return true;
 		}
 	}
@@ -193,6 +194,7 @@ bool UInventoryComponent::DropSelected(bool bDropAll, int32 Amount)
 		slots[selectedIndex].stack.quantity -= toDrop;
 		if (slots[selectedIndex].stack.quantity <= 0) slots[selectedIndex].Clear();
 		BroadcastSlot(selectedIndex);
+		OnItemRemoved.Broadcast(dropStack.def, dropStack.quantity);
 		ClampSelectedToNonEmpty();
 		return true;
 	}

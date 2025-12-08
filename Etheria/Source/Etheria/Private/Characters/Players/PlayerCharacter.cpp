@@ -51,8 +51,8 @@ APlayerCharacter::APlayerCharacter()
     // --- INVENTORY COMPONENT ---
     InventoryComponent  = CreateDefaultSubobject<UInventoryComponent>(TEXT("BPC_Inventory"));
 
-    // --- INTERACTOR COMPONENT ---
-    InteractorComponent = CreateDefaultSubobject<UInteractorComponent>(TEXT("BPC_Interactor"));
+    // --- INTERACTION COMPONENT ---
+    //InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("BPC_Interaction"));
     
     // --- LOCK COMPONENT ---
     LockTargetComponent = CreateDefaultSubobject<ULockTargetComponent>(TEXT("BPC_LockTarget"));
@@ -179,10 +179,10 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         EIC->BindAction(DropItemAction, ETriggerEvent::Started, this, &ThisClass::Input_DropItem);
     #pragma endregion
 
-    #pragma region "INTERACTION BINDS"
+    //#pragma region "INTERACTION BINDS"
         // INTERACTION BIND
-        EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &ThisClass::Input_Interact);
-    #pragma endregion
+        //EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &ThisClass::Input_Interact);
+    //#pragma endregion
 
     #pragma region "COMBAT BINDS"
         // COMBAT BINDS
@@ -822,13 +822,13 @@ void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryCom
 // INTERACTION INPUT
 void APlayerCharacter::Input_Interact()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
-    if (!InteractorComponent)
-    {
-        UE_LOG(LogTemp, Error, TEXT("InteractorComponent is null"));
-        return;
-    }
-    InteractorComponent->TryInteract();
+    //UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
+    //if (!InteractionComponent)
+    //{
+    //    UE_LOG(LogTemp, Error, TEXT("InteractionComponent is null"));
+    //    return;
+    //}
+    //InteractionComponent->Interact();
 }
 
 #pragma endregion
