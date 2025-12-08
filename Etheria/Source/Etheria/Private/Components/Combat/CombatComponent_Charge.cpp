@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
- * Last Updated by: "0nnen"
+ * Created by:  0nnen
+ * Last Updated by: 0nnen
  * Class: "CombatComponent - Source (Charge)"
  * Notes: Charge input flow and damage scaling.
  */

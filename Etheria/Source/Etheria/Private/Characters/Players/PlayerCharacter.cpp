@@ -17,7 +17,8 @@
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
-#include "Components/Combat/LockTargetComponent.h"
+#include "Components/Combat/LockTarget/LockTargetComponent.h"
+#include "Components/Combat/LockTarget/LockVisualComponent.h"
 #include "Core/System/EtheriaGameplayTags.h"
 #include "Data/Weapons/WeaponData.h"
 
@@ -55,6 +56,7 @@ APlayerCharacter::APlayerCharacter()
     
     // --- LOCK COMPONENT ---
     LockTargetComponent = CreateDefaultSubobject<ULockTargetComponent>(TEXT("BPC_LockTarget"));
+    LockVisualComponent = CreateDefaultSubobject<ULockVisualComponent>(TEXT("BPC_LockVisual"));
 }
 
 void APlayerCharacter::BeginPlay()

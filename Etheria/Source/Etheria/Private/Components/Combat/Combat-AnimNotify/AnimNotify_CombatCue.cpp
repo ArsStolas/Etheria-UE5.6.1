@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
- * Last Updated by: "0nnen"
+ * Created by:  0nnen
+ * Last Updated by: 0nnen
  * Class: "AnimNotify_CombatCue" - Source
  */
 #include "Components/Combat/Combat-AnimNotify/AnimNotify_CombatCue.h"

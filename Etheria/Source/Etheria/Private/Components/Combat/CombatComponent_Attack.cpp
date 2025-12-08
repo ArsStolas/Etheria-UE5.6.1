@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
- * Last Updated by: "0nnen"
+ * Created by:  0nnen
+ * Last Updated by: 0nnen
  * Class: "CombatComponent - Source (Attacks)"
  * Notes: Attack execution, traces, target assist, and damage application.
  */
@@ -9,7 +9,7 @@
 #include "Components/Combat/CombatComponent.h"
 
 #include "Characters/BaseCharacter.h"
-#include "Components/Combat/LockTargetComponent.h"
+#include "Components/Combat/LockTarget/LockTargetComponent.h"
 #include "Components/Characters/CharacterStateComponent.h"
 
 #include "GameFramework/CharacterMovementComponent.h"
