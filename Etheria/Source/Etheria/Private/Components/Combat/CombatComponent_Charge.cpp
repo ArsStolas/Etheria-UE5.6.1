@@ -10,9 +10,88 @@
 #include "Components/Combat/CombatComponent.h"
 
 #include "Components/DecalComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 
 #pragma region CHARGE
+
+void UCombatComponent::ApplyChargeMovementLock()
+{
+    if (!bBlockMovementDuringCharge)
+    {
+        return;
+    }
+
+    if (!OwnerCharacter.IsValid())
+    {
+        return;
+    }
+
+    UCharacterMovementComponent* Movement =
+        MoveComp.IsValid() ? MoveComp.Get() : OwnerCharacter->GetCharacterMovement();
+
+    if (!Movement)
+    {
+        return;
+    }
+
+    // Cache current speed once so we can restore it later.
+    if (SavedChargeMoveSpeed < 0.f)
+    {
+        SavedChargeMoveSpeed = Movement->MaxWalkSpeed;
+    }
+
+    const float ClampedMult = FMath::Clamp(ChargeMoveSpeedMultiplier, 0.f, 1.f);
+
+    // If multiplier == 0 -> fully lock movement by disabling it.
+    if (ClampedMult <= KINDA_SMALL_NUMBER)
+    {
+        bChargeDisabledMovement = true;
+        Movement->StopMovementImmediately();
+        Movement->DisableMovement();
+    }
+    else
+    {
+        bChargeDisabledMovement = false;
+        Movement->StopMovementImmediately();
+        Movement->MaxWalkSpeed = SavedChargeMoveSpeed * ClampedMult;
+    }
+}
+
+void UCombatComponent::RestoreChargeMovementLock()
+{
+    if (!OwnerCharacter.IsValid())
+    {
+        SavedChargeMoveSpeed   = -1.f;
+        bChargeDisabledMovement = false;
+        return;
+    }
+
+    UCharacterMovementComponent* Movement =
+        MoveComp.IsValid() ? MoveComp.Get() : OwnerCharacter->GetCharacterMovement();
+
+    if (!Movement)
+    {
+        SavedChargeMoveSpeed   = -1.f;
+        bChargeDisabledMovement = false;
+        return;
+    }
+
+    // If we disabled movement, restore a walking mode.
+    if (bChargeDisabledMovement)
+    {
+        Movement->SetMovementMode(MOVE_Walking);
+    }
+
+    // Restore previous walk speed if we cached one.
+    if (SavedChargeMoveSpeed >= 0.f)
+    {
+        Movement->MaxWalkSpeed = SavedChargeMoveSpeed;
+    }
+
+    SavedChargeMoveSpeed    = -1.f;
+    bChargeDisabledMovement = false;
+}
 
 void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
 {
@@ -42,6 +121,8 @@ void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
     ChargeLevelIndex        = -1;
     ObservedChargeLevel     = -1;
 
+    ApplyChargeMovementLock();
+    
     if (Spec->Charge.bShowTelegraph)
     {
         SpawnTelegraph();
@@ -105,7 +186,8 @@ void UCombatComponent::EndCharge(bool bCanceled)
     }
 
     bCharging = false;
-
+    RestoreChargeMovementLock();
+    
     const FAttackSpecConfig* Spec = FindAttack(CurrentAttackId);
     if (!Spec)
     {

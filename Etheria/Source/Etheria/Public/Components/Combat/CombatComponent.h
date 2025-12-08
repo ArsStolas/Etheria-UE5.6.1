@@ -337,6 +337,18 @@ private:
     float ChargeAccumulated = 0.f;
     int32 ChargeLevelIndex = -1;
     int32 ObservedChargeLevel = -1;
+
+    /** Cached walk speed while charging, restored in EndCharge. */
+    float SavedChargeMoveSpeed = -1.f;
+
+    /** True if we disabled movement mode instead of just scaling walk speed. */
+    bool bChargeDisabledMovement = false;
+
+    /** Applies movement lock / slowdown while charging. */
+    void ApplyChargeMovementLock();
+
+    /** Restores movement settings after charge ends. */
+    void RestoreChargeMovementLock();
 #pragma endregion
 
 #pragma region CACHED
@@ -358,6 +370,15 @@ private:
     UPROPERTY(EditAnywhere, Category="Combat|Magnetism", meta=(ClampMin="0.0", ClampMax="1.0")) float MagnetismStrength = 0.55f;
     UPROPERTY(EditAnywhere, Category="Combat|Facing", meta=(ClampMin="0.0", ClampMax="45.0")) float MaxAutoYawOnAttackDeg = 20.f;
     UPROPERTY(EditAnywhere, Category="Combat|Direction") bool bUseMeshFacing = true;
+
+    /** If true, movement will be limited/blocked while charging a manual charge attack. */
+    UPROPERTY(EditAnywhere, Category="Combat|Charge") bool bBlockMovementDuringCharge = true;
+
+    /**
+     * Multiplier applied to walk speed while charging.
+     * 0.0 = fully locked in place, 1.0 = normal speed, 0.2 = heavy slow.
+     */
+    UPROPERTY(EditAnywhere, Category="Combat|Charge", meta=(ClampMin="0.0", ClampMax="1.0")) float ChargeMoveSpeedMultiplier = 0.0f;
 #pragma endregion
     
 #pragma region DEBUG

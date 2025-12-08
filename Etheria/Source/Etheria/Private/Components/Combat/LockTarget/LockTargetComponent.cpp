@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  0nnen
+ * Created by: 0nnen
  * Last Updated by: 0nnen
  * Class: "LockTargetComponent" - Source (Core)
  * Notes: Implements core lock-on logic (toggle, clear, switch, candidate search and scoring) and controls when the component tick is enabled.
