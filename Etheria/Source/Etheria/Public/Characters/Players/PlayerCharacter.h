@@ -23,6 +23,7 @@ class UInventoryComponent;
 //class UInteractionComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
+class UQuestComponent;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -108,6 +109,10 @@ protected:
     ULockTargetComponent* LockTargetComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
     ULockVisualComponent* LockVisualComponent;
+
+    // --- QUEST TARGET ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
+    UQuestComponent* QuestComponent;
 
 #pragma endregion
 
