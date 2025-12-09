@@ -31,7 +31,11 @@ void UInteractionComponent::BeginPlay()
 	UInputComponent* InputComponent = Owner->FindComponentByClass<UInputComponent>();
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(InputComponent)) {
-		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Triggered, this, &UInteractionComponent::Interact);
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &UInteractionComponent::Interact);
+		if (GEngine != nullptr)
+		{
+			GEngine->AddOnScreenDebugMessage(NULL, 3.f, FColor::Green, TEXT("Enhanced Input Component"));
+		}
 	}
 }
 
@@ -44,58 +48,54 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	UInteractionComponent::CheckInteraction();
 }
 
+bool UInteractionComponent::LineTrace(FHitResult& HitResult)
+{
+	FVector CameraLocation = Camera->GetComponentLocation();
+	FVector CameraForward = Camera->GetForwardVector();
+
+	FVector End = CameraLocation + CameraForward * InteractDistance;
+
+	FCollisionQueryParams TraceParams(FName(TEXT("LineTrace")), true, GetOwner());
+	TraceParams.bReturnPhysicalMaterial = false;
+	TraceParams.bTraceComplex = true;
+
+	bool bHit = GetWorld()->LineTraceSingleByChannel(
+		HitResult,
+		CameraLocation,
+		End,
+		ECC_Visibility,
+		TraceParams
+	);
+
+	return bHit;
+}
+
+
 void UInteractionComponent::CheckInteraction()
 {
 	if (GetOwner() && Camera != nullptr)
 	{
-		FVector CameraLocation = Camera->GetComponentLocation();
-		FVector CameraForward = Camera->GetForwardVector();
-
-		FVector End = CameraLocation + CameraForward * InteractDistance;
-
 		FHitResult HitResult;
 
-		FCollisionQueryParams TraceParams(FName(TEXT("LineTrace")), true, GetOwner());
-		TraceParams.bReturnPhysicalMaterial = false;
-		TraceParams.bTraceComplex = true;
-
-		bool bHit = GetWorld()->LineTraceSingleByChannel(
-			HitResult,
-			CameraLocation,
-			End,
-			ECC_Visibility,
-			TraceParams
-		);
+		bool bHit = LineTrace(HitResult);
 
 		if (bHit) {
 			AActor* HitActor = HitResult.GetActor();
-			if (HitActor)
+
+			if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
 			{
-				if (HitActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
-				{
-					if (InteractableActor == nullptr || InteractableActor != HitActor) {
-						InteractableActor = HitActor;
-						OnEnter(InteractableActor);
-
-						if (OverlayMaterial != nullptr) {
-							UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
-							if (StaticMesh != nullptr) {
-								StaticMesh->SetOverlayMaterial(OverlayMaterial);
-							}
-						}
-					}
-
-					return;
+				if (InteractableActor == nullptr || InteractableActor != HitActor) {
+					InteractableActor = HitActor;
+					OnEnter(InteractableActor);
+					ApplyMesh();
 				}
+
+				return;
 			}
 		}
 
-
 		if (InteractableActor != nullptr) {
-			UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
-			if (StaticMesh != nullptr) {
-				StaticMesh->SetOverlayMaterial(nullptr);
-			}
+			RemoveMesh();
 			OnLeave(InteractableActor);
 		}
 
@@ -104,7 +104,26 @@ void UInteractionComponent::CheckInteraction()
 }
 
 void UInteractionComponent::Interact() {
-	if (InteractableActor != nullptr && InteractableActor->GetClass()->ImplementsInterface(UInteraction::StaticClass())) {
+	if (InteractableActor != nullptr && InteractableActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
+	{
 		IInteraction::Execute_Interact(InteractableActor, GetOwner());
+	}
+}
+
+void UInteractionComponent::ApplyMesh()
+{
+	if (OverlayMaterial != nullptr) {
+		UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
+		if (StaticMesh != nullptr) {
+			StaticMesh->SetOverlayMaterial(OverlayMaterial);
+		}
+	}
+}
+
+void UInteractionComponent::RemoveMesh()
+{
+	UMeshComponent* StaticMesh = InteractableActor->FindComponentByClass<UMeshComponent>();
+	if (StaticMesh != nullptr) {
+		StaticMesh->SetOverlayMaterial(nullptr);
 	}
 }
