@@ -23,9 +23,9 @@ UAnimNotifyState_SlowMo::UAnimNotifyState_SlowMo()
     bHasCapturedOriginal    = false;
 }
 
-void UAnimNotifyState_SlowMo::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration)
+void UAnimNotifyState_SlowMo::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference)
 {
-    Super::NotifyBegin(MeshComp, Animation, TotalDuration);
+    Super::NotifyBegin(MeshComp, Animation, TotalDuration, EventReference);
 
     runtimeTotalDuration = FMath::Max(TotalDuration, KINDA_SMALL_NUMBER);
     runtimeElapsed = 0.0f;
@@ -60,9 +60,9 @@ void UAnimNotifyState_SlowMo::NotifyBegin(USkeletalMeshComponent* MeshComp, UAni
     }
 }
 
-void UAnimNotifyState_SlowMo::NotifyTick(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float FrameDeltaTime)
+void UAnimNotifyState_SlowMo::NotifyTick(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float FrameDeltaTime, const FAnimNotifyEventReference& EventReference)
 {
-    Super::NotifyTick(MeshComp, Animation, FrameDeltaTime);
+    Super::NotifyTick(MeshComp, Animation, FrameDeltaTime, EventReference);
 
     if (!MeshComp || !bHasCapturedOriginal)
     {
@@ -88,9 +88,9 @@ void UAnimNotifyState_SlowMo::NotifyTick(USkeletalMeshComponent* MeshComp, UAnim
     }
 }
 
-void UAnimNotifyState_SlowMo::NotifyEnd(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation)
+void UAnimNotifyState_SlowMo::NotifyEnd(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
 {
-    Super::NotifyEnd(MeshComp, Animation);
+    Super::NotifyEnd(MeshComp, Animation, EventReference);
 
     if (!MeshComp || !bHasCapturedOriginal)
     {
