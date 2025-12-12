@@ -8,9 +8,10 @@
 #include "World/Environment/WindColumn.h"
 #include "Components/BoxComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
-#include "Components/Characters/Player/Glider/GliderComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "TimerManager.h"
+#include "Core/System/EtheriaGameplayTags.h"
+#include "Components/Characters/CharacterStateComponent.h"
 
 AWindColumn::AWindColumn()
 {
@@ -119,16 +120,29 @@ void AWindColumn::OnEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor*
 
 void AWindColumn::ApplyLift(APlayerCharacter* Player)
 {
-    if (!Player) return;
+    if (!Player || !Player->GetStateComponent()) return;
 
     UCharacterMovementComponent* MoveComp = Player->GetCharacterMovement();
     if (!MoveComp) return;
 
-    bool bCanLift = !bAffectOnlyGliding || Player->IsInSpecialMode();
+    bool bCanLift = false;
+
+    if (!bAffectOnlyGliding)
+    {
+        bCanLift = true;
+    }
+    else
+    {
+        FGameplayTag CurrentMovement = Player->GetStateComponent()->CurrentMovementState;
+        bCanLift = CurrentMovement == EtheriaTags::State_Movement_Airborne_Gliding ||
+                   CurrentMovement == EtheriaTags::State_Movement_Airborne_Diving;
+    }
+
     if (!bCanLift) return;
 
     FVector Vel = MoveComp->Velocity;
 
+    // Appliquer le lift vertical
     if (Vel.Z < 0.f)
         Vel.Z *= (1.f - VerticalDamping);
 
@@ -137,6 +151,7 @@ void AWindColumn::ApplyLift(APlayerCharacter* Player)
 
     MoveComp->Velocity = Vel;
 
+    // Gestion du top boost
     const FVector PlayerLoc = Player->GetActorLocation();
     const FVector BoxCenter = WindArea->GetComponentLocation();
     const FVector Extent = WindArea->GetScaledBoxExtent();

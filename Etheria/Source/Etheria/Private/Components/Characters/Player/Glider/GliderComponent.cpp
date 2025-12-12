@@ -7,8 +7,9 @@
 
 #include "Components/Characters/Player/Glider/GliderComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
+#include "Core/System/EtheriaGameplayTags.h"
+#include "Components/Characters/CharacterStateComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "Engine/Engine.h"
 
 UGliderComponent::UGliderComponent()
@@ -33,18 +34,27 @@ void UGliderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 	case EGliderMode::Gliding:
 		HandleDescent(DeltaTime);
 		if (OwnerCharacter->GetCharacterMovement()->IsWalking())
-			StopGliding();
+			StopGliding(false);
 		break;
 
 	case EGliderMode::Diving:
 		HandleDive(DeltaTime);
 		if (IsGrounded())
 		{
-			StopDiving();
-			OwnerCharacter->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+			StopDiving(false, false);
+
+			if (OwnerCharacter && OwnerCharacter->GetStateComponent())
+			{
+				int Hor = OwnerCharacter->GetHorizontalAxis();
+				int Ver = OwnerCharacter->GetVerticalAxis();
+
+				if (Hor != 0 || Ver != 0)
+					OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Grounded_Walking);
+				else
+					OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+			}
 		}
 		break;
-
 	default:
 		break;
 	}
@@ -60,10 +70,10 @@ void UGliderComponent::ToggleGliding()
             StartGliding();
             break;
         case EGliderMode::Gliding:
-            StopGliding();
+            StopGliding(true);
             break;
         case EGliderMode::Diving:
-            StopDiving(true);
+            StopDiving(true, true);
             break;
     }
 }
@@ -79,7 +89,7 @@ void UGliderComponent::ToggleDiving()
 		break;
 
 	case EGliderMode::Diving:
-		StopDiving(false);
+		StopDiving(false, true);
 		break;
 
 	default:
@@ -100,7 +110,7 @@ void UGliderComponent::StartGliding()
 	RecordOriginalSettings();
 
 	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
-	MoveComp->bOrientRotationToMovement = false; // Désactiver la rotation automatique
+	MoveComp->bOrientRotationToMovement = false;
 	MoveComp->RotationRate = FRotator(0.f, 250.f, 0.f);
 	MoveComp->GravityScale = 0.0f;
 	MoveComp->AirControl = 0.9f;
@@ -108,9 +118,11 @@ void UGliderComponent::StartGliding()
 	MoveComp->MaxAcceleration = 1024.f;
 	MoveComp->MaxWalkSpeed = 640.f;
 	MoveComp->bUseControllerDesiredRotation = true;
+
+	OnGlideStart.Broadcast();
 }
 
-void UGliderComponent::StopGliding()
+void UGliderComponent::StopGliding(bool bManualStop)
 {
 	if (!OwnerCharacter) return;
 
@@ -120,6 +132,10 @@ void UGliderComponent::StopGliding()
 		OwnerCharacter->GetGliderVisual()->SetVisibility(false);
 
 	ApplyOriginalSettings();
+	if (bManualStop)
+	{
+		OnGlideStop.Broadcast();
+	}
 }
 
 void UGliderComponent::StartDiving()
@@ -141,9 +157,10 @@ void UGliderComponent::StartDiving()
 	MoveComp->BrakingDecelerationFalling = 0.f;
 
 	MoveComp->SetMovementMode(MOVE_Flying);
+	OnDiveStart.Broadcast();
 }
 
-void UGliderComponent::StopDiving(bool bGoToGlide)
+void UGliderComponent::StopDiving(bool bGoToGlide, bool bManualStop)
 {
 	if (!OwnerCharacter || CurrentMode != EGliderMode::Diving) return;
 
@@ -161,7 +178,6 @@ void UGliderComponent::StopDiving(bool bGoToGlide)
 
 	if (bGoToGlide)
 	{
-		// Passer en Gliding proprement
 		StartGliding();
 	}
 	else
@@ -181,6 +197,10 @@ void UGliderComponent::StopDiving(bool bGoToGlide)
 	}
 
 	CurrentDiveSpeed = MinDiveSpeed;
+	if (bManualStop && !bGoToGlide)
+	{
+		OnDiveStop.Broadcast();
+	}
 }
 
 bool UGliderComponent::CanStartGliding() const

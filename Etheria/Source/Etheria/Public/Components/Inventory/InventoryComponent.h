@@ -15,6 +15,8 @@
 class UItemDefinition;
 class AItemPickup;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemAdded, const UItemDefinition*, ItemDef, int32, SlotIndex);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemRemoved, const UItemDefinition*, ItemDef, int32, SlotIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInventorySlotChanged, int32, SlotIndex, const FItemStack&, NewStack);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedIndexChanged, int32, NewIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemUsed, const UItemDefinition*, ItemDef, bool, bConsumed);
@@ -32,72 +34,41 @@ public:
 	static constexpr int32 kMaxSlots = 3;
 
 protected:
-	UPROPERTY(VisibleAnywhere, Category="Inventory")
-	TArray<FInventorySlot> slots;
-
-	UPROPERTY(VisibleAnywhere, Category="Inventory")
-	int32 selectedIndex = 0;
+	UPROPERTY(VisibleAnywhere, Category="Inventory") TArray<FInventorySlot> slots;
+	UPROPERTY(VisibleAnywhere, Category="Inventory") int32 selectedIndex = 0;
 
 	// Classe actor to drop items (BP child autorized)
-	UPROPERTY(EditDefaultsOnly, Category="Inventory|Drop")
-	TSubclassOf<AItemPickup> pickupClass;
+	UPROPERTY(EditDefaultsOnly, Category="Inventory|Drop") TSubclassOf<AItemPickup> pickupClass;
 
 public:
 	// ---- Events (UI & Gameplay can bind)
-	UPROPERTY(BlueprintAssignable, Category="Inventory|Events")
-	FOnInventorySlotChanged OnInventorySlotChanged;
-
-	UPROPERTY(BlueprintAssignable, Category="Inventory|Events")
-	FOnSelectedIndexChanged OnSelectedIndexChanged;
-
-	UPROPERTY(BlueprintAssignable, Category="Inventory|Events")
-	FOnItemUsed OnItemUsed;
-
-	UPROPERTY(BlueprintAssignable, Category="Inventory|Events")
-	FOnInventoryFull OnInventoryFull;
-
-	UPROPERTY(BlueprintAssignable, Category="Inventory|Events")
-	FOnRequestUseSelected OnRequestUseSelected;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnItemAdded OnItemAdded;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnItemRemoved OnItemRemoved;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnInventorySlotChanged OnInventorySlotChanged;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnSelectedIndexChanged OnSelectedIndexChanged;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnItemUsed OnItemUsed;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnInventoryFull OnInventoryFull;
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Events") FOnRequestUseSelected OnRequestUseSelected;
 
 	// ---- Drop
-	UPROPERTY(EditAnywhere, Category="Inventory|Drop")
-	float DropForwardDistance = 100.f;
-
-	UPROPERTY(EditAnywhere, Category="Inventory|Drop")
-	float DropUpOffset = 20.f;
-
-	UPROPERTY(EditAnywhere, Category="Inventory|Drop")
-	float DropDownProbe = 120.f;
+	UPROPERTY(EditAnywhere, Category="Inventory|Drop") float DropForwardDistance = 100.f;
+	UPROPERTY(EditAnywhere, Category="Inventory|Drop") float DropUpOffset = 20.f;
+	UPROPERTY(EditAnywhere, Category="Inventory|Drop") float DropDownProbe = 120.f;
 
 	// ---- Debug
-	UPROPERTY(EditAnywhere, Category="Inventory|Drop")
-	bool bDropDrawDebug = false;
+	UPROPERTY(EditAnywhere, Category="Inventory|Drop") bool bDropDrawDebug = false;
 
 	
 	// ---- Core API
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	bool TryAddItem(UItemDefinition* Def, int32 Quantity=1);
-
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	bool TryAddPickup(AItemPickup* Pickup);
-
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	bool DropSelected(bool bDropAll=true, int32 Amount=1);
-
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	bool UseSelected();
-
-	UFUNCTION(BlueprintPure, Category="Inventory")
-	int32 GetSelectedIndex() const { return selectedIndex; }
-
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	void SelectNext();
-
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	void SelectPrevious();
-
-	UFUNCTION(BlueprintPure, Category="Inventory")
-	const TArray<FInventorySlot>& GetSlots() const { return slots; }
+	UFUNCTION(BlueprintCallable, Category="Inventory") bool TryAddItem(UItemDefinition* Def, int32 Quantity=1);
+	UFUNCTION(BlueprintCallable, Category="Inventory") bool TryAddPickup(AItemPickup* Pickup);
+	UFUNCTION(BlueprintCallable, Category="Inventory") bool DropSelected(bool bDropAll=true, int32 Amount=1);
+	UFUNCTION(BlueprintCallable, Category="Inventory") bool UseSelected();
+	UFUNCTION(BlueprintPure, Category="Inventory") int32 GetSelectedIndex() const { return selectedIndex; }
+	UFUNCTION(BlueprintCallable, Category="Inventory") void SelectNext();
+	UFUNCTION(BlueprintCallable, Category="Inventory") void SelectPrevious();
+	UFUNCTION(BlueprintPure, Category="Inventory") const TArray<FInventorySlot>& GetSlots() const { return slots; }
+	UFUNCTION(BlueprintPure, Category="Inventory") UItemDefinition* GetItemDefInSlot(int32 SlotIndex) const;
 
 protected:
 	virtual void BeginPlay() override;

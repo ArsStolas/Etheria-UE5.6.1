@@ -28,11 +28,8 @@ struct FItemStack
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Item")
-	UItemDefinition* def = nullptr;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Item", meta=(ClampMin="1"))
-	int32 quantity = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Item") UItemDefinition* def = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Item", meta=(ClampMin="1")) int32 quantity = 0;
 
 	bool IsValid() const { return def != nullptr && quantity > 0; }
 	void Reset() { def = nullptr; quantity = 0; }
@@ -43,8 +40,7 @@ struct FInventorySlot
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Item")
-	FItemStack stack;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Item") FItemStack stack;
 
 	bool IsEmpty() const { return !stack.IsValid(); }
 	void Clear() { stack.Reset(); }

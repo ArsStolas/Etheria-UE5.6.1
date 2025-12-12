@@ -15,6 +15,8 @@
 
 class APlayerCharacter;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FGliderEvent);
+
 UENUM(BlueprintType)
 enum class EGliderMode : uint8
 {
@@ -37,7 +39,17 @@ public:
     void ToggleDiving();
     FORCEINLINE bool IsDiving() const { return CurrentMode == EGliderMode::Diving; }
 
-    FORCEINLINE bool IsInSpecialMode() const { return CurrentMode != EGliderMode::None; }
+    UPROPERTY(BlueprintAssignable)
+    FGliderEvent OnGlideStart;
+
+    UPROPERTY(BlueprintAssignable)
+    FGliderEvent OnGlideStop;
+
+    UPROPERTY(BlueprintAssignable)
+    FGliderEvent OnDiveStart;
+
+    UPROPERTY(BlueprintAssignable)
+    FGliderEvent OnDiveStop;
 
 protected:
     virtual void BeginPlay() override;
@@ -94,9 +106,9 @@ protected:
 
 private:
     void StartGliding();
-    void StopGliding();
+    void StopGliding(bool bManualStop);
     void StartDiving();
-    void StopDiving(bool bGoToGlide = false);
+    void StopDiving(bool bGoToGlide = false, bool bManualStop = false);
 
     bool CanStartGliding() const;
     bool IsGrounded() const;

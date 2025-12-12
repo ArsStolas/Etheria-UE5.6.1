@@ -8,19 +8,26 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Characters/BaseCharacter.h"
-#include "InputActionValue.h"
 #include "PlayerCharacter.generated.h"
+
+struct FInputActionValue;
 
 class USpringArmComponent;
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
-class UGliderComponent;
+class UFlightComponent;
 class UInventoryComponent;
-class UInteractorComponent;
+//class UInteractionComponent;
 class ULockTargetComponent;
+class ULockVisualComponent;
+class UQuestComponent;
 
+// ============================================================
+// AXIS STATE STRUCT
+// ============================================================
 USTRUCT()
 struct FAxisPressState
 {
@@ -34,11 +41,10 @@ struct FAxisPressState
     int32 GetAxisValue() const
     {
         if (bNegPressed && bPosPressed)
-        {
             return (PosLastTime > NegLastTime) ? +1 : -1;
-        }
-        if (bNegPressed) return -1;
-        if (bPosPressed) return +1;
+
+        if (bNegPressed)  return -1;
+        if (bPosPressed)  return +1;
         return 0;
     }
 
@@ -48,6 +54,9 @@ struct FAxisPressState
     void OnPosCompleted()          { bPosPressed = false; }
 };
 
+// ============================================================
+// PLAYER CHARACTER
+// ============================================================
 UCLASS()
 class ETHERIA_API APlayerCharacter : public ABaseCharacter
 {
@@ -57,196 +66,241 @@ public:
     APlayerCharacter();
 
     FORCEINLINE UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
-    bool IsInSpecialMode() const;
-
-    // Exposés pour le GliderComponent
     FORCEINLINE int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
+    FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
 
-    FORCEINLINE UGliderComponent* GetGliderComponent() const { return GliderComponent; }
-
+    bool IsGrounded() const;
+    
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
-
-    void Look(const struct FInputActionValue& Value);
-
-    void OnJumpPressed();
     
-    void OnCrouchPressed();
-    void StartCrouch();
-    void StopCrouch();
+// ============================================================
+// COMPONENTS
+// ============================================================
+#pragma region COMPONENTS
 
-    void StartSprint();
-    void StopSprint();
-
-    void ToggleGlideMode();
-    void ToggleDiveMode();
-
-    void AlignToCamera();
-
-    UFUNCTION() void Input_SelectNext();
-    UFUNCTION() void Input_SelectPrev();
-    UFUNCTION() void Input_UseItem();
-    UFUNCTION() void Input_DropItem();
-    UFUNCTION() void Input_Interact();
-    
-    UFUNCTION() void HandleAttackStart(FName AttackId);
-    UFUNCTION() void HandleAttackEnd(FName AttackId);
-    
-#pragma region "COMPONENTS"
-    // === CAMERA COMPONENTS ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
+    // --- CAMERA ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     USpringArmComponent* CameraBoom;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera Components")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     UCameraComponent* FollowCamera;
 
-    // === GLIDER COMPONENT ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider")
-    UGliderComponent* GliderComponent;
+    // --- FLIGHT MODE ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode")
+    UFlightComponent* FlightComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Glider|Visual")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode|Glider|Visual")
     UStaticMeshComponent* GliderVisual;
 
-    // === INVENTORY COMPONENTS ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Inventory Component", meta=(AllowPrivateAccess="true"))
+    // --- INVENTORY ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Inventory", meta=(AllowPrivateAccess="true"))
     UInventoryComponent* InventoryComponent;
 
-    // === Interactor COMPONENTS ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interactor Component", meta=(AllowPrivateAccess="true"))
-    UInteractorComponent* InteractorComponent;
+    // --- INTERACTOR ---
+    //UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction", meta=(AllowPrivateAccess="true"))
+    //UInteractionComponent* InteractionComponent;
 
-    // === LOCK TARGET COMPONENTS ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Lock Target Components", meta=(AllowPrivateAccess="true"))
+    // --- LOCK TARGET ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
     ULockTargetComponent* LockTargetComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
+    ULockVisualComponent* LockVisualComponent;
+
+    // --- QUEST TARGET ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
+    UQuestComponent* QuestComponent;
+
 #pragma endregion
-    
-#pragma region "INPUTS"
-    // --===-- INPUTS --===--
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+
+// ============================================================
+// INPUT SYSTEM
+// ============================================================
+#pragma region INPUT ACTIONS
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Context")
     UInputMappingContext* PlayerContext;
 
-    // === CAMERA ACTION ===
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    // --- CAMERA ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Camera")
     UInputAction* LookAction;
-    
-    // === MOVEMENTS ACTIONS ===
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    void OnAimPressed();
+    void OnAimReleased();
+
+    // --- MOVEMENT ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
     UInputAction* ForwardAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
     UInputAction* BackAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
     UInputAction* LeftAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
     UInputAction* RightAction;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
     UInputAction* JumpAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
     UInputAction* CrouchAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Movement")
     UInputAction* SprintAction;
 
-    // === GLIDER ACTIONS ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
+    // --- GLIDER ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Glider")
     UInputAction* GliderAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Glider")
     UInputAction* DiveAction;
 
-    // === INVENTORY ACTIONS ===
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    // --- INVENTORY ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Inventory")
     UInputAction* NextItemAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Inventory")
     UInputAction* PrevItemAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Inventory")
     UInputAction* UseItemAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Inventory")
     UInputAction* DropItemAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Inventory")
     UInputAction* InteractAction;
-    
-    // === COMBAT ACTIONS ===
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+
+    // --- COMBAT ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat")
     UInputAction* AttackLightAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
-    UInputAction* AttackHeavyAction; // used for charge attacks
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat")
+    UInputAction* AttackHeavyAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat")
     UInputAction* ParryAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat")
     UInputAction* DodgeAction;
 
-    // === LOCK TARGET ACTIONS ===
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    // --- LOCK TARGET ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
     UInputAction* LockToggleAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
     UInputAction* LockSwitchLeftAction;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Player Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
     UInputAction* LockSwitchRightAction;
 
 #pragma endregion
-    
-    // === MOVEMENT SPEEDS ===
+
+// ============================================================
+// MOVEMENT CONFIG
+// ============================================================
+#pragma region MOVEMENT CONFIG
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float WalkSpeed = 600.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float SprintSpeed = 900.f;
 
-    UPROPERTY(EditAnywhere, Category="Player Input") float JumpBufferTime = 0.25f;
-    bool bJumpBuffered = false;
-    float JumpBufferExpireAt = 0.f;
-    bool bLockJumpCrouchFromCombat = false;
+    UPROPERTY(EditAnywhere, Category = "Movement|Jump Buffer")
+    float JumpBufferTime = 0.25f;
 
+    UPROPERTY(EditAnywhere, Category = "Movement|State")
+    float AirborneStateGraceDuration = 0.18f;
+
+    bool  bJumpBuffered = false;
+    float JumpBufferExpireAt = 0.f;
+    bool  bLockJumpCrouchFromCombat = false;
+
+#pragma endregion
+
+// ============================================================
+// AIMING 
+// ============================================================
+#pragma region AIMING
+
+    /** True when the player is aiming (right click held). */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aiming")
+    bool bIsAiming = false;
+
+    /** Base FOV for normal gameplay (cached at BeginPlay). */
+    float BaseFOV = 90.f;
+
+    /** Base arm length for normal camera (cached at BeginPlay). */
+    float BaseArmLength = 350.f;
+
+    /** Called to enable or disable aiming mode. */
+    void ToggleAiming(bool bEnable);
+
+    /** Simple accessor. */
+    bool IsAiming() const { return bIsAiming; }
+
+#pragma endregion
+    
+// ============================================================
+// STATE & AXIS TRACKING
+// ============================================================
 private:
-    // STATES AXIS
     FAxisPressState Horizontal;
     FAxisPressState Vertical;
 
-    // === CAMERA STATE ===
-    bool bIsLookingAround = false;
-    float TimeSinceLastLook = 0.f;
+    float AirborneIgnoreUntil = 0.f;
 
-#pragma region "HANDLERS"
-    // === MOVEMENTS HANDLERS ===
-    void OnForwardStarted(const FInputActionValue& Value);
-    void OnForwardCompleted(const FInputActionValue& Value);
-    void OnBackStarted(const FInputActionValue& Value);
-    void OnBackCompleted(const FInputActionValue& Value);
-    void OnLeftStarted(const FInputActionValue& Value);
-    void OnLeftCompleted(const FInputActionValue& Value);
-    void OnRightStarted(const FInputActionValue& Value);
-    void OnRightCompleted(const FInputActionValue& Value);
-    
-    // === COMBAT HANDLERS ===
-    void OnAttackLightPressed();
-    void OnAttackLightReleased();
-    void OnAttackHeavyPressed();
-    void OnAttackHeavyReleased();   // release the charge at current level
-    void OnAttackHeavyCanceled();   // cancel the charge if needed
-    void OnParryPressed();
-    void OnParryReleased();
+// ============================================================
+// INTERNAL HANDLERS
+// ============================================================
+#pragma region HANDLERS
+
+    // --- Movement ---
+    void OnForwardStarted(const FInputActionValue&);   void OnForwardCompleted(const FInputActionValue&);
+    void OnBackStarted(const FInputActionValue&);      void OnBackCompleted(const FInputActionValue&);
+    void OnLeftStarted(const FInputActionValue&);      void OnLeftCompleted(const FInputActionValue&);
+    void OnRightStarted(const FInputActionValue&);     void OnRightCompleted(const FInputActionValue&);
+    void StartSprint();                                void StopSprint();
+    void OnCrouchPressed();                            void StopCrouch();
+    void OnJumpPressed();                              virtual void Landed(const FHitResult&) override;
+
+    // --- Movement State ---
+    void HandleMovementInput();
+    void UpdateMovementState();
+    void HandleAirborneState();
+    void HandleGroundedState();
+
+    // --- Camera ---
+    void Look(const FInputActionValue& Value);
+
+    // --- Glider ---
+    void ToggleGlideMode();                            void ToggleDiveMode();
+    void AlignToCamera();
+    UFUNCTION() void OnGlideStart();                   UFUNCTION() void OnGlideStop();
+    UFUNCTION() void OnDiveStart();                    UFUNCTION() void OnDiveStop();
+
+    // --- Combat ---
+    void OnAttackLightPressed();   void OnAttackLightReleased();
+    void OnAttackHeavyPressed();   void OnAttackHeavyReleased();   
+    void OnAttackHeavyCanceled();
+    void OnParryPressed();         void OnParryReleased();
     void OnDodgePressed();
+    UFUNCTION() void HandleAttackStart(FName AttackId);
+    UFUNCTION() void HandleAttackEnd(FName AttackId);
+
+    // --- Lock Target ---
     void OnLockToggle();
-    
-    // === LOCK TARGET HANDLERS ===
     void OnLockSwitchLeft();
     void OnLockSwitchRight();
+
+    // --- Inventory ---
+    UFUNCTION() void Input_SelectNext();   UFUNCTION() void Input_SelectPrev();
+    UFUNCTION() void Input_UseItem();      UFUNCTION() void Input_DropItem();
+
+    // --- Interactor ---
+    UFUNCTION() void Input_Interact();
+
+#pragma endregion
+
+// ============================================================
+// STATE LOGGING
+// ============================================================
+#pragma region STATE LOGS
+
+    UFUNCTION() void LogMovementStateChanged(FGameplayTag Previous, FGameplayTag New);
+    UFUNCTION() void LogCombatStateChanged(FGameplayTag Previous, FGameplayTag New);
+    UFUNCTION() void LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New);
+    UFUNCTION() void LogHealthChanged(float NewHealth, float MaxHealth);
+    UFUNCTION() void LogDeath();
+
 #pragma endregion
 };
