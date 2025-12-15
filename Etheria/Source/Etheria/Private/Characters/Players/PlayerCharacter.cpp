@@ -382,12 +382,12 @@ void APlayerCharacter::StopSprint()
 
 void APlayerCharacter::OnJumpPressed()
 {
-    // Si on est actuellement en grapple, détacher d'abord
-    /*if (GrappleTraversalComponent && GrappleTraversalComponent->IsGrappling())
+    if (GrappleComponent && GrappleComponent->bIsGrappling)
     {
-        GrappleTraversalComponent->DetachGrapple();
+        GrappleComponent->DetachGrappleWithJump();
+        Jump();
         return;
-    }*/
+    }
 
     if (!CombatComponent) { Jump(); return; }
     if (CombatComponent->IsJumpBlocked()) return;
@@ -395,7 +395,9 @@ void APlayerCharacter::OnJumpPressed()
     if (CombatComponent->IsAttackActive())
     {
         bJumpBuffered = true;
-        JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
+        JumpBufferExpireAt = GetWorld()
+            ? GetWorld()->GetTimeSeconds() + JumpBufferTime
+            : 0.f;
         return;
     }
 
