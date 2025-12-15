@@ -12,6 +12,7 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class UGrappleManipulatorComponent;
 struct FInputActionValue;
 
 class USpringArmComponent;
@@ -24,6 +25,7 @@ class UInventoryComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
 class UQuestComponent;
+class UGrappleComponent;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -69,6 +71,9 @@ public:
     FORCEINLINE int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
+    FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+    FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+    FORCEINLINE float GetWalkSpeed() const { return WalkSpeed; }
 
     bool IsGrounded() const;
     
@@ -113,6 +118,11 @@ protected:
     // --- QUEST TARGET ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
     UQuestComponent* QuestComponent;
+
+    // --- GRAPPLE ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Grapple", meta=(AllowPrivateAccess="true"))
+    UGrappleComponent* GrappleComponent;
+
 
 #pragma endregion
 
@@ -181,6 +191,14 @@ protected:
     UInputAction* LockSwitchLeftAction;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
     UInputAction* LockSwitchRightAction;
+
+    // --- GRAPPLE ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input|Grapple")
+    UInputAction* GrappleAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input|Grapple")
+    UInputAction* GrappleClimbUpAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input|Grapple")
+    UInputAction* GrappleClimbDownAction;
 
 #pragma endregion
 
@@ -289,6 +307,12 @@ private:
     // --- Interactor ---
     UFUNCTION() void Input_Interact();
 
+    // --- Grapple ---
+    void Input_UseGrapple(const FInputActionValue& Value);
+    void Input_ClimbGrappleUp(const FInputActionValue& Value);
+    void Input_ClimbGrappleDown(const FInputActionValue& Value);
+    void Input_DetachGrapple();
+
 #pragma endregion
 
 // ============================================================
@@ -301,6 +325,9 @@ private:
     UFUNCTION() void LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New);
     UFUNCTION() void LogHealthChanged(float NewHealth, float MaxHealth);
     UFUNCTION() void LogDeath();
+
+    UFUNCTION() void OnGrappleStart();
+    UFUNCTION() void OnGrappleStop();
 
 #pragma endregion
 };

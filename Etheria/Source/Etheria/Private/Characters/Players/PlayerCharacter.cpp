@@ -14,6 +14,7 @@
 #include "Components/Characters/CharacterStateComponent.h"
 #include "Components/Characters/HealthComponent.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
+#include "Components/Characters/Player/Grapple/GrappleComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
@@ -22,6 +23,7 @@
 #include "Components/Quests/QuestComponent.h"
 #include "Core/System/EtheriaGameplayTags.h"
 #include "Data/Weapons/WeaponData.h"
+#include "World/Grapple/GrapplePointActor.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -61,6 +63,9 @@ APlayerCharacter::APlayerCharacter()
 
     // --- QUEST COMPONENT ---
     QuestComponent = CreateDefaultSubobject<UQuestComponent>(TEXT("BPC_QuestComponent"));
+
+    // --- GRAPPLE COMPONENTS ---
+    GrappleComponent = CreateDefaultSubobject<UGrappleComponent>(TEXT("BPC_GrappleComponent"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -114,6 +119,8 @@ void APlayerCharacter::BeginPlay()
         FlightComponent->OnDiveStart.AddDynamic(this, &APlayerCharacter::OnDiveStart);
         FlightComponent->OnDiveStop.AddDynamic(this, &APlayerCharacter::OnDiveStop);
     }
+
+    // --- Grapple Delegates ---
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
@@ -137,7 +144,6 @@ void APlayerCharacter::Tick(float DeltaTime)
         FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, BaseFOV, DeltaTime, 6.f));
     }
 }
-
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -234,23 +240,24 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
             EIC->BindAction(LockSwitchRightAction, ETriggerEvent::Started, this, &APlayerCharacter::OnLockSwitchRight);
         }
     #pragma endregion
+
+    #pragma region "GRAPPLE  BINDS"  
+        if (GrappleAction)
+        {
+            EIC->BindAction(GrappleAction, ETriggerEvent::Started, this, &APlayerCharacter::Input_UseGrapple);
+        }
+    
+        if (GrappleClimbUpAction)
+        {
+            EIC->BindAction(GrappleClimbUpAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Input_ClimbGrappleUp);
+        }
+
+        if (GrappleClimbDownAction)
+        {
+            EIC->BindAction(GrappleClimbDownAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Input_ClimbGrappleDown);
+        }
+    #pragma endregion
     }
-}
-
-bool APlayerCharacter::IsGrounded() const
-{
-    FHitResult Hit;
-    FVector Start = this->GetActorLocation();
-    FVector End = Start - FVector(0.f, 0.f, 100.f);
-
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-
-    bool bHit = this->GetWorld()->LineTraceSingleByChannel(
-        Hit, Start, End, ECC_Visibility, QueryParams
-    );
-
-    return bHit;
 }
 
 #pragma region AIMING
@@ -375,6 +382,13 @@ void APlayerCharacter::StopSprint()
 
 void APlayerCharacter::OnJumpPressed()
 {
+    // Si on est actuellement en grapple, détacher d'abord
+    /*if (GrappleTraversalComponent && GrappleTraversalComponent->IsGrappling())
+    {
+        GrappleTraversalComponent->DetachGrapple();
+        return;
+    }*/
+
     if (!CombatComponent) { Jump(); return; }
     if (CombatComponent->IsJumpBlocked()) return;
 
@@ -401,6 +415,22 @@ void APlayerCharacter::Landed(const FHitResult& Hit)
     {
         StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
     }
+}
+
+bool APlayerCharacter::IsGrounded() const
+{
+    FHitResult Hit;
+    FVector Start = this->GetActorLocation();
+    FVector End = Start - FVector(0.f, 0.f, 100.f);
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+
+    bool bHit = this->GetWorld()->LineTraceSingleByChannel(
+        Hit, Start, End, ECC_Visibility, QueryParams
+    );
+
+    return bHit;
 }
 
 void APlayerCharacter::OnCrouchPressed()
@@ -837,18 +867,50 @@ void APlayerCharacter::Input_Interact()
 
 #pragma endregion
 
+#pragma region "GRAPPLE INPUTS"
+
+void APlayerCharacter::Input_UseGrapple(const FInputActionValue& Value)
+{
+    if (GrappleComponent)
+    {
+        GrappleComponent->ToggleGrapple();
+    }
+}
+
+void APlayerCharacter::Input_ClimbGrappleUp(const FInputActionValue& Value)
+{
+}
+
+void APlayerCharacter::Input_ClimbGrappleDown(const FInputActionValue& Value)
+{
+}
+
+void APlayerCharacter::Input_DetachGrapple()
+{
+    if (GrappleComponent)
+    {
+        GrappleComponent->DetachGrapple();
+    }
+}
+
+#pragma endregion
+
+
+
+
+
 #pragma region "STATE LOGS"
 
 void APlayerCharacter::LogMovementStateChanged(FGameplayTag Previous, FGameplayTag New)
 {
-    UE_LOG(LogTemp, Warning, TEXT("[%s] MovementState changed: %s -> %s"),
-           *GetName(), *Previous.ToString(), *New.ToString());
+    /*UE_LOG(LogTemp, Warning, TEXT("[%s] MovementState changed: %s -> %s"),
+           *GetName(), *Previous.ToString(), *New.ToString());*/
 }
 
 void APlayerCharacter::LogCombatStateChanged(FGameplayTag Previous, FGameplayTag New)
-{
+{/*
     UE_LOG(LogTemp, Warning, TEXT("[%s] CombatState changed: %s -> %s"),
-           *GetName(), *Previous.ToString(), *New.ToString());
+           *GetName(), *Previous.ToString(), *New.ToString());*/
 }
 
 void APlayerCharacter::LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New)
@@ -869,6 +931,16 @@ void APlayerCharacter::LogDeath()
     {
         StateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
     }
+}
+
+void APlayerCharacter::OnGrappleStart()
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] Grapple started"), *GetName());
+}
+
+void APlayerCharacter::OnGrappleStop()
+{
+    UE_LOG(LogTemp, Warning, TEXT("[%s] Grapple ended"), *GetName());
 }
 
 #pragma endregion
