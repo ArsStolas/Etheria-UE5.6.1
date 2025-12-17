@@ -1,215 +1,311 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeDetectionComponent - Source
+*/
 
 #include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
 
 #include "Characters/Players/PlayerCharacter.h"
 #include "Camera/CameraComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 #include "Components/Characters/CharacterStateComponent.h"
 #include "World/Rope/RopeAttachPoint.h"
 
 URopeDetectionComponent::URopeDetectionComponent()
 {
-	PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
 }
 
 void URopeDetectionComponent::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	OwnerCharacter = Cast<APlayerCharacter>(GetOwner());
-	if (!OwnerCharacter) return;
+    OwnerCharacter = Cast<APlayerCharacter>(GetOwner());
+    if (!OwnerCharacter) return;
 
-	Camera = OwnerCharacter->FindComponentByClass<UCameraComponent>();
+    Camera = OwnerCharacter->FindComponentByClass<UCameraComponent>();
+    StateComponent = OwnerCharacter->GetStateComponent();
+
+    UpdateCachedValues();
+}
+
+void URopeDetectionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    CurrentPoint.Reset();
+    Super::EndPlay(EndPlayReason);
+}
+
+void URopeDetectionComponent::UpdateCachedValues()
+{
+    if (!OwnerCharacter || !Camera)
+    {
+        return;
+    }
+
+    CachedMaxDistSq = MaxDetectionDistance * MaxDetectionDistance;
+    CachedMinCameraDot = MinCameraDot;
 }
 
 void URopeDetectionComponent::TickComponent(
-	float DeltaTime,
-	ELevelTick TickType,
-	FActorComponentTickFunction* ThisTickFunction)
+    float DeltaTime,
+    ELevelTick TickType,
+    FActorComponentTickFunction* ThisTickFunction)
 {
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	DetectAttachPoint();
+    TimeSinceLastScan += DeltaTime;
+    if (TimeSinceLastScan < DetectionInterval)
+    {
+        return;
+    }
+    TimeSinceLastScan = 0.f;
+
+    if (!OwnerCharacter || !Camera || !StateComponent)
+    {
+        return;
+    }
+
+    DetectAttachPoint();
 }
 
 void URopeDetectionComponent::DetectAttachPoint()
 {
-	if (!OwnerCharacter || !Camera) return;
+    CachedCameraLocation = Camera->GetComponentLocation();
+    CachedCameraForward = Camera->GetForwardVector();
 
-	// --- Cache caméra (IMPORTANT) ---
-	CachedCameraLocation = Camera->GetComponentLocation();
-	CachedCameraForward = Camera->GetForwardVector();
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+    if (bDebugMode)
+    {
+        Stats.TotalPointsChecked = 0;
+        Stats.FailedBroadPhase = 0;
+        Stats.FailedValidation = 0;
+    }
+#endif
 
-	float BestScore = -FLT_MAX;
-	ARopeAttachPoint* BestPoint = nullptr;
+    ARopeAttachPoint* PreviousPoint = CurrentPoint.Get();
 
-	TArray<AActor*> FoundActors;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARopeAttachPoint::StaticClass(), FoundActors);
+    float BestScore = -FLT_MAX;
+    ARopeAttachPoint* BestPoint = nullptr;
 
-	for (AActor* Actor : FoundActors)
-	{
-		ARopeAttachPoint* Point = Cast<ARopeAttachPoint>(Actor);
-		if (!Point) continue;
+    // === État joueur ===
+    if (StateComponent->IsInLifeState(EtheriaTags::State_Life_Dead))
+    {
+        BestPoint = nullptr;
+    }
+    else
+    {
+        const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
 
-		FString FailReason;
-		bool bValid = IsValidPoint(Point, FailReason);
+        for (const TWeakObjectPtr<ARopeAttachPoint>& WeakPoint : ARopeAttachPoint::AllAttachPoints)
+        {
+            ARopeAttachPoint* Point = WeakPoint.Get();
+            if (!Point)
+            {
+                continue;
+            }
 
-		// --- Debug points ---
-		if (bDebugDraw)
-		{
-			FColor Color = bValid ? FColor::Yellow : FColor::Red;
-			DrawDebugSphere(GetWorld(), Point->GetActorLocation(), 25.f, 8, Color, false, 0.f);
-			if (!bValid)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[RopeDetection] Point %s invalid: %s"), *Point->GetName(), *FailReason);
-			}
-		}
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+            if (bDebugMode)
+            {
+                Stats.TotalPointsChecked++;
+            }
+#endif
 
-		if (!bValid) continue;
+            // === BROAD PHASE ===
+            const FVector PointLoc = Point->GetActorLocation();
+            const float DistSq = FVector::DistSquared(CachedCameraLocation, PointLoc);
 
-		// --- Scoring ---
-		const FVector ToPoint = Point->GetActorLocation() - CachedCameraLocation;
-		const float Distance = ToPoint.Size();
-		const float Dot = FVector::DotProduct(CachedCameraForward, ToPoint.GetSafeNormal());
+            if (DistSq > CachedMaxDistSq)
+            {
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+                if (bDebugMode)
+                {
+                    Stats.FailedBroadPhase++;
+                }
+#endif
+                continue;
+            }
 
-		// Pondération : angle prioritaire
-		float Score = Dot * 2000.f + (1.f - Distance / MaxDetectionDistance) * 500.f;
+            // === VALIDATION ===
+            FString FailReason;
+            if (!IsValidPoint(Point, FailReason, PlayerLoc))
+            {
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+                if (bDebugMode)
+                {
+                    Stats.FailedValidation++;
+                }
+#endif
+                continue;
+            }
 
-		if (Score > BestScore)
-		{
-			BestScore = Score;
-			BestPoint = Point;
-		}
-	}
+            // === SCORING ===
+            const FVector ToPoint = (PointLoc - CachedCameraLocation).GetSafeNormal();
+            const float DotProduct = FVector::DotProduct(CachedCameraForward, ToPoint);
 
-	CurrentPoint = BestPoint;
+            const float Distance = FMath::Sqrt(DistSq);
+            const float DistanceFactor = 1.f - (Distance / MaxDetectionDistance);
 
-	// --- Debug BestPoint ---
-	if (bDebugDraw && BestPoint)
-	{
-		DrawDebugSphere(
-			GetWorld(),
-			BestPoint->GetActorLocation(),
-			BestPoint->DetectionRadius,
-			16,
-			FColor::Green,
-			false,
-			0.f,
-			0,
-			2.f
-		);
-	}
+            const float DirectionScore = DotProduct * DotProduct;
+            const float DistanceScore = DistanceFactor * DistanceFactor;
 
-	// --- Debug cone ---
-	if (bDebugDraw)
-	{
-		const float ConeLength = MaxDetectionDistance;
-		const float ConeHalfAngleRad = FMath::DegreesToRadians(DetectionHalfAngle);
+            const float Score =
+                (DirectionScore * ScoringDirectionWeight * 1000.f) +
+                (DistanceScore * ScoringDistanceWeight * 500.f);
 
-		DrawDebugCone(
-			GetWorld(),
-			CachedCameraLocation,
-			CachedCameraForward,
-			ConeLength,
-			ConeHalfAngleRad,
-			ConeHalfAngleRad,
-			16,
-			FColor::Cyan,
-			false,
-			0.f,
-			0,
-			1.5f
-		);
-	}
+            if (Score > BestScore)
+            {
+                BestScore = Score;
+                BestPoint = Point;
+            }
+        }
+    }
+
+    // === CHANGEMENT D'ÉTAT ===
+    if (BestPoint != PreviousPoint)
+    {
+        CurrentPoint = BestPoint;
+
+        if (bDebugMode)
+        {
+            UE_LOG(LogTemp, Log,
+                TEXT("[RopeDetection] Detected point changed: %s"),
+                BestPoint ? *BestPoint->GetName() : TEXT("None"));
+        }
+
+        OnDetectedPointChanged.Broadcast(BestPoint);
+    }
+
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+    if (bDebugMode)
+    {
+        if (BestPoint)
+        {
+            DrawDebugSphere(
+                GetWorld(),
+                BestPoint->GetActorLocation(),
+                BestPoint->DetectionRadius,
+                16,
+                FColor::Green,
+                false,
+                DetectionInterval * 1.5f
+            );
+        }
+
+        DrawDebugCone(
+            GetWorld(),
+            CachedCameraLocation,
+            CachedCameraForward,
+            MaxDetectionDistance,
+            FMath::DegreesToRadians(DetectionHalfAngle),
+            FMath::DegreesToRadians(DetectionHalfAngle),
+            16,
+            FColor::Cyan,
+            false,
+            DetectionInterval * 1.5f
+        );
+    }
+#endif
 }
 
-bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& OutFailReason) const
+bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& OutFailReason, const FVector& PlayerLoc) const
 {
-	OutFailReason = "";
+    if (!Point)
+    {
+        return false;
+    }
 
-	if (!Point)
-	{
-		OutFailReason = "Null Point";
-		return false;
-	}
+    // Check 0: État du joueur (très rapide)
+    if (StateComponent)
+    {
+        if (StateComponent->IsInLifeState(EtheriaTags::State_Life_Dead))
+        {
+            OutFailReason = "Dead";
+            return false;
+        }
 
-	if (!OwnerCharacter)
-	{
-		OutFailReason = "Invalid Owner";
-		return false;
-	}
+        if (StateComponent->IsInLifeState(EtheriaTags::State_Movement_Airborne_Diving))
+        {
+            OutFailReason = "Diving";
+            return false;
+        }
+    }
 
-	UCharacterStateComponent* StateComp = OwnerCharacter->GetStateComponent();
-	if (!StateComp)
-	{
-		OutFailReason = "No StateComponent";
-		return false;
-	}
+    const FVector PointLoc = Point->GetActorLocation();
 
-	if (StateComp->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
-	{
-		OutFailReason = "Diving";
-		return false;
-	}
+    // Check 1: Direction (rapide)
+    const FVector ToPoint = (PointLoc - CachedCameraLocation).GetSafeNormal();
+    const float DotProduct = FVector::DotProduct(CachedCameraForward, ToPoint);
+    
+    if (DotProduct < CachedMinCameraDot)
+    {
+        OutFailReason = "Outside Cone";
+        return false;
+    }
 
-	if (StateComp->IsInLifeState(EtheriaTags::State_Life_Dead))
-	{
-		OutFailReason = "Dead";
-		return false;
-	}
+    // Check 2: Hauteur (très rapide) - sauf pour les Pull (peuvent être n'importe où)
+    const float HeightDelta = PointLoc.Z - PlayerLoc.Z;
+    if (Point->GetAttachType() != ERopeAttachType::Pull && HeightDelta < MinHeightAbovePlayer)
+    {
+        OutFailReason = "Too Low";
+        return false;
+    }
 
-	// --- Camera context ---
-	const FVector CameraLoc = CachedCameraLocation;
-	const FVector CameraForward = CachedCameraForward;
-	const FVector PointLoc = Point->GetActorLocation();
-	const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
+    // Check 3: Line trace (plus coûteux - faire en dernier)
+    FHitResult Hit;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerCharacter);
+    Params.AddIgnoredActor(Point);
 
-	// Distance max caméra
-	const float CamDistance = FVector::Dist(CameraLoc, PointLoc);
-	if (CamDistance > MaxDetectionDistance)
-	{
-		OutFailReason = "Too Far (Camera)";
-		return false;
-	}
+    const FVector TargetLoc = PointLoc + FVector(0, 0, Point->DetectionRadius * 0.5f);
 
-	// Angle caméra
-	const FVector ToPoint = (PointLoc - CameraLoc).GetSafeNormal();
-	const float Dot = FVector::DotProduct(CameraForward, ToPoint);
-	if (Dot < MinCameraDot)
-	{
-		OutFailReason = "Outside Camera Cone";
-		return false;
-	}
+    if (GetWorld()->LineTraceSingleByChannel(
+        Hit,
+        CachedCameraLocation,
+        TargetLoc,
+        ECC_Visibility,
+        Params))
+    {
+        OutFailReason = "LOS Blocked";
+        return false;
+    }
 
-	// Line of Sight vers le centre du point (sphere)
-	FHitResult Hit;
-	FCollisionQueryParams Params;
-	Params.AddIgnoredActor(OwnerCharacter);
-	Params.AddIgnoredActor(Point);
+    return true;
+}
 
-	const FVector TargetLoc = PointLoc + FVector(0, 0, Point->DetectionRadius * 0.5f);
+void URopeDetectionComponent::DrawDebugInfo(ARopeAttachPoint* BestPoint) const
+{
+    // Utiliser DetectionInterval * 2 pour éviter le clignotement
+    // (le draw persiste jusqu'au prochain frame)
+    const float DrawDuration = DetectionInterval * 1.5f;
+    
+    const float ConeHalfAngleRad = FMath::DegreesToRadians(DetectionHalfAngle);
+    DrawDebugCone(
+        GetWorld(),
+        CachedCameraLocation,
+        CachedCameraForward,
+        MaxDetectionDistance,
+        ConeHalfAngleRad,
+        ConeHalfAngleRad,
+        16,
+        FColor::Cyan,
+        false,
+        DrawDuration
+    );
 
-	bool bBlocked = GetWorld()->LineTraceSingleByChannel(Hit, CameraLoc, TargetLoc, ECC_Visibility, Params);
-	if (bBlocked)
-	{
-		if (bDebugDraw)
-		{
-			DrawDebugLine(GetWorld(), CameraLoc, TargetLoc, FColor::Orange, false, 0.f, 0, 1.f);
-		}
-		OutFailReason = "LOS Blocked";
-		return false;
-	}
-
-	// Hauteur minimale relative au joueur (pas la caméra)
-	const float HeightDelta = PointLoc.Z - PlayerLoc.Z;
-	if (HeightDelta < MinHeightAboveCamera)
-	{
-		OutFailReason = "Too Low (Player)";
-		return false;
-	}
-
-	return true;
+    if (BestPoint)
+    {
+        DrawDebugSphere(
+            GetWorld(),
+            BestPoint->GetActorLocation(),
+            BestPoint->DetectionRadius,
+            16,
+            FColor::Green,
+            false,
+            DrawDuration
+        );
+    }
 }

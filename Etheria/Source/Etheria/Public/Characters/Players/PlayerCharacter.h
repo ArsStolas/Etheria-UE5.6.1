@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Header
  */
 
@@ -12,6 +12,7 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class URopeLockComponent;
 class URopeDetectionComponent;
 struct FInputActionValue;
 
@@ -71,6 +72,7 @@ public:
     FORCEINLINE int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
 
+    // Simple accessor
     bool IsGrounded() const;
     
 protected:
@@ -114,6 +116,13 @@ protected:
     // --- QUEST TARGET ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
     UQuestComponent* QuestComponent;
+
+    // --- ROPE ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
+    URopeDetectionComponent* RopeDetectionComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeLockComponent* RopeLockComponent;
 
 #pragma endregion
 
@@ -184,8 +193,8 @@ protected:
     UInputAction* LockSwitchRightAction;
 
     // --- ROPE ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
-    URopeDetectionComponent* RopeDetectionComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
+    UInputAction* AttachRopeAction;
 
 #pragma endregion
 
@@ -293,6 +302,9 @@ private:
 
     // --- Interactor ---
     UFUNCTION() void Input_Interact();
+
+    // --- Rope ---
+    void OnRopeAttachPressed();
 
 #pragma endregion
 

@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
  */
 
@@ -15,6 +15,7 @@
 #include "Components/Characters/HealthComponent.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
 #include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
+#include "Components/Characters/Player/Rope/RopeLockComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
@@ -65,6 +66,7 @@ APlayerCharacter::APlayerCharacter()
 
     // --- ROPE COMPONENTS ---
     RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("RopeDetectionComponent"));
+    RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("RopeLockComponent"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -238,8 +240,17 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
             EIC->BindAction(LockSwitchRightAction, ETriggerEvent::Started, this, &APlayerCharacter::OnLockSwitchRight);
         }
     #pragma endregion
+
+    #pragma region "ROPE BINDS"
+        if (AttachRopeAction)
+        {
+            EIC->BindAction(AttachRopeAction, ETriggerEvent::Started, this, &APlayerCharacter::OnRopeAttachPressed);
+        }
+    #pragma endregion
     }
 }
+
+#pragma region "SIMPLE ACCESSORS"
 
 bool APlayerCharacter::IsGrounded() const
 {
@@ -256,6 +267,8 @@ bool APlayerCharacter::IsGrounded() const
 
     return bHit;
 }
+
+#pragma endregion
 
 #pragma region AIMING
 
@@ -837,6 +850,23 @@ void APlayerCharacter::Input_Interact()
     //    return;
     //}
     //InteractionComponent->Interact();
+}
+
+#pragma endregion
+
+#pragma region "ROPE INPUTS"
+
+void APlayerCharacter::OnRopeAttachPressed()
+{
+    if (!RopeLockComponent)
+    {
+        return;
+    }
+
+    if (RopeLockComponent->TryLock())
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Rope Locked!"));
+    }
 }
 
 #pragma endregion

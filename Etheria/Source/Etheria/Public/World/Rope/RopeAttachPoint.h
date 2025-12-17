@@ -1,4 +1,9 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeAttachPoint - Header
+*/
 
 #pragma once
 
@@ -13,8 +18,6 @@ enum class ERopeAttachType : uint8
 	Pull  UMETA(DisplayName = "Pull")
 };
 
-class USphereComponent;
-
 UCLASS()
 class ETHERIA_API ARopeAttachPoint : public AActor
 {
@@ -23,18 +26,26 @@ class ETHERIA_API ARopeAttachPoint : public AActor
 public:
 	ARopeAttachPoint();
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rope")
+	// === GLOBAL CACHE ===
+	static TArray<TWeakObjectPtr<ARopeAttachPoint>> AllAttachPoints;
+
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	// === DATA ===
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rope")
 	ERopeAttachType AttachType = ERopeAttachType::Swing;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rope")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rope")
 	float DetectionRadius = 150.f;
+
+	// Debug permanent du point
+	UPROPERTY(EditAnywhere, Category="Debug")
+	bool bDrawBaseDebug = true;
 
 	FORCEINLINE ERopeAttachType GetAttachType() const { return AttachType; }
 
 protected:
 	UPROPERTY(VisibleAnywhere)
 	USceneComponent* Root;
-
-	UPROPERTY(VisibleAnywhere)
-	USphereComponent* DetectionSphere;
 };

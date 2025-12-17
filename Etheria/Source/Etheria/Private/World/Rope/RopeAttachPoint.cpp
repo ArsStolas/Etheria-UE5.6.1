@@ -1,9 +1,14 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeAttachPoint - Source
+*/
 
 #include "World/Rope/RopeAttachPoint.h"
+#include "DrawDebugHelpers.h"
 
-#include "Components/SphereComponent.h"
+TArray<TWeakObjectPtr<ARopeAttachPoint>> ARopeAttachPoint::AllAttachPoints;
 
 ARopeAttachPoint::ARopeAttachPoint()
 {
@@ -11,10 +16,16 @@ ARopeAttachPoint::ARopeAttachPoint()
 
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
+}
 
-	DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
-	DetectionSphere->SetupAttachment(Root);
-	DetectionSphere->SetSphereRadius(DetectionRadius);
+void ARopeAttachPoint::BeginPlay()
+{
+	Super::BeginPlay();
+	AllAttachPoints.Add(this);
+}
 
-	DetectionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+void ARopeAttachPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	AllAttachPoints.Remove(this);
+	Super::EndPlay(EndPlayReason);
 }
