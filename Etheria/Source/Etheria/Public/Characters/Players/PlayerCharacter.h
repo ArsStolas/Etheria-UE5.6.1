@@ -12,6 +12,7 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class URopeDetectionComponent;
 struct FInputActionValue;
 
 class USpringArmComponent;
@@ -181,6 +182,10 @@ protected:
     UInputAction* LockSwitchLeftAction;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
     UInputAction* LockSwitchRightAction;
+
+    // --- ROPE ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
+    URopeDetectionComponent* RopeDetectionComponent;
 
 #pragma endregion
 

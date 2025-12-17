@@ -14,6 +14,7 @@
 #include "Components/Characters/CharacterStateComponent.h"
 #include "Components/Characters/HealthComponent.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
+#include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
@@ -61,6 +62,9 @@ APlayerCharacter::APlayerCharacter()
 
     // --- QUEST COMPONENT ---
     QuestComponent = CreateDefaultSubobject<UQuestComponent>(TEXT("BPC_QuestComponent"));
+
+    // --- ROPE COMPONENTS ---
+    RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("RopeDetectionComponent"));
 }
 
 void APlayerCharacter::BeginPlay()
