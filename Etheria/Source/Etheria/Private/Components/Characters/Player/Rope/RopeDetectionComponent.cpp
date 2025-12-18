@@ -137,6 +137,11 @@ void URopeDetectionComponent::DetectAttachPoint()
                 if (bDebugMode && DebugVerbosity >= 2)
                 {
                     Stats.FailedValidation++;
+                    
+                    UE_LOG(LogTemp, Log,
+                    TEXT("[RopeDetection] Point '%s' invalid: %s"),
+                    *Point->GetName(),
+                    *FailReason);
                 }
 #endif
                 continue;
@@ -228,7 +233,7 @@ bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& Out
             return false;
         }
 
-        if (StateComponent->IsInLifeState(EtheriaTags::State_Movement_Airborne_Diving))
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Diving))
         {
             OutFailReason = "Diving";
             return false;

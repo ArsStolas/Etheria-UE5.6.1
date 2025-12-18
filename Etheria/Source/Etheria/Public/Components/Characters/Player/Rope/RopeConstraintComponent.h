@@ -8,6 +8,8 @@ class APlayerCharacter;
 class ARopeAttachPoint;
 class UCharacterMovementComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRopeTensioned);
+
 /**
  * Gère la contrainte physique de distance de la corde
  * (indépendant de Swing / Pull)
@@ -36,12 +38,14 @@ public:
 
 	ARopeAttachPoint* GetAnchor() const { return Anchor.Get(); }
 	float GetRopeLength() const { return RopeLength; }
+	
+	UPROPERTY(BlueprintAssignable)
+	FOnRopeTensioned OnRopeTensioned;
 
 private:
 	/** Applique la contrainte de distance */
 	void ApplyConstraint();
 
-private:
 	APlayerCharacter* OwnerCharacter = nullptr;
 	UCharacterMovementComponent* MoveComp = nullptr;
 

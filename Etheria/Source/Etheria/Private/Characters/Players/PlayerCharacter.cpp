@@ -107,16 +107,16 @@ void APlayerCharacter::BeginPlay()
     // --- State Delegates ---
     if (StateComponent)
     {
-        StateComponent->OnMovementStateChanged.AddDynamic(this, &APlayerCharacter::LogMovementStateChanged);
-        StateComponent->OnCombatStateChanged.AddDynamic(this, &APlayerCharacter::LogCombatStateChanged);
-        StateComponent->OnLifeStateChanged.AddDynamic(this, &APlayerCharacter::LogLifeStateChanged);
+        BindIf(bDebugMovementStateLogs, StateComponent->OnMovementStateChanged, &APlayerCharacter::LogMovementStateChanged);
+        BindIf(bDebugCombatStateLogs, StateComponent->OnCombatStateChanged, &APlayerCharacter::LogCombatStateChanged);
+        BindIf(bDebugLifeStateLogs, StateComponent->OnLifeStateChanged, &APlayerCharacter::LogLifeStateChanged);
     }
 
     // --- Health Delegates ---
     if (HealthComponent)
     {
-        HealthComponent->OnHealthChanged.AddDynamic(this, &APlayerCharacter::LogHealthChanged);
-        HealthComponent->OnDeath.AddDynamic(this, &APlayerCharacter::LogDeath);
+        BindIf(bDebugLifeStateLogs, HealthComponent->OnHealthChanged, &APlayerCharacter::LogHealthChanged);
+        BindIf(bDebugLifeStateLogs, HealthComponent->OnDeath, &APlayerCharacter::LogDeath);
     }
 
     // --- Glider Delegates ---
@@ -869,13 +869,13 @@ void APlayerCharacter::OnRopeAttachPressed()
 
     if (RopeAttachComponent->IsAttached())
     {
+        CheckRopeAttachMode();
         RopeLockComponent->Unlock();
         return;
     }
 
     if (RopeLockComponent->TryLock())
     {
-        CheckRopeAttachMode();
     }
 }
 
@@ -890,16 +890,7 @@ void APlayerCharacter::CheckRopeAttachMode()
     {
     case ERopeAttachType::Swing:
         {
-            if (!GetCharacterMovement()->IsMovingOnGround() &&
-                FVector::Dist(GetActorLocation(), LockedPoint->GetActorLocation()) > 100.f)
-            {
-                RopeSwingComponent->StartSwing();
-            }
-            else
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow,
-                    TEXT("Trop proche du sol pour swing"));
-            }
+            RopeSwingComponent->StopSwing();
             break;
         }
     case ERopeAttachType::Pull:

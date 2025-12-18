@@ -263,6 +263,13 @@ private:
     FAxisPressState Vertical;
 
     float AirborneIgnoreUntil = 0.f;
+    
+    UPROPERTY(EditAnywhere, Category = "Debug")
+    bool bDebugMovementStateLogs = false;
+    UPROPERTY(EditAnywhere, Category = "Debug")
+    bool bDebugCombatStateLogs = false;
+    UPROPERTY(EditAnywhere, Category = "Debug")
+    bool bDebugLifeStateLogs   = false;
 
 // ============================================================
 // INTERNAL HANDLERS
@@ -332,4 +339,19 @@ private:
     UFUNCTION() void LogDeath();
 
 #pragma endregion
+
+#pragma region UTILITIES
+    
+    template<typename DelegateType, typename FuncType>
+    void BindIf(bool bCondition, DelegateType& Delegate, FuncType Func)
+    {
+        if (bCondition)
+        {
+            Delegate.AddDynamic(this, Func);
+        }
+    }
+
+#pragma endregion
+
 };
+

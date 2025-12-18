@@ -24,47 +24,52 @@ public:
 		ELevelTick TickType,
 		FActorComponentTickFunction* ThisTickFunction) override;
 
-	/** Lance le swing dans le vide */
+	/** Lance le swing */
 	void StartSwing();
 
 	/** Stop le swing */
 	void StopSwing();
 
-	/** Détache la corde complètement */
-	void Detach();
-
-	/** Retourne si le joueur est en swing */
 	bool IsSwinging() const { return bIsSwinging; }
 
 protected:
-	/** Mise à jour de la position du joueur pendant le swing */
 	void UpdateSwing(float DeltaTime);
-	
+
+	bool ShouldStartSwing() const;
+	bool IsFarEnoughFromGround() const;
+	bool HasTouchedGround() const;
+
 	UFUNCTION()
-	void OnLockedPointChanged(ARopeAttachPoint* NewLockedPoint);
+	void OnRopeTensioned();
 
 private:
-	/** Le joueur propriétaire */
+	/* ===== Owner ===== */
 	APlayerCharacter* OwnerCharacter = nullptr;
-
-	/** Composant de mouvement du joueur */
 	UCharacterMovementComponent* MoveComp = nullptr;
 
-	/** Composant RopeAttach pour vérifier si on est attaché */
+	/* ===== Rope ===== */
 	URopeAttachComponent* AttachComponent = nullptr;
-
-	/** Composant RopeLock pour connaître le point verrouillé */
 	URopeLockComponent* LockComponent = nullptr;
-
-	/** Point de suspension actuel */
 	TWeakObjectPtr<ARopeAttachPoint> SwingPoint;
 
-	/** Flag si on est en swing actif */
+	/* ===== Swing State ===== */
 	bool bIsSwinging = false;
-
-	/** Longueur de la corde */
-	float RopeLength = 0.f;
-
-	/** Vitesse projetée pour la simulation du swing */
 	FVector VelocityProjected = FVector::ZeroVector;
+
+	/* ===== Tuning ===== */
+	UPROPERTY(EditAnywhere, Category="Swing")
+	float FallingSpeedToStartSwing = 200.f;
+
+	UPROPERTY(EditAnywhere, Category="Swing")
+	float MinHeightAboveGround = 80.f;
+
+	UPROPERTY(EditAnywhere, Category="Swing")
+	float GroundStopDistance = 25.f;
+
+	/* ===== Debug ===== */
+	UPROPERTY(EditAnywhere, Category="Debug")
+	bool bDebugSwing = false;
+
+	UPROPERTY(EditAnywhere, Category="Debug", meta=(EditCondition="bDebugSwing"))
+	float DebugLineThickness = 2.f;
 };

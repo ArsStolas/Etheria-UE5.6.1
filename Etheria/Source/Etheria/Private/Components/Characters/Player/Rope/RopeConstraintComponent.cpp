@@ -68,11 +68,12 @@ void URopeConstraintComponent::ApplyConstraint()
 	}
 
 	const FVector RopeDir = ToPlayer / CurrentDist;
-	const FVector ClampedLoc = AnchorLoc + RopeDir * RopeLength;
 
+	OnRopeTensioned.Broadcast();
+
+	const FVector ClampedLoc = AnchorLoc + RopeDir * RopeLength;
 	OwnerCharacter->SetActorLocation(ClampedLoc, true);
 
-	// Supprime la vitesse radiale (évite le jitter)
 	if (MoveComp)
 	{
 		FVector Vel = MoveComp->Velocity;
