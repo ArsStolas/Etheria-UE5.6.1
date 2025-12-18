@@ -12,6 +12,8 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class URopeSwingComponent;
+class URopeAttachComponent;
 class URopeLockComponent;
 class URopeDetectionComponent;
 struct FInputActionValue;
@@ -71,6 +73,8 @@ public:
     FORCEINLINE int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
+    FORCEINLINE URopeAttachComponent* GetRopeAttachComponent() const { return RopeAttachComponent; }
+    FORCEINLINE URopeLockComponent* GetRopeLockComponent() const { return RopeLockComponent; }
 
     // Simple accessor
     bool IsGrounded() const;
@@ -120,9 +124,12 @@ protected:
     // --- ROPE ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
     URopeDetectionComponent* RopeDetectionComponent;
-
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeLockComponent* RopeLockComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeAttachComponent* RopeAttachComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeSwingComponent* RopeSwingComponent;
 
 #pragma endregion
 
@@ -305,6 +312,7 @@ private:
 
     // --- Rope ---
     void OnRopeAttachPressed();
+    void CheckRopeAttachMode();
 
 #pragma endregion
 

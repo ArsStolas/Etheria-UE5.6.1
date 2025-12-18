@@ -69,7 +69,7 @@ protected:
     bool bDebugMode = false;
 
     UPROPERTY(EditAnywhere, Category="Debug", meta=(EditCondition="bDebugMode"))
-    int32 DebugVerbosity = 1;
+    int32 DebugVerbosity = 0;
 
 private:
     // Cache
@@ -98,5 +98,4 @@ private:
     void DetectAttachPoint();
     bool IsValidPoint(ARopeAttachPoint* Point, FString& OutFailReason, const FVector& PlayerLoc) const;
     void UpdateCachedValues();
-    void DrawDebugInfo(ARopeAttachPoint* BestPoint) const;
 };

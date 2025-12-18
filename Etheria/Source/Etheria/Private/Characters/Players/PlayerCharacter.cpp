@@ -14,8 +14,10 @@
 #include "Components/Characters/CharacterStateComponent.h"
 #include "Components/Characters/HealthComponent.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
+#include "Components/Characters/Player/Rope/RopeAttachComponent.h"
 #include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
+#include "Components/Characters/Player/Rope/RopeSwingComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
@@ -24,6 +26,7 @@
 #include "Components/Quests/QuestComponent.h"
 #include "Core/System/EtheriaGameplayTags.h"
 #include "Data/Weapons/WeaponData.h"
+#include "World/Rope/RopeAttachPoint.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -65,8 +68,10 @@ APlayerCharacter::APlayerCharacter()
     QuestComponent = CreateDefaultSubobject<UQuestComponent>(TEXT("BPC_QuestComponent"));
 
     // --- ROPE COMPONENTS ---
-    RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("RopeDetectionComponent"));
-    RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("RopeLockComponent"));
+    RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("BPC_RopeDetectionComponent"));
+    RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("BPC_RopeLockComponent"));
+    RopeAttachComponent = CreateDefaultSubobject<URopeAttachComponent>(TEXT("BPC_RopeAttachComponent"));
+    RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -858,14 +863,49 @@ void APlayerCharacter::Input_Interact()
 
 void APlayerCharacter::OnRopeAttachPressed()
 {
-    if (!RopeLockComponent)
+    if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
+
+    if (RopeAttachComponent->IsAttached())
     {
+        RopeLockComponent->Unlock();
         return;
     }
 
     if (RopeLockComponent->TryLock())
     {
-        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Rope Locked!"));
+        CheckRopeAttachMode();
+    }
+}
+
+void APlayerCharacter::CheckRopeAttachMode()
+{
+    if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
+
+    ARopeAttachPoint* LockedPoint = RopeLockComponent->GetLockedPoint();
+    if (!LockedPoint) return;
+
+    switch (LockedPoint->AttachType)
+    {
+    case ERopeAttachType::Swing:
+        {
+            if (!GetCharacterMovement()->IsMovingOnGround() &&
+                FVector::Dist(GetActorLocation(), LockedPoint->GetActorLocation()) > 100.f)
+            {
+                RopeSwingComponent->StartSwing();
+            }
+            else
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow,
+                    TEXT("Trop proche du sol pour swing"));
+            }
+            break;
+        }
+    case ERopeAttachType::Pull:
+        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Point Pull, pas de swing"));
+        break;
+    default:
+        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("AttachType non géré"));
+        break;
     }
 }
 

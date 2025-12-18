@@ -7,6 +7,12 @@
 class ARopeAttachPoint;
 class URopeDetectionComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnLockedPointChanged,
+	ARopeAttachPoint*,
+	NewLockedPoint
+);
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API URopeLockComponent : public UActorComponent
 {
@@ -14,6 +20,8 @@ class ETHERIA_API URopeLockComponent : public UActorComponent
 
 public:
 	URopeLockComponent();
+	
+	void SetPhysicallyAttached(bool bAttached);
 
 	/** Tente de verrouiller le point actuellement détecté */
 	UFUNCTION(BlueprintCallable, Category="Rope|Lock")
@@ -34,16 +42,24 @@ public:
 	/** Retourne le point verrouillé */
 	UFUNCTION(BlueprintPure, Category="Rope|Lock")
 	ARopeAttachPoint* GetLockedPoint() const;
+	
+	/** Event appelé quand le point lock change (lock ou unlock) */
+	UPROPERTY(BlueprintAssignable, Category="Rope|Lock")
+	FOnLockedPointChanged OnLockedPointChanged;
 
 protected:
 	virtual void BeginPlay() override;
 
 	UPROPERTY(EditAnywhere, Category="Debug")
 	bool bDebugMode = false;
+	
+	bool bIsPhysicallyAttached = false;
 
 private:
 	UPROPERTY()
 	URopeDetectionComponent* DetectionComponent = nullptr;
 
 	TWeakObjectPtr<ARopeAttachPoint> LockedPoint;
+	
+	void BroadcastLockedPoint();
 };

@@ -77,7 +77,7 @@ void URopeDetectionComponent::DetectAttachPoint()
     CachedCameraForward = Camera->GetForwardVector();
 
 #if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-    if (bDebugMode)
+    if (bDebugMode && DebugVerbosity >= 2)
     {
         Stats.TotalPointsChecked = 0;
         Stats.FailedBroadPhase = 0;
@@ -108,7 +108,7 @@ void URopeDetectionComponent::DetectAttachPoint()
             }
 
 #if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-            if (bDebugMode)
+            if (bDebugMode && DebugVerbosity >= 2)
             {
                 Stats.TotalPointsChecked++;
             }
@@ -121,7 +121,7 @@ void URopeDetectionComponent::DetectAttachPoint()
             if (DistSq > CachedMaxDistSq)
             {
 #if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-                if (bDebugMode)
+                if (bDebugMode && DebugVerbosity >= 2)
                 {
                     Stats.FailedBroadPhase++;
                 }
@@ -134,7 +134,7 @@ void URopeDetectionComponent::DetectAttachPoint()
             if (!IsValidPoint(Point, FailReason, PlayerLoc))
             {
 #if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-                if (bDebugMode)
+                if (bDebugMode && DebugVerbosity >= 2)
                 {
                     Stats.FailedValidation++;
                 }
@@ -169,7 +169,7 @@ void URopeDetectionComponent::DetectAttachPoint()
     {
         CurrentPoint = BestPoint;
 
-        if (bDebugMode)
+        if (bDebugMode && DebugVerbosity >= 1)
         {
             UE_LOG(LogTemp, Log,
                 TEXT("[RopeDetection] Detected point changed: %s"),
@@ -182,7 +182,7 @@ void URopeDetectionComponent::DetectAttachPoint()
 #if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
     if (bDebugMode)
     {
-        if (BestPoint)
+        if (BestPoint && DebugVerbosity >= 0)
         {
             DrawDebugSphere(
                 GetWorld(),
@@ -193,20 +193,21 @@ void URopeDetectionComponent::DetectAttachPoint()
                 false,
                 DetectionInterval * 1.5f
             );
+        } else if (DebugVerbosity >= 1)
+        {
+            DrawDebugCone(
+                GetWorld(),
+                CachedCameraLocation,
+                CachedCameraForward,
+                MaxDetectionDistance,
+                FMath::DegreesToRadians(DetectionHalfAngle),
+                FMath::DegreesToRadians(DetectionHalfAngle),
+                16,
+                FColor::Cyan,
+                false,
+                DetectionInterval * 1.5f
+            );
         }
-
-        DrawDebugCone(
-            GetWorld(),
-            CachedCameraLocation,
-            CachedCameraForward,
-            MaxDetectionDistance,
-            FMath::DegreesToRadians(DetectionHalfAngle),
-            FMath::DegreesToRadians(DetectionHalfAngle),
-            16,
-            FColor::Cyan,
-            false,
-            DetectionInterval * 1.5f
-        );
     }
 #endif
 }
@@ -274,38 +275,4 @@ bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& Out
     }
 
     return true;
-}
-
-void URopeDetectionComponent::DrawDebugInfo(ARopeAttachPoint* BestPoint) const
-{
-    // Utiliser DetectionInterval * 2 pour éviter le clignotement
-    // (le draw persiste jusqu'au prochain frame)
-    const float DrawDuration = DetectionInterval * 1.5f;
-    
-    const float ConeHalfAngleRad = FMath::DegreesToRadians(DetectionHalfAngle);
-    DrawDebugCone(
-        GetWorld(),
-        CachedCameraLocation,
-        CachedCameraForward,
-        MaxDetectionDistance,
-        ConeHalfAngleRad,
-        ConeHalfAngleRad,
-        16,
-        FColor::Cyan,
-        false,
-        DrawDuration
-    );
-
-    if (BestPoint)
-    {
-        DrawDebugSphere(
-            GetWorld(),
-            BestPoint->GetActorLocation(),
-            BestPoint->DetectionRadius,
-            16,
-            FColor::Green,
-            false,
-            DrawDuration
-        );
-    }
 }

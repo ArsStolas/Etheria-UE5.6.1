@@ -21,7 +21,8 @@ public class Etheria : ModuleRules
 			"GameplayTasks",
 			"GameplayTags",
 			"UMGEditor",
-			"GameplayStateTreeModule"
+			"GameplayStateTreeModule",
+			"CableComponent",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
