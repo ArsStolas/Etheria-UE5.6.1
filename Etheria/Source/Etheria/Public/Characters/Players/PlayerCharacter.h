@@ -12,6 +12,7 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class URopeConstraintComponent;
 class URopeSwingComponent;
 class URopeAttachComponent;
 class URopeLockComponent;
@@ -75,6 +76,7 @@ public:
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
     FORCEINLINE URopeAttachComponent* GetRopeAttachComponent() const { return RopeAttachComponent; }
     FORCEINLINE URopeLockComponent* GetRopeLockComponent() const { return RopeLockComponent; }
+    FORCEINLINE URopeConstraintComponent* GetRopeConstraintComponent() const { return RopeConstraintComponent; }
 
     // Simple accessor
     bool IsGrounded() const;
@@ -130,6 +132,8 @@ protected:
     URopeAttachComponent* RopeAttachComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeSwingComponent* RopeSwingComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeConstraintComponent* RopeConstraintComponent;
 
 #pragma endregion
 

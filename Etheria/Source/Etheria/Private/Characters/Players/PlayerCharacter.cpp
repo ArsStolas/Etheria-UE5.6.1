@@ -15,6 +15,7 @@
 #include "Components/Characters/HealthComponent.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
 #include "Components/Characters/Player/Rope/RopeAttachComponent.h"
+#include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
 #include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
 #include "Components/Characters/Player/Rope/RopeSwingComponent.h"
@@ -72,6 +73,7 @@ APlayerCharacter::APlayerCharacter()
     RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("BPC_RopeLockComponent"));
     RopeAttachComponent = CreateDefaultSubobject<URopeAttachComponent>(TEXT("BPC_RopeAttachComponent"));
     RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
+    RopeConstraintComponent = CreateDefaultSubobject<URopeConstraintComponent>(TEXT("BPC_RopeConstraintComponent"));
 }
 
 void APlayerCharacter::BeginPlay()

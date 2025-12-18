@@ -26,9 +26,6 @@ public:
 	/** Détache la corde */
 	void DetachRope();
 
-	/** Met à jour visuellement la corde à chaque frame */
-	void UpdateRope();
-
 	/** Change le mesh ou le matériel de la corde */
 	UFUNCTION(BlueprintCallable, Category="Rope|Visual")
 	void SetRopeMesh(USkeletalMesh* NewMesh);
@@ -39,6 +36,8 @@ public:
 	bool IsAttached() const { return AttachedPoint.IsValid(); }
 	
 	FORCEINLINE ARopeAttachPoint* GetAttachedPoint() const { return AttachedPoint.Get(); }
+	
+	float GetCurrentRopeLength() const;
 
 protected:
 	/** Le joueur propriétaire */

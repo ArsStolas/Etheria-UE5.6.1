@@ -3,6 +3,7 @@
 #include "World/Rope/RopeAttachPoint.h"
 #include "CableComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
+#include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
 #include "Materials/MaterialInterface.h"
 
 URopeAttachComponent::URopeAttachComponent()
@@ -47,6 +48,7 @@ void URopeAttachComponent::BeginPlay()
     }
 
     CableComponent->SetVisibility(false);
+    CableComponent->EndLocation = FVector::ZeroVector;
 }
 
 void URopeAttachComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -57,18 +59,34 @@ void URopeAttachComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void URopeAttachComponent::AttachRope(ARopeAttachPoint* TargetPoint)
 {
-    if (!TargetPoint || !CableComponent) return;
+    if (!TargetPoint || !CableComponent || !OwnerCharacter) return;
 
     AttachedPoint = TargetPoint;
-    CableComponent->SetVisibility(true);
 
-    // Attache au joueur
+    const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
+    const FVector AnchorLoc = TargetPoint->GetActorLocation();
+
+    const float RopeLength = FVector::Dist(PlayerLoc, AnchorLoc);
+
+    // --- Visuel ---
+    CableComponent->CableLength = RopeLength + CableLengthOffset;
     CableComponent->SetAttachEndToComponent(
         TargetPoint->GetRootComponent(),
         NAME_None
     );
-    
-    LockComponent->SetPhysicallyAttached(true);
+    CableComponent->SetVisibility(true);
+
+    // --- Physique ---
+    OwnerCharacter->GetRopeConstraintComponent()->ActivateConstraint(
+        TargetPoint,
+        RopeLength
+    );
+
+    // --- Lock ---
+    if (LockComponent)
+    {
+        LockComponent->SetPhysicallyAttached(true);
+    }
 }
 
 void URopeAttachComponent::DetachRope()
@@ -77,22 +95,18 @@ void URopeAttachComponent::DetachRope()
     {
         LockComponent->SetPhysicallyAttached(false);
     }
-    
+
     AttachedPoint.Reset();
-    
+
     if (CableComponent)
     {
         CableComponent->SetVisibility(false);
-        CableComponent->EndLocation = FVector::ZeroVector;
     }
-}
 
-void URopeAttachComponent::UpdateRope()
-{
-    if (!AttachedPoint.IsValid() || !CableComponent) return;
-
-    CableComponent->SetWorldLocation(OwnerCharacter->GetActorLocation());
-    CableComponent->EndLocation = AttachedPoint->GetActorLocation() - OwnerCharacter->GetActorLocation();
+    if (OwnerCharacter)
+    {
+        OwnerCharacter->GetRopeConstraintComponent()->DeactivateConstraint();
+    }
 }
 
 void URopeAttachComponent::OnLockedPointChanged(ARopeAttachPoint* NewLockedPoint)
@@ -122,4 +136,10 @@ void URopeAttachComponent::SetRopeMaterial(UMaterialInterface* NewMaterial)
 
     RopeMaterial = NewMaterial;
     CableComponent->SetMaterial(0, RopeMaterial);
+}
+
+float URopeAttachComponent::GetCurrentRopeLength() const
+{
+    if (!CableComponent) return 0.f;
+    return CableComponent->CableLength - CableLengthOffset;
 }

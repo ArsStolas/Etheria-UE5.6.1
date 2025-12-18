@@ -40,18 +40,26 @@ void URopeSwingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 
 void URopeSwingComponent::StartSwing()
 {
-	if (bIsSwinging || !LockComponent || !MoveComp) return;
+	if (bIsSwinging || !OwnerCharacter || !MoveComp || !LockComponent) return;
 
 	ARopeAttachPoint* Point = LockComponent->GetLockedPoint();
 	if (!Point || Point->AttachType != ERopeAttachType::Swing) return;
 
 	SwingPoint = Point;
-	RopeLength = FVector::Dist(OwnerCharacter->GetActorLocation(), SwingPoint->GetActorLocation());
 	bIsSwinging = true;
 
-	VelocityProjected = MoveComp->Velocity;
+	// Projeter la vitesse actuelle sur le plan tangent
+	const FVector Anchor = SwingPoint->GetActorLocation();
+	const FVector ToPlayer = OwnerCharacter->GetActorLocation() - Anchor;
+	const FVector RopeDir = ToPlayer.GetSafeNormal();
+
+	FVector Vel = MoveComp->Velocity;
+	Vel -= FVector::DotProduct(Vel, RopeDir) * RopeDir;
+	VelocityProjected = Vel;
+
 	MoveComp->SetMovementMode(MOVE_Flying);
 	PrimaryComponentTick.SetTickFunctionEnable(true);
+	
 	GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Swing Started"));
 }
 
@@ -61,19 +69,30 @@ void URopeSwingComponent::StopSwing()
 
 	bIsSwinging = false;
 	SwingPoint.Reset();
-	MoveComp->SetMovementMode(MOVE_Falling);
-	MoveComp->Velocity = VelocityProjected;
+
+	if (MoveComp)
+	{
+		MoveComp->SetMovementMode(MOVE_Falling);
+		MoveComp->Velocity = VelocityProjected;
+	}
+
 	PrimaryComponentTick.SetTickFunctionEnable(false);
 	
 	GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("Swing Stopped"));
 }
 
+
 void URopeSwingComponent::Detach()
 {
+	if (!bIsSwinging && (!AttachComponent || !AttachComponent->IsAttached()))
+	{
+		return;
+	}
+
 	bIsSwinging = false;
 	SwingPoint.Reset();
 
-	if (AttachComponent && AttachComponent->IsAttached())
+	if (AttachComponent)
 	{
 		AttachComponent->DetachRope();
 	}
@@ -82,57 +101,31 @@ void URopeSwingComponent::Detach()
 	{
 		MoveComp->SetMovementMode(MOVE_Falling);
 	}
-	
+
 	PrimaryComponentTick.SetTickFunctionEnable(false);
 }
 
 void URopeSwingComponent::UpdateSwing(float DeltaTime)
 {
-	if (!SwingPoint.IsValid() && !LockComponent->HasLockedPoint())
+	if (!SwingPoint.IsValid())
 	{
 		StopSwing();
 		return;
 	}
 
 	const FVector Anchor = SwingPoint->GetActorLocation();
-	FVector PlayerLoc = OwnerCharacter->GetActorLocation();
-	FVector ToPlayer = PlayerLoc - Anchor;
-	const float CurrentDist = ToPlayer.Size();
-	if (CurrentDist <= KINDA_SMALL_NUMBER) return;
+	const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
+	const FVector RopeDir = (PlayerLoc - Anchor).GetSafeNormal();
 
-	FVector RopeDir = ToPlayer / CurrentDist;
-
-	if (!bIsSwinging)
-	{
-		// Cas attaché au sol : on clamp juste la distance max
-		if (MoveComp->IsMovingOnGround())
-		{
-			if (CurrentDist > RopeLength)
-			{
-				FVector CorrectedLoc = Anchor + RopeDir * RopeLength;
-				OwnerCharacter->SetActorLocation(CorrectedLoc);
-			}
-			return;
-		}
-		else
-		{
-			// Si on est dans les airs et attaché mais pas swing → passer en swing
-			StartSwing();
-		}
-	}
-
-	// --- Swing actif ---
-	FVector CorrectedLoc = Anchor + RopeDir * RopeLength;
-	OwnerCharacter->SetActorLocation(CorrectedLoc);
-
-	// Supprimer vitesse radiale
+	// 1️⃣ Supprimer toute composante radiale
 	FVector Vel = VelocityProjected;
 	Vel -= FVector::DotProduct(Vel, RopeDir) * RopeDir;
 
-	// Gravité projetée
-	const FVector Gravity(0,0,GetWorld()->GetGravityZ());
+	// 2️⃣ Appliquer la gravité (elle sera contrainte automatiquement)
+	const FVector Gravity(0.f, 0.f, GetWorld()->GetGravityZ());
 	Vel += Gravity * DeltaTime;
 
+	// 3️⃣ Appliquer la vitesse
 	VelocityProjected = Vel;
 	OwnerCharacter->AddActorWorldOffset(Vel * DeltaTime, true);
 }
