@@ -21,6 +21,11 @@ namespace EtheriaTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne_Gliding);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne_Diving);
 	ETHERIA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Airborne_Jumping);
+	
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope);
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope_Attached);
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope_Swinging);
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope_Detaching);
 
 	// === Combat ===
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat);

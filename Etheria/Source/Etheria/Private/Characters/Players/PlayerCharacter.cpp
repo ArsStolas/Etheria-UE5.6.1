@@ -458,6 +458,12 @@ void APlayerCharacter::StopCrouch()
 void APlayerCharacter::HandleMovementInput()
 {
     if (!Controller) return;
+    
+    if (RopeSwingComponent && RopeSwingComponent->IsSwinging())
+    {
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Swinging - skipping normal movement input"));
+        return;
+    }
 
     const int Hor = Horizontal.GetAxisValue();
     const int Ver = Vertical.GetAxisValue();
