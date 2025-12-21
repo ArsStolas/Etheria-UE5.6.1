@@ -158,25 +158,53 @@ void URopeSwingComponent::ApplyAirResistance(FVector& CurrentVelocity, float Del
     CurrentVelocity *= FMath::Clamp(1.f - (AirDrag * DeltaTime), 0.f, 1.f);
 }
 
-void URopeSwingComponent::ApplyPlayerInputForce(FVector& CurrentVelocity, const FVector& RopeDirection, float DeltaTime)
+void URopeSwingComponent::ApplyPlayerInputForce(
+    FVector& CurrentVelocity,
+    const FVector& RopeDirection,
+    float DeltaTime)
 {
     FVector InputDir = GetCameraInputDirection();
-    if (InputDir.IsNearlyZero()) return;
+    if (InputDir.IsNearlyZero())
+        return;
 
-    FVector TangentDir = FVector::VectorPlaneProject(InputDir, RopeDirection).GetSafeNormal();
-    
-    // CORRECTION VITESSE :
-    // 1. Calcul de la vitesse actuelle dans la direction où on veut pousser
-    float CurrentSpeedInDir = FVector::DotProduct(CurrentVelocity, TangentDir);
-    
-    // 2. Si on va déjà à MaxSwingVelocity, on n'ajoute plus de force, on maintient juste.
-    // Ça empêche l'accélération infinie en 2 secondes.
-    float SpeedFactor = FMath::Clamp(1.0f - (CurrentSpeedInDir / MaxSwingVelocity), 0.0f, 1.0f);
+    // Tangente réelle du pendule
+    FVector TangentDir =
+        FVector::VectorPlaneProject(InputDir, RopeDirection).GetSafeNormal();
 
-    // 3. Bonus de force si on essaie de changer de direction (pour la réactivité)
-    float AccelMult = (CurrentSpeedInDir < 0.f) ? 2.0f : 1.0f; 
+    // Sécurité
+    if (TangentDir.IsNearlyZero())
+        return;
 
-    CurrentVelocity += TangentDir * SwingForce * SpeedFactor * AccelMult * DeltaTime;
+    // Montée / descente = basé sur la verticale (physique pure)
+    const bool bGoingUp   = CurrentVelocity.Z > 0.f;
+    const bool bGoingDown = CurrentVelocity.Z < 0.f;
+
+    float AppliedForce = SwingForce;
+
+    /* ===============================
+       MODULATION PHYSIQUE
+       =============================== */
+
+    if (bGoingUp)
+    {
+        // Frein léger en montée (mais JAMAIS zéro)
+        AppliedForce *= 0.35f;
+    }
+    else if (bGoingDown)
+    {
+        // Bonus léger en descente (pump)
+        AppliedForce *= 1.1f;
+    }
+
+    // Clamp vitesse max (sécurité)
+    float SpeedAlongTangent =
+        FVector::DotProduct(CurrentVelocity, TangentDir);
+
+    if (SpeedAlongTangent > MaxSwingVelocity)
+        return;
+
+    // APPLICATION RESULTANTE
+    CurrentVelocity += TangentDir * AppliedForce * DeltaTime;
 }
 
 void URopeSwingComponent::SolveRopeConstraint(FVector& CurrentPosition, FVector& CurrentVelocity, const FVector& AnchorLocation, float DeltaTime)
