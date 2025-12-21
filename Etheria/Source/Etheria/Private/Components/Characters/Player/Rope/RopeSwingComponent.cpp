@@ -148,6 +148,8 @@ void URopeSwingComponent::UpdateSwing(float DeltaTime)
     if (bShowDebug) DrawVisualDebug(AnchorLoc, NextPos, GetCameraInputDirection());
 }
 
+#pragma region "FORCES APPLICATION"
+
 void URopeSwingComponent::ApplyGravity(FVector& CurrentVelocity, float DeltaTime)
 {
     CurrentVelocity += FVector(0.f, 0.f, GetWorld()->GetGravityZ() * GravityScale) * DeltaTime;
@@ -164,48 +166,95 @@ void URopeSwingComponent::ApplyPlayerInputForce(
     float DeltaTime)
 {
     FVector InputDir = GetCameraInputDirection();
-    if (InputDir.IsNearlyZero())
+    const bool bHasInput = !InputDir.IsNearlyZero();
+    if (!bHasInput)
         return;
 
-    // Tangente réelle du pendule
     FVector TangentDir =
         FVector::VectorPlaneProject(InputDir, RopeDirection).GetSafeNormal();
 
-    // Sécurité
     if (TangentDir.IsNearlyZero())
         return;
 
-    // Montée / descente = basé sur la verticale (physique pure)
     const bool bGoingUp   = CurrentVelocity.Z > 0.f;
     const bool bGoingDown = CurrentVelocity.Z < 0.f;
 
     float AppliedForce = SwingForce;
 
     /* ===============================
-       MODULATION PHYSIQUE
+       MODULATION EXISTANTE (SAFE)
        =============================== */
 
     if (bGoingUp)
     {
-        // Frein léger en montée (mais JAMAIS zéro)
         AppliedForce *= 0.35f;
     }
     else if (bGoingDown)
     {
-        // Bonus léger en descente (pump)
         AppliedForce *= 1.1f;
     }
 
-    // Clamp vitesse max (sécurité)
-    float SpeedAlongTangent =
+    /* ===============================
+       PUMP TIMING (BONUS PONCTUEL)
+       =============================== */
+
+    TryConsumePump(CurrentVelocity, TangentDir);
+
+    /* ===============================
+       CLAMP VITESSE MAX
+       =============================== */
+
+    const float SpeedAlongTangent =
         FVector::DotProduct(CurrentVelocity, TangentDir);
 
     if (SpeedAlongTangent > MaxSwingVelocity)
         return;
 
-    // APPLICATION RESULTANTE
     CurrentVelocity += TangentDir * AppliedForce * DeltaTime;
 }
+
+#pragma endregion
+
+#pragma region "PUMP CALCULATION"
+
+bool URopeSwingComponent::TryConsumePump(
+    const FVector& CurrentVelocity,
+    const FVector& TangentDir)
+{
+    bPumpActive = false;
+
+    // Reset quand on remonte clairement
+    if (CurrentVelocity.Z > PumpResetVerticalSpeed)
+    {
+        bPumpConsumedThisSwing = false;
+    }
+
+    // Détection du passage du bas :
+    const bool bPassedBottom =
+        LastVerticalSpeed < 0.f &&
+        CurrentVelocity.Z >= 0.f;
+
+    LastVerticalSpeed = CurrentVelocity.Z;
+
+    if (!bPassedBottom)
+        return false;
+
+    if (bPumpConsumedThisSwing)
+        return false;
+
+    // PUMP VALIDÉ
+    bPumpConsumedThisSwing = true;
+    bPumpActive = true;
+
+    // Impulsion directe (PAS * DeltaTime)
+    SwingVelocity += TangentDir * PumpImpulseStrength;
+
+    return true;
+}
+
+#pragma endregion
+
+#pragma region "CONSTRAINT SOLVER"
 
 void URopeSwingComponent::SolveRopeConstraint(FVector& CurrentPosition, FVector& CurrentVelocity, const FVector& AnchorLocation, float DeltaTime)
 {
@@ -235,29 +284,7 @@ void URopeSwingComponent::SolveRopeConstraint(FVector& CurrentPosition, FVector&
     }
 }
 
-FVector URopeSwingComponent::GetCameraInputDirection() const
-{
-    if (!OwnerCharacter || !OwnerCharacter->GetController()) return FVector::ZeroVector;
-    
-    FVector2D MoveInput(OwnerCharacter->GetHorizontalInput(), OwnerCharacter->GetVerticalInput());
-    if (MoveInput.IsNearlyZero()) return FVector::ZeroVector;
-
-    FRotator CamRot = OwnerCharacter->GetController()->GetControlRotation();
-    CamRot.Pitch = 0.f; CamRot.Roll = 0.f;
-
-    return (UKismetMathLibrary::GetForwardVector(CamRot) * MoveInput.Y + UKismetMathLibrary::GetRightVector(CamRot) * MoveInput.X).GetSafeNormal();
-}
-
-bool URopeSwingComponent::HasTouchedGround() const
-{
-    const float HalfHeight = OwnerCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-    FHitResult Hit;
-    FVector Start = OwnerCharacter->GetActorLocation();
-    FVector End = Start - FVector(0,0, HalfHeight + GroundStopDistance);
-    
-    FCollisionQueryParams Params; Params.AddIgnoredActor(OwnerCharacter);
-    return GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params) && SwingVelocity.Z < 50.f;
-}
+#pragma endregion
 
 /* ================= CONDITIONS ================= */
 
@@ -314,6 +341,31 @@ bool URopeSwingComponent::IsFarEnoughFromGround() const
     return !bHit;
 }
 
+bool URopeSwingComponent::HasTouchedGround() const
+{
+    const float HalfHeight = OwnerCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+    FHitResult Hit;
+    FVector Start = OwnerCharacter->GetActorLocation();
+    FVector End = Start - FVector(0,0, HalfHeight + GroundStopDistance);
+    
+    FCollisionQueryParams Params; Params.AddIgnoredActor(OwnerCharacter);
+    return GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params) && SwingVelocity.Z < 50.f;
+
+}
+
+FVector URopeSwingComponent::GetCameraInputDirection() const
+{
+    if (!OwnerCharacter || !OwnerCharacter->GetController()) return FVector::ZeroVector;
+    
+    FVector2D MoveInput(OwnerCharacter->GetHorizontalInput(), OwnerCharacter->GetVerticalInput());
+    if (MoveInput.IsNearlyZero()) return FVector::ZeroVector;
+
+    FRotator CamRot = OwnerCharacter->GetController()->GetControlRotation();
+    CamRot.Pitch = 0.f; CamRot.Roll = 0.f;
+
+    return (UKismetMathLibrary::GetForwardVector(CamRot) * MoveInput.Y + UKismetMathLibrary::GetRightVector(CamRot) * MoveInput.X).GetSafeNormal();
+}
+
 void URopeSwingComponent::OnRopeTensioned()
 {
     // C'est ici que le signal envoyé par le ConstraintComponent arrive
@@ -350,6 +402,24 @@ void URopeSwingComponent::DrawVisualDebug(const FVector& Anchor, const FVector& 
     
     FString ModeStr = (MoveComp->MovementMode == MOVE_Custom) ? TEXT("CUSTOM (Swing)") : TEXT("OTHER");
     SWING_SCREEN_MSG(6, FColor::White,  TEXT("Movement Mode: %s"), *ModeStr);
+    
+    // Pump status
+    SWING_SCREEN_MSG(
+        8,
+        bPumpActive ? FColor::Green : FColor::Silver,
+        TEXT("Pump Window: %s"),
+        bPumpConsumedThisSwing ? TEXT("USED") : TEXT("READY")
+    );
+
+    if (bPumpActive)
+    {
+        SWING_DEBUG_LINE(
+            GetWorld(),
+            PlayerPos,
+            PlayerPos + FVector(0,0,150.f),
+            FColor::Green
+        );
+    }
 }
 
 #pragma endregion

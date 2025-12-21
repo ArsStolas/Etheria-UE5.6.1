@@ -40,14 +40,19 @@ public:
 protected:
     void UpdateSwing(float DeltaTime);
     
-    // Physique
+    // FORCES APPLICATION
     void ApplyGravity(FVector& CurrentVelocity, float DeltaTime);
     void ApplyAirResistance(FVector& CurrentVelocity, float DeltaTime);
     void ApplyPlayerInputForce(FVector& CurrentVelocity, const FVector& RopeDirection, float DeltaTime);
     void SolveRopeConstraint(FVector& CurrentPosition, FVector& CurrentVelocity, const FVector& AnchorLocation, float DeltaTime);
 
-    // Helpers
+    // PUMP CALCULATION
+    bool TryConsumePump(const FVector& CurrentVelocity, const FVector& TangentDir);
+    
+    // CONSTRAINT SOLVER
     bool ShouldStartSwing() const;
+    
+    // SWING CONDITIONS
     bool IsFarEnoughFromGround() const;
     bool HasTouchedGround() const;
     FVector GetCameraInputDirection() const;
@@ -81,11 +86,37 @@ private:
     UPROPERTY(EditAnywhere, Category="Swing|Physics")
     float AirDrag = 0.3f; // Plus c'est haut, plus ça freine vite
     UPROPERTY(EditAnywhere, Category="Swing|Control")
-    float SwingForce = 550.f;
+    float SwingForce = 600.f;
     UPROPERTY(EditAnywhere, Category="Swing|Control")
     float MaxSwingVelocity = 1400.f;
 
-    // Paramètres Anti-Choc (pour la "téléportation")
+    /* ===== PUMP TIMING ===== */
+
+    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    float PumpBonusMultiplier = 1.35f;
+
+    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    float PumpVerticalSpeedThreshold = 80.f; // |Z| proche du bas
+
+    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    float PumpMinSpeed = 450.f; // vitesse mini pour autoriser pump
+
+    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    float PumpCooldown = 0.35f;
+    
+    float LastVerticalSpeed = 0.f;
+    bool bPumpConsumedThisSwing = false;
+
+    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    float PumpImpulseStrength = 280.f;
+
+    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    float PumpResetVerticalSpeed = 120.f; // quand on remonte assez
+
+    float LastPumpTime = -1000.f;
+    bool bPumpActive = false;
+    
+    // Paramètres Anti-Choc
     UPROPERTY()
     FVector InitialSwingLocation;
     UPROPERTY(EditAnywhere, Category="Swing|Physics")
@@ -97,7 +128,7 @@ private:
     float MinHeightAboveGround = 80.f;
     UPROPERTY(EditAnywhere, Category="Swing")
     float GroundStopDistance = 30.f;
-
+    
     /* Debug */
     UPROPERTY(EditAnywhere, Category="Debug") bool bShowDebug = true;
     void DrawVisualDebug(const FVector& Anchor, const FVector& PlayerPos, const FVector& InputDir);
