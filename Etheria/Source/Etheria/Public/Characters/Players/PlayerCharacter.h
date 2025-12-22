@@ -12,6 +12,7 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class URopeLengthControllerComponent;
 class URopeConstraintComponent;
 class URopeSwingComponent;
 class URopeAttachComponent;
@@ -74,9 +75,12 @@ public:
     FORCEINLINE float GetHorizontalInput() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE float GetVerticalInput() const   { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
+    FORCEINLINE URopeDetectionComponent* GetRopeDetectionComponent() const { return RopeDetectionComponent; }
     FORCEINLINE URopeAttachComponent* GetRopeAttachComponent() const { return RopeAttachComponent; }
     FORCEINLINE URopeLockComponent* GetRopeLockComponent() const { return RopeLockComponent; }
     FORCEINLINE URopeConstraintComponent* GetRopeConstraintComponent() const { return RopeConstraintComponent; }
+    FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
+    FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
 
     // Simple accessor
     
@@ -132,9 +136,11 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeAttachComponent* RopeAttachComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeConstraintComponent* RopeConstraintComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeSwingComponent* RopeSwingComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
-    URopeConstraintComponent* RopeConstraintComponent;
+    URopeLengthControllerComponent* RopeLengthControllerComponent;
 
 #pragma endregion
 
@@ -207,6 +213,8 @@ protected:
     // --- ROPE ---
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
     UInputAction* AttachRopeAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
+    UInputAction* ClimbRopeAction;
 
 #pragma endregion
 
@@ -325,6 +333,8 @@ private:
     // --- Rope ---
     void OnRopeAttachPressed();
     void CheckRopeAttachMode();
+    void ClimbRopeInput(const FInputActionValue& Value);
+    void StopClimbRopeInput(const FInputActionValue& Value);
 
 #pragma endregion
 

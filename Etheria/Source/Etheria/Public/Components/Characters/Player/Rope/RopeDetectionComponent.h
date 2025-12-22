@@ -5,11 +5,30 @@
  * Class: RopeDetectionComponent - Header
 */
 
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeDetectionComponent - Header
+*/
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "RopeDetectionComponent.generated.h"
+
+#if UE_BUILD_SHIPPING
+    #define DETECTION_LOG(Category, Verbosity, Format, ...)
+    #define DETECTION_SCREEN_MSG(Key, Color, Format, ...)
+    #define DEBUG_ONLY(x)
+#else
+    #define DETECTION_LOG(Category, Verbosity, Format, ...) \
+        if (bDetectionDebugMode) UE_LOG(Category, Verbosity, Format, ##__VA_ARGS__)
+    #define DETECTION_SCREEN_MSG(Key, Color, Format, ...) \
+        if (bDetectionDebugMode && GEngine) GEngine->AddOnScreenDebugMessage(Key, 0.1f, Color, FString::Printf(Format, ##__VA_ARGS__))
+    #define DEBUG_ONLY(x) if (bDetectionDebugMode) { x; }
+#endif
 
 class APlayerCharacter;
 class ARopeAttachPoint;
@@ -31,9 +50,11 @@ public:
 
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    /** Get the currently detected rope attachment point */
     UFUNCTION(BlueprintCallable, Category="Rope")
     ARopeAttachPoint* GetCurrentDetectedPoint() const { return CurrentPoint.Get(); }
 
+    /** Broadcast when detected point changes */
     UPROPERTY(BlueprintAssignable, Category="Rope|Detection")
     FOnRopeDetectedPointChanged OnDetectedPointChanged;
 
@@ -41,7 +62,7 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    // === Detection ===
+    // === Detection Parameters ===
     UPROPERTY(EditAnywhere, Category="Detection", meta=(ClampMin="500", ClampMax="5000"))
     float MaxDetectionDistance = 1500.f;
 
@@ -51,7 +72,7 @@ protected:
     UPROPERTY(EditAnywhere, Category="Detection", meta=(ClampMin="0.05", ClampMax="0.5"))
     float DetectionInterval = 0.08f;
 
-    // === Validation ===
+    // === Validation Parameters ===
     UPROPERTY(EditAnywhere, Category="Detection|Validation", meta=(ClampMin="0.0", ClampMax="1.0"))
     float MinCameraDot = 0.75f;
 
@@ -64,19 +85,25 @@ protected:
     UPROPERTY(EditAnywhere, Category="Detection|Validation", meta=(ClampMin="0", ClampMax="1"))
     float ScoringDirectionWeight = 0.7f;
 
-    // === Debug ===
-    UPROPERTY(EditAnywhere, Category="Debug")
-    bool bDebugMode = false;
+    // === Debug Parameters ===
+    UPROPERTY(EditAnywhere, Category="Rope|Detection|Debug")
+    bool bDetectionDebugMode = false;
 
-    UPROPERTY(EditAnywhere, Category="Debug", meta=(EditCondition="bDebugMode"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection|Debug", meta=(EditCondition="bDetectionDebugMode"))
     int32 DebugVerbosity = 0;
 
 private:
-    // Cache
+    // Cached references
+    UPROPERTY()
     APlayerCharacter* OwnerCharacter = nullptr;
+    
+    UPROPERTY()
     UCameraComponent* Camera = nullptr;
+    
+    UPROPERTY()
     UCharacterStateComponent* StateComponent = nullptr;
 
+    // Cached values
     FVector CachedCameraLocation = FVector::ZeroVector;
     FVector CachedCameraForward = FVector::ForwardVector;
     float CachedMaxDistSq = 0.f;
@@ -85,7 +112,7 @@ private:
     float TimeSinceLastScan = 0.f;
     TWeakObjectPtr<ARopeAttachPoint> CurrentPoint;
 
-    // Statistiques optionnelles pour debug
+    // === Debug Stats ===
 #if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
     struct FDetectionStats
     {

@@ -1,3 +1,10 @@
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeSwingComponent - Source
+*/
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -9,9 +16,12 @@
     #define SWING_DEBUG_LINE(World, Start, End, Color)
     #define SWING_SCREEN_MSG(Key, Color, Format, ...)
 #else
-    #define SWING_LOG(Category, Verbosity, Format, ...) UE_LOG(Category, Verbosity, Format, ##__VA_ARGS__)
-    #define SWING_DEBUG_LINE(World, Start, End, Color) DrawDebugLine(World, Start, End, Color, false, -1.f, 0, 2.f)
-    #define SWING_SCREEN_MSG(Key, Color, Format, ...) if (GEngine) GEngine->AddOnScreenDebugMessage(Key, 0.1f, Color, FString::Printf(Format, ##__VA_ARGS__))
+    #define SWING_LOG(Category, Verbosity, Format, ...) \
+    if (bSwingDebugMode) UE_LOG(Category, Verbosity, Format, ##__VA_ARGS__)
+    #define SWING_DEBUG_LINE(World, Start, End, Color) \
+    if (bSwingDebugMode) DrawDebugLine(World, Start, End, Color, false, -1.f, 0, 2.f)
+    #define SWING_SCREEN_MSG(Key, Color, Format, ...) \
+    if (bSwingDebugMode && GEngine) GEngine->AddOnScreenDebugMessage(Key, 0.1f, Color, FString::Printf(Format, ##__VA_ARGS__))
 #endif
 
 class URopeConstraintComponent;
@@ -36,6 +46,12 @@ public:
     void StopSwing();
 
     FORCEINLINE bool IsSwinging() const { return bIsSwinging; }
+    
+    /** Permet de modifier la longueur de la corde dynamiquement (Climb) */
+    FORCEINLINE void UpdateRopeLengthExternal(float NewLength) { RopeLength = NewLength; }
+    
+    /** Récupère la longueur actuelle utilisée par le swing */
+    FORCEINLINE float GetSwingRopeLength() const { return RopeLength; }
 
 protected:
     void UpdateSwing(float DeltaTime);
@@ -122,14 +138,16 @@ private:
     UPROPERTY(EditAnywhere, Category="Swing|Physics")
     float ConstraintStiffness = 20.f; // Vitesse de rappel (plus c'est haut, plus c'est sec)
 
-    UPROPERTY(EditAnywhere, Category="Swing")
+    UPROPERTY(EditAnywhere, Category="Swing|Physics")
     float FallingSpeedToStartSwing = 100.f;
-    UPROPERTY(EditAnywhere, Category="Swing")
+    UPROPERTY(EditAnywhere, Category="Swing|Physics")
     float MinHeightAboveGround = 80.f;
-    UPROPERTY(EditAnywhere, Category="Swing")
+    UPROPERTY(EditAnywhere, Category="Swing|Physics")
     float GroundStopDistance = 30.f;
     
     /* Debug */
-    UPROPERTY(EditAnywhere, Category="Debug") bool bShowDebug = true;
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Debug")
+    bool bSwingDebugMode = true;
+    
     void DrawVisualDebug(const FVector& Anchor, const FVector& PlayerPos, const FVector& InputDir);
 };

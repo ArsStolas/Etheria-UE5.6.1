@@ -1,0 +1,102 @@
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeLengthControllerComponent - Source
+*/
+
+#include "Components/Characters/Player/Rope/RopeLengthControllerComponent.h"
+#include "Components/Characters/Player/Rope/RopeAttachComponent.h"
+#include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
+#include "Components/Characters/Player/Rope/RopeSwingComponent.h"
+#include "Characters/Players/PlayerCharacter.h"
+
+URopeLengthControllerComponent::URopeLengthControllerComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+}
+
+void URopeLengthControllerComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    SetComponentTickEnabled(false);
+
+    OwnerCharacter = Cast<APlayerCharacter>(GetOwner());
+    if (OwnerCharacter)
+    {
+        AttachComponent = OwnerCharacter->GetRopeAttachComponent();
+        ConstraintComponent = OwnerCharacter->GetRopeConstraintComponent();
+        SwingComp = OwnerCharacter->GetRopeSwingComponent();
+    }
+}
+
+void URopeLengthControllerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    ProcessClimbing(DeltaTime);
+}
+
+void URopeLengthControllerComponent::SetClimbInput(float Value)
+{
+    ClimbInput = FMath::Clamp(Value, -1.f, 1.f);
+    const bool bIsClimbing = !FMath::IsNearlyZero(ClimbInput);
+    
+    if (IsComponentTickEnabled() != bIsClimbing)
+    {
+        SetComponentTickEnabled(bIsClimbing);
+        CLIMB_LOG(LogTemp, Verbose, TEXT("[RopeClimb] Tick %s"), bIsClimbing ? TEXT("ENABLED") : TEXT("DISABLED"));
+    }
+}
+
+void URopeLengthControllerComponent::ProcessClimbing(float DeltaTime)
+{
+    if (FMath::IsNearlyZero(ClimbInput)) return;
+
+    if (!AttachComponent || !AttachComponent->IsAttached())
+    {
+        return;
+    }
+
+    const bool bIsSwinging = SwingComp && SwingComp->IsSwinging();
+    float CurrentLength = 0.f;
+
+    if (bIsSwinging) 
+    {
+        CurrentLength = SwingComp->GetSwingRopeLength();
+    } 
+    else if (ConstraintComponent && ConstraintComponent->IsActive()) 
+    {
+        CurrentLength = ConstraintComponent->GetRopeLength();
+    } 
+    else 
+    {
+        return; 
+    }
+
+    // Compute new length
+    float NewLength = CurrentLength - (ClimbInput * ClimbSpeed * DeltaTime);
+    NewLength = FMath::Clamp(NewLength, MinRopeLength, MaxRopeLength);
+
+    // Apply physics
+    if (bIsSwinging) 
+    {
+        SwingComp->UpdateRopeLengthExternal(NewLength);
+    } 
+    else if (ConstraintComponent)
+    {
+        ConstraintComponent->SetRopeLength(NewLength);
+    }
+
+    // Update visual
+    if (AttachComponent)
+    {
+        AttachComponent->UpdateVisualLength(NewLength);
+    }
+
+    FColor DebugColor = bIsSwinging ? FColor::Cyan : FColor::Green;
+    CLIMB_SCREEN_MSG(104, DebugColor, TEXT("Climb: %.2f (Mode: %s)"), NewLength, bIsSwinging ? TEXT("SWING") : TEXT("STATIC"));
+}

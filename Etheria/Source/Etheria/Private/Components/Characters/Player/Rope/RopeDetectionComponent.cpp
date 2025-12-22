@@ -30,6 +30,8 @@ void URopeDetectionComponent::BeginPlay()
     StateComponent = OwnerCharacter->GetStateComponent();
 
     UpdateCachedValues();
+
+    DETECTION_LOG(LogTemp, Log, TEXT("[RopeDetection] Component initialized"));
 }
 
 void URopeDetectionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -76,21 +78,18 @@ void URopeDetectionComponent::DetectAttachPoint()
     CachedCameraLocation = Camera->GetComponentLocation();
     CachedCameraForward = Camera->GetForwardVector();
 
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-    if (bDebugMode && DebugVerbosity >= 2)
-    {
+    DEBUG_ONLY(
         Stats.TotalPointsChecked = 0;
         Stats.FailedBroadPhase = 0;
         Stats.FailedValidation = 0;
-    }
-#endif
+    );
 
     ARopeAttachPoint* PreviousPoint = CurrentPoint.Get();
 
     float BestScore = -FLT_MAX;
     ARopeAttachPoint* BestPoint = nullptr;
 
-    // === État joueur ===
+    // === Player state check ===
     if (StateComponent->IsInLifeState(EtheriaTags::State_Life_Dead))
     {
         BestPoint = nullptr;
@@ -107,12 +106,7 @@ void URopeDetectionComponent::DetectAttachPoint()
                 continue;
             }
 
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-            if (bDebugMode && DebugVerbosity >= 2)
-            {
-                Stats.TotalPointsChecked++;
-            }
-#endif
+            DEBUG_ONLY(Stats.TotalPointsChecked++);
 
             // === BROAD PHASE ===
             const FVector PointLoc = Point->GetActorLocation();
@@ -120,12 +114,7 @@ void URopeDetectionComponent::DetectAttachPoint()
 
             if (DistSq > CachedMaxDistSq)
             {
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-                if (bDebugMode && DebugVerbosity >= 2)
-                {
-                    Stats.FailedBroadPhase++;
-                }
-#endif
+                DEBUG_ONLY(Stats.FailedBroadPhase++);
                 continue;
             }
 
@@ -133,17 +122,17 @@ void URopeDetectionComponent::DetectAttachPoint()
             FString FailReason;
             if (!IsValidPoint(Point, FailReason, PlayerLoc))
             {
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-                if (bDebugMode && DebugVerbosity >= 2)
-                {
+                DEBUG_ONLY(
                     Stats.FailedValidation++;
                     
-                    UE_LOG(LogTemp, Log,
-                    TEXT("[RopeDetection] Point '%s' invalid: %s"),
-                    *Point->GetName(),
-                    *FailReason);
-                }
-#endif
+                    if (DebugVerbosity >= 2)
+                    {
+                        DETECTION_LOG(LogTemp, Verbose,
+                            TEXT("[RopeDetection] Point '%s' invalid: %s"),
+                            *Point->GetName(),
+                            *FailReason);
+                    }
+                );
                 continue;
             }
 
@@ -169,24 +158,30 @@ void URopeDetectionComponent::DetectAttachPoint()
         }
     }
 
-    // === CHANGEMENT D'ÉTAT ===
+    // === STATE CHANGE ===
     if (BestPoint != PreviousPoint)
     {
         CurrentPoint = BestPoint;
 
-        if (bDebugMode && DebugVerbosity >= 1)
-        {
-            UE_LOG(LogTemp, Log,
-                TEXT("[RopeDetection] Detected point changed: %s"),
-                BestPoint ? *BestPoint->GetName() : TEXT("None"));
-        }
+        DETECTION_LOG(LogTemp, Log,
+            TEXT("[RopeDetection] Detected point changed: %s"),
+            BestPoint ? *BestPoint->GetName() : TEXT("None"));
+
+        DEBUG_ONLY(
+            if (DebugVerbosity >= 0)
+            {
+                DETECTION_SCREEN_MSG(150, FColor::Yellow,
+                    TEXT("Rope Target: %s (Score: %.1f)"),
+                    BestPoint ? *BestPoint->GetName() : TEXT("None"),
+                    BestScore);
+            }
+        );
 
         OnDetectedPointChanged.Broadcast(BestPoint);
     }
 
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
-    if (bDebugMode)
-    {
+    // === DEBUG VISUALS ===
+    DEBUG_ONLY(
         if (BestPoint && DebugVerbosity >= 0)
         {
             DrawDebugSphere(
@@ -198,7 +193,8 @@ void URopeDetectionComponent::DetectAttachPoint()
                 false,
                 DetectionInterval * 1.5f
             );
-        } else if (DebugVerbosity >= 1)
+        }
+        else if (DebugVerbosity >= 1)
         {
             DrawDebugCone(
                 GetWorld(),
@@ -213,8 +209,16 @@ void URopeDetectionComponent::DetectAttachPoint()
                 DetectionInterval * 1.5f
             );
         }
-    }
-#endif
+
+        if (DebugVerbosity >= 2)
+        {
+            DETECTION_SCREEN_MSG(151, FColor::White,
+                TEXT("[Detection Stats] Checked: %d | BroadPhase Failed: %d | Validation Failed: %d"),
+                Stats.TotalPointsChecked,
+                Stats.FailedBroadPhase,
+                Stats.FailedValidation);
+        }
+    );
 }
 
 bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& OutFailReason, const FVector& PlayerLoc) const
@@ -224,7 +228,7 @@ bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& Out
         return false;
     }
 
-    // Check 0: État du joueur (très rapide)
+    // Check 0: Player state (very fast)
     if (StateComponent)
     {
         if (StateComponent->IsInLifeState(EtheriaTags::State_Life_Dead))
@@ -242,7 +246,7 @@ bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& Out
 
     const FVector PointLoc = Point->GetActorLocation();
 
-    // Check 1: Direction (rapide)
+    // Check 1: Direction (fast)
     const FVector ToPoint = (PointLoc - CachedCameraLocation).GetSafeNormal();
     const float DotProduct = FVector::DotProduct(CachedCameraForward, ToPoint);
     
@@ -252,7 +256,7 @@ bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& Out
         return false;
     }
 
-    // Check 2: Hauteur (très rapide) - sauf pour les Pull (peuvent être n'importe où)
+    // Check 2: Height (very fast) - except for Pull type (can be anywhere)
     const float HeightDelta = PointLoc.Z - PlayerLoc.Z;
     if (Point->GetAttachType() != ERopeAttachType::Pull && HeightDelta < MinHeightAbovePlayer)
     {
@@ -260,7 +264,7 @@ bool URopeDetectionComponent::IsValidPoint(ARopeAttachPoint* Point, FString& Out
         return false;
     }
 
-    // Check 3: Line trace (plus coûteux - faire en dernier)
+    // Check 3: Line trace (most expensive - check last)
     FHitResult Hit;
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(OwnerCharacter);

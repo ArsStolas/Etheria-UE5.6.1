@@ -1,3 +1,10 @@
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeAttachComponent - Source
+*/
+
 #include "Components/Characters/Player/Rope/RopeAttachComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
 #include "World/Rope/RopeAttachPoint.h"
@@ -9,7 +16,6 @@
 URopeAttachComponent::URopeAttachComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
-
     CableComponent = CreateDefaultSubobject<UCableComponent>(TEXT("CableComponent"));
 }
 
@@ -68,25 +74,28 @@ void URopeAttachComponent::AttachRope(ARopeAttachPoint* TargetPoint)
 
     const float RopeLength = FVector::Dist(PlayerLoc, AnchorLoc);
 
-    // --- Visuel ---
+    // Visual setup
     CableComponent->CableLength = RopeLength + CableLengthOffset;
     CableComponent->SetAttachEndToComponent(
         TargetPoint->GetRootComponent(),
         NAME_None
     );
     CableComponent->SetVisibility(true);
-
-    // --- Physique ---
+    
+    // Physics setup
     OwnerCharacter->GetRopeConstraintComponent()->ActivateConstraint(
         TargetPoint,
         RopeLength
     );
 
-    // --- Lock ---
+    // Lock setup
     if (LockComponent)
     {
         LockComponent->SetPhysicallyAttached(true);
     }
+
+    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Rope attached to %s - Length: %.2f"), 
+        *TargetPoint->GetName(), RopeLength);
 }
 
 void URopeAttachComponent::DetachRope()
@@ -107,27 +116,24 @@ void URopeAttachComponent::DetachRope()
     {
         OwnerCharacter->GetRopeConstraintComponent()->DeactivateConstraint();
     }
+
+    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Rope detached"));
 }
 
-void URopeAttachComponent::OnLockedPointChanged(ARopeAttachPoint* NewLockedPoint)
+void URopeAttachComponent::UpdateVisualLength(float NewLength)
 {
-    if (NewLockedPoint)
-    {
-        AttachRope(NewLockedPoint);
-    }
-    else
-    {
-        DetachRope();
-    }
+    if (!CableComponent) return;
+    
+    float FinalLength = FMath::Max(NewLength + CableLengthOffset, 50.f);
+    CableComponent->CableLength = FinalLength;
+    
+    ROPE_LOG(LogTemp, Verbose, TEXT("[RopeAttach] Visual length updated to %.2f"), FinalLength);
 }
 
 void URopeAttachComponent::SetRopeMesh(USkeletalMesh* NewMesh)
 {
     if (!CableComponent || !NewMesh) return;
-
     RopeMesh = NewMesh;
-    // CableComponent ne gère pas directement un mesh, pour ça il faudrait un SkeletalMeshComponent
-    // Tu peux soit remplacer CableComponent par SkeletalMesh + physics, ou juste garder CableComponent
 }
 
 void URopeAttachComponent::SetRopeMaterial(UMaterialInterface* NewMaterial)
@@ -142,4 +148,16 @@ float URopeAttachComponent::GetCurrentRopeLength() const
 {
     if (!CableComponent) return 0.f;
     return CableComponent->CableLength - CableLengthOffset;
+}
+
+void URopeAttachComponent::OnLockedPointChanged(ARopeAttachPoint* NewLockedPoint)
+{
+    if (NewLockedPoint)
+    {
+        AttachRope(NewLockedPoint);
+    }
+    else
+    {
+        DetachRope();
+    }
 }

@@ -17,6 +17,7 @@
 #include "Components/Characters/Player/Rope/RopeAttachComponent.h"
 #include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
 #include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
+#include "Components/Characters/Player/Rope/RopeLengthControllerComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
 #include "Components/Characters/Player/Rope/RopeSwingComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
@@ -72,8 +73,9 @@ APlayerCharacter::APlayerCharacter()
     RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("BPC_RopeDetectionComponent"));
     RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("BPC_RopeLockComponent"));
     RopeAttachComponent = CreateDefaultSubobject<URopeAttachComponent>(TEXT("BPC_RopeAttachComponent"));
-    RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
     RopeConstraintComponent = CreateDefaultSubobject<URopeConstraintComponent>(TEXT("BPC_RopeConstraintComponent"));
+    RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
+    RopeLengthControllerComponent = CreateDefaultSubobject<URopeLengthControllerComponent>(TEXT("BPC_RopeLengthController"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -252,6 +254,12 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         if (AttachRopeAction)
         {
             EIC->BindAction(AttachRopeAction, ETriggerEvent::Started, this, &APlayerCharacter::OnRopeAttachPressed);
+        }
+        
+        if (ClimbRopeAction)
+        {
+            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Triggered, this, &APlayerCharacter::ClimbRopeInput);
+            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopClimbRopeInput);
         }
     #pragma endregion
     }
@@ -906,6 +914,20 @@ void APlayerCharacter::CheckRopeAttachMode()
         GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("AttachType non géré"));
         break;
     }
+}
+
+void APlayerCharacter::ClimbRopeInput(const FInputActionValue& Value)
+{
+    float AxisVal = Value.Get<float>();
+    UE_LOG(LogTemp, Warning, TEXT("ClimbRopeInput: %f"), AxisVal);
+    if (RopeLengthControllerComponent)
+        RopeLengthControllerComponent->SetClimbInput(AxisVal);
+}
+
+void APlayerCharacter::StopClimbRopeInput(const FInputActionValue& Value)
+{
+    if (RopeLengthControllerComponent)
+        RopeLengthControllerComponent->SetClimbInput(0.f);
 }
 
 #pragma endregion

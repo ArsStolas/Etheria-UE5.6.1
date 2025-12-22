@@ -1,11 +1,26 @@
+/**
+ * Etheria's End Project, 2025
+ * Created by: Zhailendra
+ * Last Updated by: Zhailendra
+ * Class: RopeLockComponent - Header
+*/
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "RopeLockComponent.generated.h"
 
+#if UE_BUILD_SHIPPING
+	#define LOCK_LOG(Category, Verbosity, Format, ...)
+#else
+	#define LOCK_LOG(Category, Verbosity, Format, ...) \
+	if (bLockDebugMode) UE_LOG(Category, Verbosity, Format, ##__VA_ARGS__)
+#endif
+
 class ARopeAttachPoint;
 class URopeDetectionComponent;
+class APlayerCharacter;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnLockedPointChanged,
@@ -21,45 +36,42 @@ class ETHERIA_API URopeLockComponent : public UActorComponent
 public:
 	URopeLockComponent();
 	
-	void SetPhysicallyAttached(bool bAttached);
+	FORCEINLINE void SetPhysicallyAttached(bool bAttached) { bIsPhysicallyAttached = bAttached; }
+	
+	UFUNCTION(BlueprintPure, Category="Rope|Lock")
+	FORCEINLINE ARopeAttachPoint* GetLockedPoint() const { return LockedPoint.Get(); }
+	
+	UFUNCTION(BlueprintPure, Category="Rope|Lock")
+	FORCEINLINE bool HasLockedPoint() const { return LockedPoint.IsValid(); }
 
-	/** Tente de verrouiller le point actuellement détecté */
 	UFUNCTION(BlueprintCallable, Category="Rope|Lock")
 	bool TryLock();
 
-	/** Libère le point verrouillé */
 	UFUNCTION(BlueprintCallable, Category="Rope|Lock")
 	void Unlock();
-
-	/** Y a-t-il un point verrouillé ? */
-	UFUNCTION(BlueprintPure, Category="Rope|Lock")
-	bool HasLockedPoint() const;
-
-	/** Handler appelé lorsque le point détecté change */
+	
 	UFUNCTION(BlueprintCallable, Category="Rope|Lock")
 	void OnDetectedPointChanged(ARopeAttachPoint* NewPoint);
-
-	/** Retourne le point verrouillé */
-	UFUNCTION(BlueprintPure, Category="Rope|Lock")
-	ARopeAttachPoint* GetLockedPoint() const;
 	
-	/** Event appelé quand le point lock change (lock ou unlock) */
 	UPROPERTY(BlueprintAssignable, Category="Rope|Lock")
 	FOnLockedPointChanged OnLockedPointChanged;
 
 protected:
 	virtual void BeginPlay() override;
-
-	UPROPERTY(EditAnywhere, Category="Debug")
-	bool bDebugMode = false;
 	
 	bool bIsPhysicallyAttached = false;
 
 private:
 	UPROPERTY()
+	APlayerCharacter* OwnerCharacter = nullptr;
+	
+	UPROPERTY()
 	URopeDetectionComponent* DetectionComponent = nullptr;
 
 	TWeakObjectPtr<ARopeAttachPoint> LockedPoint;
+	
+	UPROPERTY(EditAnywhere, Category="Rope|Lock|Debug")
+	bool bLockDebugMode = false;
 	
 	void BroadcastLockedPoint();
 };
