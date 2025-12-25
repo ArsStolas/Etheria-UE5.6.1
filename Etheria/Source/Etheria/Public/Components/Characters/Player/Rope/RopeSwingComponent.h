@@ -44,17 +44,18 @@ public:
 
     void StartSwing();
     void StopSwing();
+    
+    // SLACK DYNAMIQUE
+    void SetBaseRopeLength(float NewLength);
 
     FORCEINLINE bool IsSwinging() const { return bIsSwinging; }
-    
-    /** Permet de modifier la longueur de la corde dynamiquement (Climb) */
-    FORCEINLINE void UpdateRopeLengthExternal(float NewLength) { RopeLength = NewLength; }
     
     /** Récupère la longueur actuelle utilisée par le swing */
     FORCEINLINE float GetSwingRopeLength() const { return RopeLength; }
 
 protected:
     void UpdateSwing(float DeltaTime);
+    void UpdateDynamicSlack(float DeltaTime, const FVector& RopeDir);
     
     // FORCES APPLICATION
     void ApplyGravity(FVector& CurrentVelocity, float DeltaTime);
@@ -131,6 +132,26 @@ private:
 
     float LastPumpTime = -1000.f;
     bool bPumpActive = false;
+    
+    /* ===== SLACK DYNAMIQUE ===== */
+    
+    // Physical length of the rope without slack
+    float BaseRopeLength;
+
+    // Effective length considering slack
+    float EffectiveRopeLength;
+
+    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    float MaxSlackLength = 120.f;
+
+    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    float SlackInterpSpeed = 6.f;
+
+    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    float SlackVerticalSpeedThreshold = 50.f;
+    
+    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    float SlackReleaseSpeed = 10.f; // retension speed
     
     // Paramètres Anti-Choc
     UPROPERTY()

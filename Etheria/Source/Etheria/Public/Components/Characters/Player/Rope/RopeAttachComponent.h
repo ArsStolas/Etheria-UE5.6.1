@@ -48,9 +48,9 @@ public:
     /** Detach the rope */
     void DetachRope();
 
-    /** Update the visual length of the cable */
+    /** Smoothly update the visual length of the cable */
     UFUNCTION(BlueprintCallable, Category="Rope|Visual")
-    void UpdateVisualLength(float NewLength);
+    void UpdateVisualCableLength(float TargetLength, float DeltaTime);
 
     /** Change the rope mesh or material */
     UFUNCTION(BlueprintCallable, Category="Rope|Visual")
@@ -90,4 +90,8 @@ private:
     
     UPROPERTY(EditAnywhere, Category="Rope|Attach|Debug")
     bool bAttachDebugMode = false;
+    
+    // Visual smoothing
+    UPROPERTY(EditAnywhere, Category="Rope|Visual")
+    float CableLengthInterpSpeed = 10.f;
 };

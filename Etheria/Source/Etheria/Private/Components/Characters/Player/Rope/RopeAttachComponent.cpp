@@ -120,14 +120,19 @@ void URopeAttachComponent::DetachRope()
     ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Rope detached"));
 }
 
-void URopeAttachComponent::UpdateVisualLength(float NewLength)
+void URopeAttachComponent::UpdateVisualCableLength(float TargetLength, float DeltaTime)
 {
     if (!CableComponent) return;
-    
-    float FinalLength = FMath::Max(NewLength + CableLengthOffset, 50.f);
-    CableComponent->CableLength = FinalLength;
-    
-    ROPE_LOG(LogTemp, Verbose, TEXT("[RopeAttach] Visual length updated to %.2f"), FinalLength);
+
+    const float VisualTarget =
+        TargetLength + CableLengthOffset;
+
+    CableComponent->CableLength = FMath::FInterpTo(
+        CableComponent->CableLength,
+        VisualTarget,
+        DeltaTime,
+        CableLengthInterpSpeed
+    );
 }
 
 void URopeAttachComponent::SetRopeMesh(USkeletalMesh* NewMesh)

@@ -84,17 +84,11 @@ void URopeLengthControllerComponent::ProcessClimbing(float DeltaTime)
     // Apply physics
     if (bIsSwinging) 
     {
-        SwingComp->UpdateRopeLengthExternal(NewLength);
+        SwingComp->SetBaseRopeLength(NewLength);
     } 
     else if (ConstraintComponent)
     {
         ConstraintComponent->SetRopeLength(NewLength);
-    }
-
-    // Update visual
-    if (AttachComponent)
-    {
-        AttachComponent->UpdateVisualLength(NewLength);
     }
 
     FColor DebugColor = bIsSwinging ? FColor::Cyan : FColor::Green;

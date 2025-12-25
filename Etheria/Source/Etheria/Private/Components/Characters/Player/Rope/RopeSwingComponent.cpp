@@ -56,7 +56,10 @@ void URopeSwingComponent::StartSwing()
     InitialSwingLocation = OwnerCharacter->GetActorLocation(); // Lock initial position
     const FVector Anchor = SwingPoint->GetActorLocation();
     
-    RopeLength = FVector::Dist(InitialSwingLocation, Anchor);
+    BaseRopeLength = FVector::Dist(InitialSwingLocation, Anchor);
+    EffectiveRopeLength = BaseRopeLength;
+    RopeLength = EffectiveRopeLength;
+
     SwingVelocity = MoveComp->Velocity;
     
     MaxVelocityReached = SwingVelocity.Size();
@@ -102,6 +105,8 @@ void URopeSwingComponent::StopSwing()
         SwingVelocity.Size(), *OwnerCharacter->GetActorLocation().ToString());
 }
 
+#pragma region "SWING UPDATE"
+
 void URopeSwingComponent::UpdateSwing(float DeltaTime)
 {
     if (!SwingPoint.IsValid() || HasTouchedGround())
@@ -130,6 +135,11 @@ void URopeSwingComponent::UpdateSwing(float DeltaTime)
 
     // --- INTEGRATION ---
     FVector NextPos = CurrentPos + (SwingVelocity * DeltaTime);
+    
+    // --- DYNAMIC SLACK ---
+    UpdateDynamicSlack(DeltaTime, RopeDir);
+    
+    AttachComponent->UpdateVisualCableLength(RopeLength, DeltaTime);
 
     // --- CONSTRAINT ---
     // Increase stiffness to prevent player from moving away from rope
@@ -154,6 +164,53 @@ void URopeSwingComponent::UpdateSwing(float DeltaTime)
     
     DrawVisualDebug(AnchorLoc, NextPos, GetCameraInputDirection());
 }
+
+void URopeSwingComponent::UpdateDynamicSlack(float DeltaTime, const FVector& RopeDir)
+{
+    // Vitesse verticale
+    const float VerticalSpeed = SwingVelocity.Z;
+
+    // Angle par rapport au bas du swing
+    const float DotDown =
+        FVector::DotProduct(-RopeDir, FVector::UpVector);
+
+    // 1 = bas du swing, 0 = horizontal, négatif = au-dessus
+    const float AngleFactor = FMath::Clamp(DotDown, 0.f, 1.f);
+
+    float TargetSlack = 0.f;
+
+    // =========================
+    // MONTÉE → SLACK
+    // =========================
+    if (VerticalSpeed > SlackVerticalSpeedThreshold)
+    {
+        TargetSlack =
+            MaxSlackLength *
+            AngleFactor *
+            FMath::Clamp(VerticalSpeed / 600.f, 0.f, 1.f);
+    }
+
+    // =========================
+    // CALCUL FINAL
+    // =========================
+    const float TargetEffectiveLength = BaseRopeLength + TargetSlack;
+
+    const float InterpSpeed =
+        (TargetEffectiveLength > EffectiveRopeLength)
+            ? SlackInterpSpeed
+            : SlackReleaseSpeed;
+
+    EffectiveRopeLength = FMath::FInterpTo(
+        EffectiveRopeLength,
+        TargetEffectiveLength,
+        DeltaTime,
+        InterpSpeed
+    );
+
+    RopeLength = EffectiveRopeLength;
+}
+
+#pragma endregion
 
 #pragma region "FORCES APPLICATION"
 
@@ -257,6 +314,21 @@ bool URopeSwingComponent::TryConsumePump(
     SwingVelocity += TangentDir * PumpImpulseStrength;
 
     return true;
+}
+
+#pragma endregion
+
+#pragma region "SLACK DYNAMIQUE"
+
+void URopeSwingComponent::SetBaseRopeLength(float NewBaseLength)
+{
+    BaseRopeLength = NewBaseLength;
+
+    // Keep effective length consistent
+    EffectiveRopeLength = FMath::Max(
+        EffectiveRopeLength,
+        BaseRopeLength
+    );
 }
 
 #pragma endregion
@@ -413,7 +485,7 @@ void URopeSwingComponent::DrawVisualDebug(const FVector& Anchor, const FVector& 
         TEXT("Pump Window: %s"),
         bPumpConsumedThisSwing ? TEXT("USED") : TEXT("READY")
     );
-
+    
     if (bPumpActive)
     {
         SWING_DEBUG_LINE(
@@ -423,6 +495,14 @@ void URopeSwingComponent::DrawVisualDebug(const FVector& Anchor, const FVector& 
             FColor::Green
         );
     }
+    
+    // Slack amount
+    SWING_SCREEN_MSG(
+        9,
+        FColor::Purple,
+        TEXT("Slack: %+0.1f"),
+        RopeLength - BaseRopeLength
+    );
 }
 
 #pragma endregion
