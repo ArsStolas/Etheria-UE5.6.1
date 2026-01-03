@@ -47,6 +47,8 @@ public:
     
     // SLACK DYNAMIQUE
     void SetBaseRopeLength(float NewLength);
+    
+    FORCEINLINE void SetClimbActive(bool bActive) { bClimbInputActive = bActive; }
 
     FORCEINLINE bool IsSwinging() const { return bIsSwinging; }
     
@@ -152,6 +154,8 @@ private:
     
     UPROPERTY(EditAnywhere, Category="Swing|Slack")
     float SlackReleaseSpeed = 10.f; // retension speed
+    
+    bool bClimbInputActive = false;
     
     // Paramètres Anti-Choc
     UPROPERTY()

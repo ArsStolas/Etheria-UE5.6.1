@@ -37,6 +37,24 @@ void URopeLengthControllerComponent::TickComponent(float DeltaTime, ELevelTick T
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
+    float CurrentLength = -1.f;
+
+    if (SwingComp && SwingComp->IsSwinging())
+    {
+        CurrentLength = SwingComp->GetSwingRopeLength();
+    }
+    else if (ConstraintComponent && ConstraintComponent->IsActive())
+    {
+        CurrentLength = ConstraintComponent->GetRopeLength();
+    }
+
+    if (CurrentLength > 0.f && AttachComponent)
+    {
+        AttachComponent->UpdateVisualCableLength(CurrentLength, DeltaTime);
+    }
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("[RopeClimb] Current Rope Length: %.2f"), CurrentLength);
+    
     ProcessClimbing(DeltaTime);
 }
 
@@ -49,6 +67,11 @@ void URopeLengthControllerComponent::SetClimbInput(float Value)
     {
         SetComponentTickEnabled(bIsClimbing);
         CLIMB_LOG(LogTemp, Verbose, TEXT("[RopeClimb] Tick %s"), bIsClimbing ? TEXT("ENABLED") : TEXT("DISABLED"));
+    }
+    
+    if (SwingComp && SwingComp->IsSwinging())
+    {
+        SwingComp->SetClimbActive(bIsClimbing);
     }
 }
 
@@ -79,18 +102,29 @@ void URopeLengthControllerComponent::ProcessClimbing(float DeltaTime)
 
     // Compute new length
     float NewLength = CurrentLength - (ClimbInput * ClimbSpeed * DeltaTime);
-    NewLength = FMath::Clamp(NewLength, MinRopeLength, MaxRopeLength);
-
-    // Apply physics
+    
+    // Clamp to min/max
+    if (AttachComponent)
+    {
+        NewLength = FMath::Clamp(
+            NewLength,
+            AttachComponent->GetMinRopeLength(),
+            AttachComponent->GetMaxRopeLength()
+        );
+    }
+    
+    // Apply to physics systems
     if (bIsSwinging) 
     {
         SwingComp->SetBaseRopeLength(NewLength);
     } 
     else if (ConstraintComponent)
     {
+        // SetRopeLength now handles visual sync internally
         ConstraintComponent->SetRopeLength(NewLength);
     }
 
     FColor DebugColor = bIsSwinging ? FColor::Cyan : FColor::Green;
-    CLIMB_SCREEN_MSG(104, DebugColor, TEXT("Climb: %.2f (Mode: %s)"), NewLength, bIsSwinging ? TEXT("SWING") : TEXT("STATIC"));
+    CLIMB_SCREEN_MSG(104, DebugColor, TEXT("Climb: %.2f (Mode: %s)"), 
+        NewLength, bIsSwinging ? TEXT("SWING") : TEXT("STATIC"));
 }

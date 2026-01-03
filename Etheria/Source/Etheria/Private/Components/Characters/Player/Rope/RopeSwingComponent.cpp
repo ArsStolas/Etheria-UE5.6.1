@@ -13,7 +13,9 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "World/Rope/RopeAttachPoint.h"
 #include "DrawDebugHelpers.h"
+#include "Components/Characters/CharacterStateComponent.h"
 #include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
+#include "Core/System/EtheriaGameplayTags.h"
 #include "Kismet/KismetMathLibrary.h"
 
 URopeSwingComponent::URopeSwingComponent()
@@ -52,6 +54,11 @@ void URopeSwingComponent::StartSwing()
 
     SwingPoint = LockComponent->GetLockedPoint();
     if (!SwingPoint.IsValid()) return;
+    
+    if (OwnerCharacter)
+    {
+        OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Rope_Swinging);
+    }
 
     InitialSwingLocation = OwnerCharacter->GetActorLocation(); // Lock initial position
     const FVector Anchor = SwingPoint->GetActorLocation();
@@ -80,6 +87,11 @@ void URopeSwingComponent::StartSwing()
 void URopeSwingComponent::StopSwing()
 {
     if (!bIsSwinging) return;
+    
+    if (OwnerCharacter)
+    {
+        OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Rope_Attached);
+    }
 
     bIsSwinging = false;
     PrimaryComponentTick.SetTickFunctionEnable(false);
@@ -139,8 +151,6 @@ void URopeSwingComponent::UpdateSwing(float DeltaTime)
     // --- DYNAMIC SLACK ---
     UpdateDynamicSlack(DeltaTime, RopeDir);
     
-    AttachComponent->UpdateVisualCableLength(RopeLength, DeltaTime);
-
     // --- CONSTRAINT ---
     // Increase stiffness to prevent player from moving away from rope
     SolveRopeConstraint(NextPos, SwingVelocity, AnchorLoc, DeltaTime);
@@ -167,6 +177,13 @@ void URopeSwingComponent::UpdateSwing(float DeltaTime)
 
 void URopeSwingComponent::UpdateDynamicSlack(float DeltaTime, const FVector& RopeDir)
 {
+    if (bClimbInputActive)
+    {
+        EffectiveRopeLength = BaseRopeLength;
+        RopeLength = EffectiveRopeLength;
+        return;
+    }
+    
     // Vitesse verticale
     const float VerticalSpeed = SwingVelocity.Z;
 

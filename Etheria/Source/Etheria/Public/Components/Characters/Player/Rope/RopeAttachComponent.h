@@ -35,12 +35,15 @@ public:
     URopeAttachComponent();
 
     virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     
     FORCEINLINE bool IsAttached() const { return AttachedPoint.IsValid(); }
     FORCEINLINE ARopeAttachPoint* GetAttachedPoint() const { return AttachedPoint.Get(); }
     FORCEINLINE UCableComponent* GetCableComponent() const { return CableComponent; }
-    FORCEINLINE float GetCableLengthOffset() const { return CableLengthOffset; }
+    FORCEINLINE float GetCableLengthOffset() const { return RopeLengthOffset; }
+    FORCEINLINE float GetMinRopeLength() const { return MinRopeLength; }
+    FORCEINLINE float GetMaxRopeLength() const { return MaxRopeLength; }
 
     /** Attach the rope to a target point */
     void AttachRope(ARopeAttachPoint* TargetPoint);
@@ -70,10 +73,10 @@ protected:
     UCableComponent* CableComponent = nullptr;
 
     UPROPERTY(EditAnywhere, Category="Rope|Visual")
-    float CableWidth = 5.f;
+    float RopeWidth = 5.f;
 
     UPROPERTY(EditAnywhere, Category="Rope|Visual")
-    float CableLengthOffset = 10.f;
+    float RopeLengthOffset = 10.f;
 
     UPROPERTY(EditAnywhere, Category="Rope|Visual")
     UMaterialInterface* RopeMaterial;
@@ -81,12 +84,69 @@ protected:
     UPROPERTY(EditAnywhere, Category="Rope|Visual")
     USkeletalMesh* RopeMesh;
     
-    UPROPERTY(EditDefaultsOnly, Category="Rope")
-    FName RopeStartSocketName = TEXT("hand_r");
+    /** Socket name where the rope attaches on the character mesh (try: spine_03, clavicle_r, hand_r) */
+    UPROPERTY(EditAnywhere, Category="Rope|Attachment")
+    FName RopeStartSocketName = TEXT("spine_03");
+    
+    /** Vertical offset for the rope attachment point on the anchor (positive = higher) */
+    UPROPERTY(EditAnywhere, Category="Rope|Attachment")
+    float AnchorAttachmentOffset = 25.f;
+    
+    // Min/max width for cable visual
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Rope|Visual")
+    float MinRopeWidth = 2.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Rope|Visual")
+    float MaxRopeWidth = 6.f;
+
+    // A multiplier to exaggerate tension
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Rope|Visual")
+    float TensionWidthMultiplier = 1.f;
+    
+    UPROPERTY(EditAnywhere, Category="Rope|Climb")
+    float MinRopeLength = 500.f;
+
+    UPROPERTY(EditAnywhere, Category="Rope|Climb")
+    float MaxRopeLength = 1600.f;
+
+    // ===== CABLE PHYSICS SETTINGS =====
+    
+    /** Number of segments for cable simulation (more = smoother but more expensive) 
+     * WARNING: Values above 10 may cause crashes in CableComponent
+     * Recommended: 8-10 for best stability/quality balance */
+    UPROPERTY(EditAnywhere, Category="Rope|Physics", meta=(ClampMin="5", ClampMax="10"))
+    int32 NumSegments = 10;
+    
+    /** Substep time for physics simulation (lower = more stable) */
+    UPROPERTY(EditAnywhere, Category="Rope|Physics", meta=(ClampMin="0.01", ClampMax="0.1"))
+    float SubstepTime = 0.02f;
+    
+    /** Solver iterations (higher = less stretchy but more expensive) */
+    UPROPERTY(EditAnywhere, Category="Rope|Physics", meta=(ClampMin="1", ClampMax="10"))
+    int32 SolverIterations = 2;
+    
+    /** Damping force applied to cable to reduce bouncing (higher = less bouncy) */
+    UPROPERTY(EditAnywhere, Category="Rope|Physics", meta=(ClampMin="0", ClampMax="100"))
+    FVector CableForce = FVector(0.f, 0.f, -50.f);
+    
+    /** Cable gravity scale (1.0 = normal gravity, adjust for rope weight feel) */
+    UPROPERTY(EditAnywhere, Category="Rope|Physics", meta=(ClampMin="0", ClampMax="3"))
+    float CableGravityScale = 1.0f;
+    
+    /** Enable collision for cable with world geometry */
+    UPROPERTY(EditAnywhere, Category="Rope|Physics")
+    bool bEnableCollision = true; // ACTIVÉ par défaut maintenant
+    
+    /** Collision radius for each cable segment */
+    UPROPERTY(EditAnywhere, Category="Rope|Physics", meta=(ClampMin="1", ClampMax="20"))
+    float CableCollisionRadius = 5.f;
 
 private:
     UFUNCTION()
     void OnLockedPointChanged(ARopeAttachPoint* NewLockedPoint);
+    
+    /** Target length we're interpolating towards */
+    float TargetCableLength = 0.f;
     
     UPROPERTY(EditAnywhere, Category="Rope|Attach|Debug")
     bool bAttachDebugMode = false;

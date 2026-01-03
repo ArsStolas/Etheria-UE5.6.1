@@ -109,16 +109,16 @@ void APlayerCharacter::BeginPlay()
     // --- State Delegates ---
     if (StateComponent)
     {
-        BindIf(bDebugMovementStateLogs, StateComponent->OnMovementStateChanged, &APlayerCharacter::LogMovementStateChanged);
-        BindIf(bDebugCombatStateLogs, StateComponent->OnCombatStateChanged, &APlayerCharacter::LogCombatStateChanged);
-        BindIf(bDebugLifeStateLogs, StateComponent->OnLifeStateChanged, &APlayerCharacter::LogLifeStateChanged);
+        BIND_IF(bDebugMovementStateLogs, StateComponent->OnMovementStateChanged, LogMovementStateChanged);
+        BIND_IF(bDebugCombatStateLogs, StateComponent->OnCombatStateChanged, LogCombatStateChanged);
+        BIND_IF(bDebugLifeStateLogs, StateComponent->OnLifeStateChanged, LogLifeStateChanged);
     }
 
     // --- Health Delegates ---
     if (HealthComponent)
     {
-        BindIf(bDebugLifeStateLogs, HealthComponent->OnHealthChanged, &APlayerCharacter::LogHealthChanged);
-        BindIf(bDebugLifeStateLogs, HealthComponent->OnDeath, &APlayerCharacter::LogDeath);
+        BIND_IF(bDebugLifeStateLogs, HealthComponent->OnHealthChanged, LogHealthChanged);
+        BIND_IF(bDebugLifeStateLogs, HealthComponent->OnDeath, LogDeath);
     }
 
     // --- Glider Delegates ---
@@ -419,9 +419,14 @@ void APlayerCharacter::OnJumpPressed()
 
     Jump();
 
-    if (UCharacterStateComponent* StateComp = GetStateComponent())
+    if (StateComponent)
     {
-        StateComp->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
     }
 }
 
@@ -431,6 +436,11 @@ void APlayerCharacter::Landed(const FHitResult& Hit)
 
     if (UCharacterStateComponent* StateComp = GetStateComponent())
     {
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
         StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
     }
 }
@@ -443,9 +453,14 @@ void APlayerCharacter::OnCrouchPressed()
 
     Crouch();
 
-    if (UCharacterStateComponent* StateComp = GetStateComponent())
+    if (StateComponent)
     {
-        StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
     }
 }
 
@@ -453,9 +468,14 @@ void APlayerCharacter::StopCrouch()
 {
     UnCrouch();
 
-    if (UCharacterStateComponent* StateComp = GetStateComponent())
+    if (StateComponent)
     {
-        StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
     }
 }
 
@@ -493,6 +513,12 @@ void APlayerCharacter::UpdateMovementState()
 
     UCharacterMovementComponent* MoveComp = GetCharacterMovement();
 
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+        !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+    {
+        return;
+    }
+    
     if (MoveComp->IsFalling())
         HandleAirborneState();
     else
@@ -885,11 +911,19 @@ void APlayerCharacter::OnRopeAttachPressed()
     {
         CheckRopeAttachMode();
         RopeLockComponent->Unlock();
+        if (StateComponent)
+        {
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Detached);
+        }
         return;
     }
 
     if (RopeLockComponent->TryLock())
     {
+        if (StateComponent)
+        {
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Attached);
+        }
     }
 }
 
@@ -919,13 +953,26 @@ void APlayerCharacter::CheckRopeAttachMode()
 void APlayerCharacter::ClimbRopeInput(const FInputActionValue& Value)
 {
     float AxisVal = Value.Get<float>();
-    UE_LOG(LogTemp, Warning, TEXT("ClimbRopeInput: %f"), AxisVal);
+    
+    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
+    {
+        return;
+    }
+    
     if (RopeLengthControllerComponent)
         RopeLengthControllerComponent->SetClimbInput(AxisVal);
+    
+    if (StateComponent)
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Climbing);
 }
 
 void APlayerCharacter::StopClimbRopeInput(const FInputActionValue& Value)
 {
+    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
+    {
+        return;
+    }
+    
     if (RopeLengthControllerComponent)
         RopeLengthControllerComponent->SetClimbInput(0.f);
 }

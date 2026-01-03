@@ -21,6 +21,7 @@
 class APlayerCharacter;
 class ARopeAttachPoint;
 class UCharacterMovementComponent;
+class URopeAttachComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRopeTensioned);
 
@@ -53,17 +54,26 @@ public:
 	FOnRopeTensioned OnRopeTensioned;
 
 private:
-	void ApplyConstraint();
+	void ApplyConstraint(float DeltaTime);
 
+	UPROPERTY()
 	APlayerCharacter* OwnerCharacter = nullptr;
+	
+	UPROPERTY()
 	UCharacterMovementComponent* MoveComp = nullptr;
+	
+	UPROPERTY()
+	URopeAttachComponent* AttachComponent = nullptr;
 
 	TWeakObjectPtr<ARopeAttachPoint> Anchor;
 
 	float RopeLength = 0.f;
 	bool bIsActive = false;
 	
+	/** Smoothing for constraint application (prevents jitter) */
+	UPROPERTY(EditAnywhere, Category="Rope|Constraint")
+	float ConstraintSmoothness = 0.8f;
+	
 	UPROPERTY(EditAnywhere, Category="Rope|Debug")
 	bool bConstraintDebugMode = false;
 };
-

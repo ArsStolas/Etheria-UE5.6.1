@@ -65,12 +65,6 @@ private:
 	UPROPERTY(EditAnywhere, Category="Rope|Climb")
 	float ClimbSpeed = 300.f;
 
-	UPROPERTY(EditAnywhere, Category="Rope|Climb")
-	float MinRopeLength = 500.f;
-
-	UPROPERTY(EditAnywhere, Category="Rope|Climb")
-	float MaxRopeLength = 1600.f;
-
 	/** Debug */
 	UPROPERTY(EditAnywhere, Category="Rope|LengthController|Debug")
 	bool bLengthControllerDebugMode = false;

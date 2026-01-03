@@ -353,14 +353,8 @@ private:
 
 #pragma region UTILITIES
     
-    template<typename DelegateType, typename FuncType>
-    void BindIf(bool bCondition, DelegateType& Delegate, FuncType Func)
-    {
-        if (bCondition)
-        {
-            Delegate.AddDynamic(this, Func);
-        }
-    }
+#define BIND_IF(Condition, Delegate, Function) \
+if (Condition) { Delegate.AddDynamic(this, &APlayerCharacter::Function); }
 
 #pragma endregion
 
