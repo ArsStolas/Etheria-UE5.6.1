@@ -60,8 +60,8 @@ void UGlideMode::TickMode(float DeltaTime)
 {
 	if (!Owner || !Move) return;
 
-	const int Hor = Owner->GetHorizontalAxis();
-	const int Ver = Owner->GetVerticalAxis();
+	const float Hor = Owner->GetHorizontalInput();
+	const float Ver = Owner->GetVerticalInput();
 
 	const FRotator CamRot(0.f, Owner->GetControlRotation().Yaw, 0.f);
 	const FVector Forward = FRotationMatrix(CamRot).GetUnitAxis(EAxis::X);

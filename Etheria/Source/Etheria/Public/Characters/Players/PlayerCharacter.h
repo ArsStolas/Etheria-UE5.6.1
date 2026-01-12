@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Header
  */
 
@@ -12,6 +12,12 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class URopeLengthControllerComponent;
+class URopeConstraintComponent;
+class URopeSwingComponent;
+class URopeAttachComponent;
+class URopeLockComponent;
+class URopeDetectionComponent;
 struct FInputActionValue;
 
 class USpringArmComponent;
@@ -38,14 +44,14 @@ struct FAxisPressState
     double NegLastTime = -DBL_MAX;
     double PosLastTime = -DBL_MAX;
 
-    int32 GetAxisValue() const
+    float GetAxisValue() const
     {
         if (bNegPressed && bPosPressed)
-            return (PosLastTime > NegLastTime) ? +1 : -1;
+            return (PosLastTime > NegLastTime) ? 1.f : -1.f;
 
-        if (bNegPressed)  return -1;
-        if (bPosPressed)  return +1;
-        return 0;
+        if (bNegPressed)  return -1.f;
+        if (bPosPressed)  return  1.f;
+        return 0.f;
     }
 
     void OnNegStarted(double Time) { bNegPressed = true;  NegLastTime = Time; }
@@ -66,10 +72,18 @@ public:
     APlayerCharacter();
 
     FORCEINLINE UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
-    FORCEINLINE int32 GetHorizontalAxis() const { return Horizontal.GetAxisValue(); }
-    FORCEINLINE int32 GetVerticalAxis() const { return Vertical.GetAxisValue(); }
+    FORCEINLINE float GetHorizontalInput() const { return Horizontal.GetAxisValue(); }
+    FORCEINLINE float GetVerticalInput() const   { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
+    FORCEINLINE URopeDetectionComponent* GetRopeDetectionComponent() const { return RopeDetectionComponent; }
+    FORCEINLINE URopeAttachComponent* GetRopeAttachComponent() const { return RopeAttachComponent; }
+    FORCEINLINE URopeLockComponent* GetRopeLockComponent() const { return RopeLockComponent; }
+    FORCEINLINE URopeConstraintComponent* GetRopeConstraintComponent() const { return RopeConstraintComponent; }
+    FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
+    FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
 
+    // Simple accessor
+    
     bool IsGrounded() const;
     
 protected:
@@ -113,6 +127,20 @@ protected:
     // --- QUEST TARGET ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
     UQuestComponent* QuestComponent;
+
+    // --- ROPE ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
+    URopeDetectionComponent* RopeDetectionComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeLockComponent* RopeLockComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeAttachComponent* RopeAttachComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeConstraintComponent* RopeConstraintComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeSwingComponent* RopeSwingComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeLengthControllerComponent* RopeLengthControllerComponent;
 
 #pragma endregion
 
@@ -182,6 +210,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
     UInputAction* LockSwitchRightAction;
 
+    // --- ROPE ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
+    UInputAction* AttachRopeAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
+    UInputAction* ClimbRopeAction;
+
 #pragma endregion
 
 // ============================================================
@@ -236,8 +270,15 @@ protected:
 private:
     FAxisPressState Horizontal;
     FAxisPressState Vertical;
-
+    
     float AirborneIgnoreUntil = 0.f;
+    
+    UPROPERTY(EditAnywhere, Category = "Debug")
+    bool bDebugMovementStateLogs = false;
+    UPROPERTY(EditAnywhere, Category = "Debug")
+    bool bDebugCombatStateLogs = false;
+    UPROPERTY(EditAnywhere, Category = "Debug")
+    bool bDebugLifeStateLogs   = false;
 
 // ============================================================
 // INTERNAL HANDLERS
@@ -289,6 +330,12 @@ private:
     // --- Interactor ---
     UFUNCTION() void Input_Interact();
 
+    // --- Rope ---
+    void OnRopeAttachPressed();
+    void CheckRopeAttachMode();
+    void ClimbRopeInput(const FInputActionValue& Value);
+    void StopClimbRopeInput(const FInputActionValue& Value);
+
 #pragma endregion
 
 // ============================================================
@@ -303,4 +350,13 @@ private:
     UFUNCTION() void LogDeath();
 
 #pragma endregion
+
+#pragma region UTILITIES
+    
+#define BIND_IF(Condition, Delegate, Function) \
+if (Condition) { Delegate.AddDynamic(this, &APlayerCharacter::Function); }
+
+#pragma endregion
+
 };
+
