@@ -45,8 +45,8 @@ void UGliderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 
 			if (OwnerCharacter && OwnerCharacter->GetStateComponent())
 			{
-				int Hor = OwnerCharacter->GetHorizontalAxis();
-				int Ver = OwnerCharacter->GetVerticalAxis();
+				float Hor = OwnerCharacter->GetHorizontalInput();
+				float Ver = OwnerCharacter->GetVerticalInput();
 
 				if (Hor != 0 || Ver != 0)
 					OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Grounded_Walking);
@@ -272,8 +272,8 @@ void UGliderComponent::HandleDescent(float DeltaTime)
 
 	UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
 
-	int Hor = OwnerCharacter->GetHorizontalAxis();
-	int Ver = OwnerCharacter->GetVerticalAxis();
+	float Hor = OwnerCharacter->GetHorizontalInput();
+	float Ver = OwnerCharacter->GetVerticalInput();
 
 	const FRotator CamRot = OwnerCharacter->GetControlRotation();
 	const FRotator YawRot(0.f, CamRot.Yaw, 0.f);
@@ -320,8 +320,8 @@ void UGliderComponent::HandleDive(float DeltaTime)
     UCharacterMovementComponent* MoveComp = OwnerCharacter->GetCharacterMovement();
 
     // Lire les axes
-    const int Hor = OwnerCharacter->GetHorizontalAxis();
-    const int Ver = OwnerCharacter->GetVerticalAxis();
+    const float Hor = OwnerCharacter->GetHorizontalInput();
+    const float Ver = OwnerCharacter->GetVerticalInput();
 
     // === PITCH / ROLL ===
     float TargetPitch = FMath::Clamp(-Ver * MaxPitchAngle, -MaxPitchAngle, MaxPitchAngle);

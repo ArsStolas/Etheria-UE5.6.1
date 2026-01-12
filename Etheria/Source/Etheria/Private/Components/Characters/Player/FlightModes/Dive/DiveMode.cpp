@@ -49,8 +49,8 @@ void UDiveMode::TickMode(float DeltaTime)
 	if (!Owner) return;
 
     // Lire les axes
-    const int Hor = Owner->GetHorizontalAxis();
-    const int Ver = Owner->GetVerticalAxis();
+    const int Hor = Owner->GetHorizontalInput();
+    const int Ver = Owner->GetVerticalInput();
 
     // === PITCH / ROLL ===
     float TargetPitch = FMath::Clamp(-Ver * MaxPitch, -MaxPitch, MaxPitch);

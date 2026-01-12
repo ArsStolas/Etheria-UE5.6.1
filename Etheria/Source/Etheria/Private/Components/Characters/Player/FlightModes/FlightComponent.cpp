@@ -111,8 +111,8 @@ void UFlightComponent::HandleLandingState()
     if (!Owner || !Owner->GetStateComponent())
         return;
 
-    const int Hor = Owner->GetHorizontalAxis();
-    const int Ver = Owner->GetVerticalAxis();
+    const int Hor = Owner->GetHorizontalInput();
+    const int Ver = Owner->GetVerticalInput();
 
     Owner->GetStateComponent()->SetMovementState(
         (Hor != 0 || Ver != 0) 

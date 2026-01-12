@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
  */
 
@@ -14,6 +14,12 @@
 #include "Components/Characters/CharacterStateComponent.h"
 #include "Components/Characters/HealthComponent.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
+#include "Components/Characters/Player/Rope/RopeAttachComponent.h"
+#include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
+#include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
+#include "Components/Characters/Player/Rope/RopeLengthControllerComponent.h"
+#include "Components/Characters/Player/Rope/RopeLockComponent.h"
+#include "Components/Characters/Player/Rope/RopeSwingComponent.h"
 #include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
@@ -22,6 +28,7 @@
 #include "Components/Quests/QuestComponent.h"
 #include "Core/System/EtheriaGameplayTags.h"
 #include "Data/Weapons/WeaponData.h"
+#include "World/Rope/RopeAttachPoint.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -61,6 +68,14 @@ APlayerCharacter::APlayerCharacter()
 
     // --- QUEST COMPONENT ---
     QuestComponent = CreateDefaultSubobject<UQuestComponent>(TEXT("BPC_QuestComponent"));
+
+    // --- ROPE COMPONENTS ---
+    RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("BPC_RopeDetectionComponent"));
+    RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("BPC_RopeLockComponent"));
+    RopeAttachComponent = CreateDefaultSubobject<URopeAttachComponent>(TEXT("BPC_RopeAttachComponent"));
+    RopeConstraintComponent = CreateDefaultSubobject<URopeConstraintComponent>(TEXT("BPC_RopeConstraintComponent"));
+    RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
+    RopeLengthControllerComponent = CreateDefaultSubobject<URopeLengthControllerComponent>(TEXT("BPC_RopeLengthController"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -94,16 +109,16 @@ void APlayerCharacter::BeginPlay()
     // --- State Delegates ---
     if (StateComponent)
     {
-        StateComponent->OnMovementStateChanged.AddDynamic(this, &APlayerCharacter::LogMovementStateChanged);
-        StateComponent->OnCombatStateChanged.AddDynamic(this, &APlayerCharacter::LogCombatStateChanged);
-        StateComponent->OnLifeStateChanged.AddDynamic(this, &APlayerCharacter::LogLifeStateChanged);
+        BIND_IF(bDebugMovementStateLogs, StateComponent->OnMovementStateChanged, LogMovementStateChanged);
+        BIND_IF(bDebugCombatStateLogs, StateComponent->OnCombatStateChanged, LogCombatStateChanged);
+        BIND_IF(bDebugLifeStateLogs, StateComponent->OnLifeStateChanged, LogLifeStateChanged);
     }
 
     // --- Health Delegates ---
     if (HealthComponent)
     {
-        HealthComponent->OnHealthChanged.AddDynamic(this, &APlayerCharacter::LogHealthChanged);
-        HealthComponent->OnDeath.AddDynamic(this, &APlayerCharacter::LogDeath);
+        BIND_IF(bDebugLifeStateLogs, HealthComponent->OnHealthChanged, LogHealthChanged);
+        BIND_IF(bDebugLifeStateLogs, HealthComponent->OnDeath, LogDeath);
     }
 
     // --- Glider Delegates ---
@@ -234,8 +249,23 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
             EIC->BindAction(LockSwitchRightAction, ETriggerEvent::Started, this, &APlayerCharacter::OnLockSwitchRight);
         }
     #pragma endregion
+
+    #pragma region "ROPE BINDS"
+        if (AttachRopeAction)
+        {
+            EIC->BindAction(AttachRopeAction, ETriggerEvent::Started, this, &APlayerCharacter::OnRopeAttachPressed);
+        }
+        
+        if (ClimbRopeAction)
+        {
+            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Triggered, this, &APlayerCharacter::ClimbRopeInput);
+            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopClimbRopeInput);
+        }
+    #pragma endregion
     }
 }
+
+#pragma region "SIMPLE ACCESSORS"
 
 bool APlayerCharacter::IsGrounded() const
 {
@@ -252,6 +282,8 @@ bool APlayerCharacter::IsGrounded() const
 
     return bHit;
 }
+
+#pragma endregion
 
 #pragma region AIMING
 
@@ -387,9 +419,14 @@ void APlayerCharacter::OnJumpPressed()
 
     Jump();
 
-    if (UCharacterStateComponent* StateComp = GetStateComponent())
+    if (StateComponent)
     {
-        StateComp->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
     }
 }
 
@@ -399,6 +436,11 @@ void APlayerCharacter::Landed(const FHitResult& Hit)
 
     if (UCharacterStateComponent* StateComp = GetStateComponent())
     {
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
         StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
     }
 }
@@ -411,9 +453,14 @@ void APlayerCharacter::OnCrouchPressed()
 
     Crouch();
 
-    if (UCharacterStateComponent* StateComp = GetStateComponent())
+    if (StateComponent)
     {
-        StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Crouching);
     }
 }
 
@@ -421,9 +468,14 @@ void APlayerCharacter::StopCrouch()
 {
     UnCrouch();
 
-    if (UCharacterStateComponent* StateComp = GetStateComponent())
+    if (StateComponent)
     {
-        StateComp->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
+        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+        {
+            return;
+        }
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Grounded_Idle);
     }
 }
 
@@ -434,6 +486,12 @@ void APlayerCharacter::StopCrouch()
 void APlayerCharacter::HandleMovementInput()
 {
     if (!Controller) return;
+    
+    if (RopeSwingComponent && RopeSwingComponent->IsSwinging())
+    {
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Swinging - skipping normal movement input"));
+        return;
+    }
 
     const int Hor = Horizontal.GetAxisValue();
     const int Ver = Vertical.GetAxisValue();
@@ -455,6 +513,12 @@ void APlayerCharacter::UpdateMovementState()
 
     UCharacterMovementComponent* MoveComp = GetCharacterMovement();
 
+    if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
+        !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
+    {
+        return;
+    }
+    
     if (MoveComp->IsFalling())
         HandleAirborneState();
     else
@@ -833,6 +897,84 @@ void APlayerCharacter::Input_Interact()
     //    return;
     //}
     //InteractionComponent->Interact();
+}
+
+#pragma endregion
+
+#pragma region "ROPE INPUTS"
+
+void APlayerCharacter::OnRopeAttachPressed()
+{
+    if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
+
+    if (RopeAttachComponent->IsAttached())
+    {
+        CheckRopeAttachMode();
+        RopeLockComponent->Unlock();
+        if (StateComponent)
+        {
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Detached);
+        }
+        return;
+    }
+
+    if (RopeLockComponent->TryLock())
+    {
+        if (StateComponent)
+        {
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Attached);
+        }
+    }
+}
+
+void APlayerCharacter::CheckRopeAttachMode()
+{
+    if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
+
+    ARopeAttachPoint* LockedPoint = RopeLockComponent->GetLockedPoint();
+    if (!LockedPoint) return;
+
+    switch (LockedPoint->AttachType)
+    {
+    case ERopeAttachType::Swing:
+        {
+            RopeSwingComponent->StopSwing();
+            break;
+        }
+    case ERopeAttachType::Pull:
+        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Point Pull, pas de swing"));
+        break;
+    default:
+        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("AttachType non géré"));
+        break;
+    }
+}
+
+void APlayerCharacter::ClimbRopeInput(const FInputActionValue& Value)
+{
+    float AxisVal = Value.Get<float>();
+    
+    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
+    {
+        return;
+    }
+    
+    if (RopeLengthControllerComponent)
+        RopeLengthControllerComponent->SetClimbInput(AxisVal);
+    
+    if (StateComponent)
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Climbing);
+}
+
+void APlayerCharacter::StopClimbRopeInput(const FInputActionValue& Value)
+{
+    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
+    {
+        return;
+    }
+    
+    if (RopeLengthControllerComponent)
+        RopeLengthControllerComponent->SetClimbInput(0.f);
 }
 
 #pragma endregion
