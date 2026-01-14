@@ -23,6 +23,21 @@
 			"TargetAllowList": [
 				"Editor"
 			]
+		},
+		{
+			"Name": "MaterialAssignment",
+			"Enabled": false,
+			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/e5667454124c4f649381638a13bcaa15"
+		},
+		{
+			"Name": "ObjectDistribution",
+			"Enabled": false,
+			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/5a78cc6e9a1549d0bb05e8d906dac776"
+		},
+		{
+			"Name": "UltimateLevelArtTool",
+			"Enabled": false,
+			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/ec0988f250ef49ebaf7852cdfe3e6516"
 		}
 	]
 }
