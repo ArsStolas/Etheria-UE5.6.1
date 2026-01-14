@@ -26,12 +26,12 @@
 		},
 		{
 			"Name": "MaterialAssignment",
-			"Enabled": false,
+			"Enabled": true,
 			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/e5667454124c4f649381638a13bcaa15"
 		},
 		{
 			"Name": "ObjectDistribution",
-			"Enabled": false,
+			"Enabled": true,
 			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/5a78cc6e9a1549d0bb05e8d906dac776"
 		},
 		{
