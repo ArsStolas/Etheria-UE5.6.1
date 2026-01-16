@@ -4,9 +4,3 @@
  * Last Updated by: ArsStolas
  * Class: BaseQuestGiver - Source
 */
-
-#include "Characters/AI/NPCs/NPCs_Type/BaseQuestGiver.h"
-
-ABaseQuestGiver::ABaseQuestGiver()
-{
-}

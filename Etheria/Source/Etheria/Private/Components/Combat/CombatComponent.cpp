@@ -191,3 +191,22 @@ void UCombatComponent::GetRecentHitActors(TArray<AActor*>& Out) const
         if (W.IsValid()) Out.Add(W.Get());
     }
 }
+
+/** Config Helper */
+float UCombatComponent::GetCurrentAttackRange() const
+{
+    if (!CurrentWeaponData) return 0.f;
+
+    if (CurrentWeaponData->Ranged.bIsRangedWeapon)
+    {
+        return CurrentWeaponData->Ranged.FullAutoRate > 0.f ?
+               CurrentWeaponData->Ranged.AimArmLength : 
+               200.f;
+    }
+    
+    if (Attacks.Num() > 0)
+    {
+        return Attacks[0].Range;
+    }
+    return 0.f;
+}

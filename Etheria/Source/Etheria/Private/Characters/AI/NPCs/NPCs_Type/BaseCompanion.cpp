@@ -4,9 +4,3 @@
  * Last Updated by: ArsStolas
  * Class: BaseCompanion - Source
 */
-
-#include "Characters/AI/NPCs/NPCs_Type/BaseCompanion.h"
-
-ABaseCompanion::ABaseCompanion()
-{
-}
