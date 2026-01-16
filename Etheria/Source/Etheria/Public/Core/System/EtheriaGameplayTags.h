@@ -44,8 +44,11 @@ namespace EtheriaTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Life_Dead);
 
 	// === IA ===
-		// === Combat ===
+		// === Movement ===
 		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Chase);
+		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Patrol);
 		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Wander);
+	// === Combat ===
+		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Fight);
 
 }

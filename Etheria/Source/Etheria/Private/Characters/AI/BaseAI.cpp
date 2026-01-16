@@ -1,11 +1,12 @@
 /*
 * Etheria's End Project, 2025
 * Created by: ArsStolas
-* Last Updated by: ArsStolas
+* Last Updated by: ChatGPT
 * Class: BaseAI - Source
 */
 
 #include "Characters/AI/BaseAI.h"
+
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/Combat/CombatComponent.h"
 
@@ -29,4 +30,12 @@ void ABaseAI::BeginPlay()
 
     StateComp = FindComponentByClass<UCharacterStateComponent>();
     CombatComp = FindComponentByClass<UCombatComponent>();
+
+    if (StateComp)
+    {
+        if (FindComponentByClass<UAISplinePatrolComponent>())
+            StateComp->SetMovementState(EtheriaTags::State_Movement_Patrol);
+        else
+            StateComp->SetMovementState(EtheriaTags::State_Movement_Wander);
+    }
 }

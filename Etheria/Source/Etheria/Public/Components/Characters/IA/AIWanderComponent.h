@@ -19,6 +19,9 @@ public:
 	void StartWander();
 	void StopWander();
 
+	FTimerHandle WanderTimer;
+
+
 protected:
 	virtual void BeginPlay() override;
 	FVector GetRandomPointInRadius();
@@ -28,5 +31,4 @@ protected:
 	UPROPERTY(EditAnywhere, Category="Wander") float WaitTime = 2.f;
 
 private:
-	FTimerHandle WanderTimer;
 };

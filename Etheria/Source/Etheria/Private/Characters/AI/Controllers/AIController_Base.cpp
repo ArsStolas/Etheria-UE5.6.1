@@ -1,145 +1,144 @@
 /*
 * Etheria's End Project, 2025
 * Created by: ArsStolas
-* Last Updated by: ArsStolas
+* Last Updated by: ChatGPT
 * Class: AIController_Base - Source
 */
 
 #include "Characters/AI/Controllers/AIController_Base.h"
 #include "Characters/AI/BaseAI.h"
-#include "Components/Combat/CombatComponent.h"
 #include "Components/Characters/IA/AISplinePatrolComponent.h"
+#include "Components/Characters/IA/AIWanderComponent.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "TimerManager.h"
-#include "Navigation/PathFollowingComponent.h" 
-#include "NavigationSystem.h"
 #include "Engine/World.h"
 
 AAIController_Base::AAIController_Base()
 {
-	PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = true;
 
-	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
-	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
+    SightConfig   = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 
-	SightConfig->SightRadius = 1500.f;
-	SightConfig->LoseSightRadius = 1800.f;
-	SightConfig->PeripheralVisionAngleDegrees = 90.f;
-	SightConfig->SetMaxAge(5.f);
-	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    SightConfig->SightRadius = 1500.f;
+    SightConfig->LoseSightRadius = 1800.f;
+    SightConfig->PeripheralVisionAngleDegrees = 90.f;
+    SightConfig->SetMaxAge(5.f);
 
-	PerceptionComp->ConfigureSense(*SightConfig);
-	PerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
+    SightConfig->DetectionByAffiliation.bDetectEnemies    = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals   = true;
 
-	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AAIController_Base::OnTargetPerceptionUpdated);
+    PerceptionComp->ConfigureSense(*SightConfig);
+    PerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AAIController_Base::OnTargetPerceptionUpdated);
 }
 
 void AAIController_Base::BeginPlay()
 {
-	Super::BeginPlay();
-
-	if (PerceptionComp)
-		PerceptionComp->RequestStimuliListenerUpdate();
-}
-
-void AAIController_Base::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-	if (!TargetActor) return;
-
-	if (ABaseAI* AI = Cast<ABaseAI>(GetPawn()))
-	{
-		if (!AI->CombatComp) return;
-
-		float Dist = FVector::Dist(TargetActor->GetActorLocation(), AI->GetActorLocation());
-		float AttackRange = AI->CombatComp->GetCurrentAttackRange();
-
-		if (Dist < AttackRange)
-		{
-			AI->CombatComp->SetExternalTarget(TargetActor);
-			AI->CombatComp->TryAttackPrimary();
-		}
-		else
-		{
-			RequestMoveTo(TargetActor->GetActorLocation());
-		}
-	}
+    Super::BeginPlay();
+    if (PerceptionComp)
+        PerceptionComp->RequestStimuliListenerUpdate();
 }
 
 void AAIController_Base::OnPossess(APawn* InPawn)
 {
-	Super::OnPossess(InPawn);
+    Super::OnPossess(InPawn);
+    if (!InPawn) return;
 
-	if (!InPawn) return;
+    if (UAISplinePatrolComponent* Patrol = InPawn->FindComponentByClass<UAISplinePatrolComponent>())
+        Patrol->StartPatrol();
 
-	if (UAISplinePatrolComponent* Patrol = InPawn->FindComponentByClass<UAISplinePatrolComponent>())
-	{
-		Patrol->StartPatrol();
-	}
+    if (UAIWanderComponent* Wander = InPawn->FindComponentByClass<UAIWanderComponent>())
+        Wander->StartWander();
 }
 
-void AAIController_Base::RequestMoveTo(const FVector& Destination)
+void AAIController_Base::Tick(float DeltaTime)
 {
-	FAIMoveRequest Request;
-	Request.SetGoalLocation(Destination);
-	Request.SetAcceptanceRadius(50.f);
-	Request.SetUsePathfinding(true);
-	Request.SetAllowPartialPath(true);
+    Super::Tick(DeltaTime);
 
-	MoveTo(Request);
+    ABaseAI* AI = Cast<ABaseAI>(GetPawn());
+    if (!AI || !AI->StateComp) return;
+
+    if (!TargetActor) return;
+
+    const float Dist = FVector::Dist(TargetActor->GetActorLocation(), AI->GetActorLocation());
+    const float FollowDistance = 50.f;
+
+    if (Dist > FollowDistance)
+    {
+        MoveToActor(TargetActor, FollowDistance);
+        AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Chase);
+    }
+    else
+    {
+        AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Fight);
+        StopMovement();
+    }
 }
 
 void AAIController_Base::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
 {
-	Super::OnMoveCompleted(RequestID, Result);
+    Super::OnMoveCompleted(RequestID, Result);
 
-	if (APawn* OwnerPawn = GetPawn())
-	{
-		if (UAISplinePatrolComponent* Patrol = OwnerPawn->FindComponentByClass<UAISplinePatrolComponent>())
-		{
-			Patrol->bIsMovingToPoint = false;
-			Patrol->AdvanceIndex();
+    APawn* ControlledPawn = GetPawn();
+    if (!ControlledPawn) return;
 
-			FTimerDelegate TimerDel;
-			TimerDel.BindUFunction(Patrol, FName("MoveToNextPoint"));
-			GetWorld()->GetTimerManager().SetTimer(
-				Patrol->PatrolTimerHandle,
-				TimerDel,
-				Patrol->WaitTimeAtPoint,
-				false
-			);
-		}
-	}
+    if (UAISplinePatrolComponent* Patrol = ControlledPawn->FindComponentByClass<UAISplinePatrolComponent>())
+    {
+        Patrol->bIsMovingToPoint = false;
+        Patrol->AdvanceIndex();
+
+        FTimerDelegate Del;
+        Del.BindUFunction(Patrol, FName("MoveToNextPoint"));
+
+        GetWorld()->GetTimerManager().SetTimer(
+            Patrol->PatrolTimerHandle,
+            Del,
+            Patrol->WaitTimeAtPoint,
+            false
+        );
+    }
 }
 
 void AAIController_Base::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
-	if (ABaseAI* AI = Cast<ABaseAI>(GetPawn()))
-	{
-		if (!AI->StateComp) return;
+    if (!Actor) return;
 
-		if (Stimulus.WasSuccessfullySensed())
-		{
-			TargetActor = Actor;
-			AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Chase);
+    ABaseAI* AI = Cast<ABaseAI>(GetPawn());
+    if (!AI || !AI->StateComp) return;
 
-			if (UAISplinePatrolComponent* Patrol = AI->FindComponentByClass<UAISplinePatrolComponent>())
-			{
-				GetWorld()->GetTimerManager().ClearTimer(Patrol->PatrolTimerHandle);
-			}
-		}
-		else
-		{
-			TargetActor = nullptr;
-			AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Wander);
+    if (Stimulus.WasSuccessfullySensed())
+    {
+        TargetActor = Actor;
 
-			if (UAISplinePatrolComponent* Patrol = AI->FindComponentByClass<UAISplinePatrolComponent>())
-			{
-				Patrol->SnapToClosestPoint();
-				Patrol->MoveToNextPoint();
-			}
-		}
-	}
+        AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Chase);
+
+        if (UAISplinePatrolComponent* Patrol = AI->FindComponentByClass<UAISplinePatrolComponent>())
+        {
+            GetWorld()->GetTimerManager().ClearTimer(Patrol->PatrolTimerHandle);
+        }
+
+        if (UAIWanderComponent* Wander = AI->FindComponentByClass<UAIWanderComponent>())
+        {
+            GetWorld()->GetTimerManager().ClearTimer(Wander->WanderTimer);
+        }
+    }
+    else
+    {
+        TargetActor = nullptr;
+        AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Wander);
+
+        if (UAISplinePatrolComponent* Patrol = AI->FindComponentByClass<UAISplinePatrolComponent>())
+        {
+            Patrol->SnapToClosestPoint();
+
+            if (!Patrol->bIsMovingToPoint)
+                Patrol->MoveToNextPoint();
+        }
+
+        if (UAIWanderComponent* Wander = AI->FindComponentByClass<UAIWanderComponent>())
+            Wander->StartWander();
+    }
 }

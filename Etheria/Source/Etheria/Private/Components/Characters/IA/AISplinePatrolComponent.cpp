@@ -58,7 +58,7 @@ void UAISplinePatrolComponent::AdvanceIndex()
 
 void UAISplinePatrolComponent::MoveToNextPoint()
 {
-	if (!SplinePath || bIsMovingToPoint) return; // si déjà en mouvement, on ne fait rien
+	if (!SplinePath || bIsMovingToPoint) return;
 	USplineComponent* Spline = SplinePath->GetSpline();
 	if (!Spline) return;
 
@@ -67,7 +67,6 @@ void UAISplinePatrolComponent::MoveToNextPoint()
 
 	FVector Dest = Spline->GetLocationAtSplinePoint(CurrentIndex, ESplineCoordinateSpace::World);
 
-	// Projeté sur le navmesh
 	if (UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld()))
 	{
 		FNavLocation ProjectedDest;

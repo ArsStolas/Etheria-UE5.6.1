@@ -35,6 +35,9 @@ UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Life_Healing, "State.Life.Healing");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Life_Dead, "State.Life.Dead");
 
 // === IA ===
-	// === Combat ===
+	// === Movement ===
 	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Chase, "State.Movement.Chase");
 	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Wander, "State.Movement.Wander");
+	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Patrol, "State.Movement.Patrol");
+	// === Combat ===
+	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Fight, "State.Movement.Fight");
