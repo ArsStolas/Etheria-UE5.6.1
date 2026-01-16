@@ -1,7 +1,7 @@
 /*
 * Etheria's End Project, 2025
 * Created by: ArsStolas
-* Last Updated by: ChatGPT
+* Last Updated by: ArsStolas
 * Class: BaseAI - Header
 */
 
@@ -9,52 +9,38 @@
 
 #include "CoreMinimal.h"
 #include "Characters/BaseCharacter.h"
-#include "Components/Characters/IA/AISplinePatrolComponent.h"
 #include "Components/Characters/CharacterStateComponent.h"
 #include "BaseAI.generated.h"
 
 UENUM(BlueprintType)
 enum class EAIType : uint8
 {
-    Neutral,
-    Hostile
-};
-
-UENUM(BlueprintType)
-enum class EAIState : uint8
-{
-    Wander,
-    Patrol,
-    Chase,
-    Fight
+	Neutral,
+	Hostile
 };
 
 UCLASS()
 class ETHERIA_API ABaseAI : public ABaseCharacter
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    ABaseAI();
+	ABaseAI();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
-    EAIType AIType;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
+	EAIType AIType;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
-    UCharacterStateComponent* StateComp;
+	bool IsHostile() const { return AIType == EAIType::Hostile; }
+	bool IsNeutral() const { return AIType == EAIType::Neutral; }
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
-    class UCombatComponent* CombatComp;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
+	UCharacterStateComponent* StateComp;
 
-    UFUNCTION(BlueprintCallable)
-    bool IsHostile() const { return AIType == EAIType::Hostile; }
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
+	class UCombatComponent* CombatComp;
 
-    UFUNCTION(BlueprintCallable)
-    bool IsNeutral() const { return AIType == EAIType::Neutral; }
-
-    /* Fonction à override pour le combat ou actions Fight */
-    virtual void PerformAttack(AActor* TargetActor) {}
+	virtual void TryAttack(AActor* TargetActor) { /* override */ }
 
 protected:
-    virtual void BeginPlay() override;
+	virtual void BeginPlay() override;
 };

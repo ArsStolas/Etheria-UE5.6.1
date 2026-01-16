@@ -1,7 +1,7 @@
 /*
 * Etheria's End Project, 2025
 * Created by: ArsStolas
-* Last Updated by: ChatGPT
+* Last Updated by: ArsStolas
 * Class: AIController_Base - Header
 */
 
@@ -26,11 +26,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	virtual void OnPossess(APawn* InPawn) override;
-
-	virtual void OnMoveCompleted(
-		FAIRequestID RequestID,
-		const FPathFollowingResult& Result
-	) override;
+	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
 
 	UFUNCTION()
 	void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
@@ -44,6 +40,4 @@ protected:
 
 	UPROPERTY()
 	AActor* TargetActor = nullptr;
-
-	bool bIsChasingTarget = false;
 };

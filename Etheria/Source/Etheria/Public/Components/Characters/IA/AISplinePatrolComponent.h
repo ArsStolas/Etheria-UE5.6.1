@@ -26,6 +26,7 @@ class ETHERIA_API UAISplinePatrolComponent : public UActorComponent
 
 public:
 	void StartPatrol();
+
 	UFUNCTION(BlueprintCallable)
 	void MoveToNextPoint();
 
@@ -34,7 +35,9 @@ public:
 	void SnapToClosestPoint();
 
 	FTimerHandle PatrolTimerHandle;
-	UPROPERTY(EditAnywhere, Category="Spline") float WaitTimeAtPoint = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category="Spline")
+	float WaitTimeAtPoint = 0.5f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Spline")
 	bool bIsMovingToPoint = false;
@@ -42,8 +45,11 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(EditInstanceOnly, Category="Spline") AAISplinePath* SplinePath;
-	UPROPERTY(EditAnywhere, Category="Spline") ESplinePatrolMode PatrolMode = ESplinePatrolMode::Loop;
+	UPROPERTY(EditInstanceOnly, Category="Spline")
+	AAISplinePath* SplinePath;
+
+	UPROPERTY(EditAnywhere, Category="Spline")
+	ESplinePatrolMode PatrolMode = ESplinePatrolMode::Loop;
 
 private:
 	int32 CurrentIndex = 0;

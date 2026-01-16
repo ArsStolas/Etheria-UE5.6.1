@@ -1,12 +1,13 @@
 /*
 * Etheria's End Project, 2025
 * Created by: ArsStolas
-* Last Updated by: ChatGPT
+* Last Updated by: ArsStolas
 * Class: BaseAI - Source
 */
 
 #include "Characters/AI/BaseAI.h"
 
+#include "Components/Characters/IA/AISplinePatrolComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/Combat/CombatComponent.h"
 
@@ -19,23 +20,18 @@ void ABaseAI::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (Tags.Contains("Enemy"))
-    {
-        AIType = EAIType::Hostile;
-    }
-
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->bUseControllerDesiredRotation = false;
-    GetCharacterMovement()->MaxWalkSpeed = 300.f;
-
-    StateComp = FindComponentByClass<UCharacterStateComponent>();
-    CombatComp = FindComponentByClass<UCombatComponent>();
+    if (!StateComp)
+        StateComp = FindComponentByClass<UCharacterStateComponent>();
 
     if (StateComp)
+        StateComp->SetMovementState(EtheriaTags::State_Movement_Patrol);
+
+    CombatComp = FindComponentByClass<UCombatComponent>();
+
+    if (UAISplinePatrolComponent* Patrol = FindComponentByClass<UAISplinePatrolComponent>())
     {
-        if (FindComponentByClass<UAISplinePatrolComponent>())
-            StateComp->SetMovementState(EtheriaTags::State_Movement_Patrol);
-        else
-            StateComp->SetMovementState(EtheriaTags::State_Movement_Wander);
+        Patrol->bIsMovingToPoint = false;
+        Patrol->SnapToClosestPoint();
+        Patrol->StartPatrol();
     }
 }
