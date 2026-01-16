@@ -27,11 +27,4 @@ void ABaseAI::BeginPlay()
         StateComp->SetMovementState(EtheriaTags::State_Movement_Patrol);
 
     CombatComp = FindComponentByClass<UCombatComponent>();
-
-    if (UAISplinePatrolComponent* Patrol = FindComponentByClass<UAISplinePatrolComponent>())
-    {
-        Patrol->bIsMovingToPoint = false;
-        Patrol->SnapToClosestPoint();
-        Patrol->StartPatrol();
-    }
 }

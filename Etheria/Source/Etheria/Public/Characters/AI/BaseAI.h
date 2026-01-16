@@ -39,7 +39,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
 	class UCombatComponent* CombatComp;
 
-	virtual void TryAttack(AActor* TargetActor) { /* override */ }
+	virtual void TryAttack(AActor* TargetActor) { }
 
 protected:
 	virtual void BeginPlay() override;
