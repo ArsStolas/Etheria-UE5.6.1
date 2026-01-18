@@ -28,7 +28,14 @@ void UAnimNotifyState_AttackWindow::NotifyEnd(USkeletalMeshComponent* MeshComp, 
     {
         if (UCombatComponent* Combat = Owner->FindComponentByClass<UCombatComponent>())
         {
-            Combat->EndAttackWindow();
+            if (bFinalizeAttackOnEnd)
+            {
+                Combat->EndAttackWindow();   // close the attack (CurrentAttackId = None)
+            }
+            else
+            {
+                Combat->EndHitWindow();      // close the window
+            }
         }
     }
 }

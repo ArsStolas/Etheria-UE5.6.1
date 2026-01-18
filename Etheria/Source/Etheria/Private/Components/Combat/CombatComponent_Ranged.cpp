@@ -98,21 +98,43 @@ void UCombatComponent::UpdateCharge(float DeltaTime)
 
 void UCombatComponent::PerformRangedFire()
 {
-    if (!OwnerCharacter.IsValid() || !CurrentWeaponData) return;
+    if (!GetWorld()) return;
+    if (!OwnerCharacter.IsValid())
+    {
+        if (!ResolveOwnerRefs()) return;
+    }
 
-    const FWeaponRangedConfig& Ranged = CurrentWeaponData->Ranged;
+    UWeaponData* Data = GetCurrentWeaponData();
+    if (!Data) return;
+
+    const FWeaponRangedConfig& Ranged = Data->Ranged;
     if (!Ranged.bIsRangedWeapon) return;
 
-    UE_LOG(LogTemp, Log, TEXT("[Combat] Fire from %s | WeaponKind: %d | AimAttackId: %s"),
-        *OwnerCharacter->GetName(),
-        (int)Ranged.WeaponKind,
-        *Ranged.AimAttackId.ToString());
+    // Prefer explicit AimAttackId (works for both hipfire + aim). If missing, fall back to HipFireGroup.
+    const FName AttackToUse = Ranged.AimAttackId;
 
-    // NOTE:
-    // - For bows, ChargeLevel is currently only logged + stored in CurrentChargeLevel.
-    // - If you want the attack to scale damage/range, wire ChargeLevel into your AttackSpec (Charge levels)
-    //   or add a "ChargeDamageMultiplier" in WeaponData and apply it in TryAttackById / ExecuteAttack.
-    TryAttackById(Ranged.AimAttackId);
+    UE_LOG(LogTemp, Log, TEXT("[Combat][Ranged] Fire | Owner=%s | Kind=%d | AttackId=%s | HipGroup=%s | Charge=%.2f"),
+        OwnerCharacter.IsValid() ? *OwnerCharacter->GetName() : TEXT("None"),
+        (int)Ranged.WeaponKind,
+        *AttackToUse.ToString(),
+        *Ranged.HipFireGroup.ToString(),
+        CurrentChargeLevel);
+
+    if (AttackToUse != NAME_None)
+    {
+        TryAttackById(AttackToUse);
+        return;
+    }
+
+    if (Ranged.HipFireGroup != NAME_None)
+    {
+        TryAttackGroup(Ranged.HipFireGroup);
+        return;
+    }
+
+    // Ultimate fallback (first attack in list)
+    TryAttackPrimary();
 }
+
 
 #pragma endregion

@@ -1,13 +1,17 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: "0nnen"
  * Class: HealthComponent - Source
 */
 
 #include "Components/Characters/HealthComponent.h"
 #include "Characters/BaseCharacter.h"
 #include "Components/Characters/CharacterStateComponent.h"
+
+#include "Components/MeshComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 UHealthComponent::UHealthComponent()
 {
@@ -23,11 +27,16 @@ void UHealthComponent::BeginPlay()
 	if (AActor* Owner = GetOwner())
 	{
 		OwnerCharacter = Cast<ABaseCharacter>(Owner);
-		OwnerCharacter->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
-		OwnerStateComponent = OwnerCharacter->GetStateComponent();
+		if (OwnerCharacter.IsValid())
+		{
+			OwnerCharacter->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
+			OwnerStateComponent = OwnerCharacter->GetStateComponent();
+		}
 	}
-}
 
+	// Cache the mesh we will use for the hit overlay (optional but avoids resolving every hit).
+	CachedDamageOverlayMesh = ResolveDamageOverlayMesh();
+}
 void UHealthComponent::ResetHealth()
 {
 	Health = MaxHealth;
@@ -45,6 +54,8 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 {
 	if (DamageAmount <= 0.f || IsDead()) return;
 
+	TriggerDamageOverlay();
+
 	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
@@ -60,6 +71,112 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 	{
 		SetTemporaryLifeState(EtheriaTags::State_Life_TakingDamage, DamageStateDuration);
 	}
+}
+
+// =============================================================
+// Damage Feedback - Overlay
+// =============================================================
+
+UMeshComponent* UHealthComponent::ResolveDamageOverlayMesh()
+{
+	if (!bEnableDamageOverlay)
+	{
+		return nullptr;
+	}
+
+	if (CachedDamageOverlayMesh.IsValid())
+	{
+		return CachedDamageOverlayMesh.Get();
+	}
+
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return nullptr;
+	}
+
+	// 1) Explicit mesh reference (recommended)
+	if (UActorComponent* Comp = DamageOverlayMesh.GetComponent(Owner))
+	{
+		if (UMeshComponent* Mesh = Cast<UMeshComponent>(Comp))
+		{
+			CachedDamageOverlayMesh = Mesh;
+			return Mesh;
+		}
+	}
+
+	// 2) OwnerCharacter mesh (if we are on a character)
+	if (OwnerCharacter.IsValid() && OwnerCharacter->GetMesh())
+	{
+		CachedDamageOverlayMesh = OwnerCharacter->GetMesh();
+		return OwnerCharacter->GetMesh();
+	}
+
+	// 3) First mesh component on owner
+	if (UMeshComponent* Mesh = Owner->FindComponentByClass<UMeshComponent>())
+	{
+		CachedDamageOverlayMesh = Mesh;
+		return Mesh;
+	}
+
+	return nullptr;
+}
+
+void UHealthComponent::TriggerDamageOverlay()
+{
+	if (!bEnableDamageOverlay || !DamageOverlayMaterial)
+	{
+		return;
+	}
+
+	UMeshComponent* Mesh = ResolveDamageOverlayMesh();
+	if (!Mesh || !GetWorld())
+	{
+		return;
+	}
+
+	// Apply overlay + restart the timer if we're hit multiple times quickly.
+	Mesh->SetOverlayMaterial(DamageOverlayMaterial);
+	bDamageOverlayActive = true;
+
+	GetWorld()->GetTimerManager().ClearTimer(DamageOverlayTimerHandle);
+	if (DamageOverlayDuration <= 0.f)
+	{
+		ClearDamageOverlay();
+		return;
+	}
+	GetWorld()->GetTimerManager().SetTimer(
+		DamageOverlayTimerHandle,
+		this,
+		&UHealthComponent::ClearDamageOverlay,
+		DamageOverlayDuration,
+		false
+	);
+}
+
+void UHealthComponent::ClearDamageOverlay()
+{
+	UMeshComponent* Mesh = ResolveDamageOverlayMesh();
+	if (Mesh)
+	{
+		Mesh->SetOverlayMaterial(nullptr);
+	}
+
+	bDamageOverlayActive = false;
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(DamageOverlayTimerHandle);
+	}
+}
+
+void UHealthComponent::SetDamageOverlayDuration(const float NewDuration)
+{
+	DamageOverlayDuration = FMath::Max(0.f, NewDuration);
+}
+
+void UHealthComponent::SetDamageOverlayMaterial(UMaterialInterface* NewMaterial)
+{
+	DamageOverlayMaterial = NewMaterial;
 }
 
 void UHealthComponent::Heal(float HealAmount)
