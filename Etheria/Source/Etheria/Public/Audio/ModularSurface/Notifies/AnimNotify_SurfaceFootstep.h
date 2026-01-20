@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
+ * Created by: "0nnen"
  * Last Updated by: "0nnen"
  * Class: "UAnimNotify_SurfaceFootstep" - Header
  */
@@ -9,11 +9,11 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
-#include "SurfaceAudioTypes.h"
+#include "Audio/ModularSurface/Types/SurfaceAudioTypes.h"
 #include "AnimNotify_SurfaceFootstep.generated.h"
 
 UCLASS(meta=(DisplayName="Surface Footstep"))
-class MODULARSURFACEAUDIO_API UAnimNotify_SurfaceFootstep : public UAnimNotify
+class ETHERIA_API UAnimNotify_SurfaceFootstep : public UAnimNotify
 {
     GENERATED_BODY()
 

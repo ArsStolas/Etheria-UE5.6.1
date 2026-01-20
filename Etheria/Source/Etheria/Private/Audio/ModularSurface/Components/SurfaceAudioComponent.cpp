@@ -5,7 +5,9 @@
  * Class: "USurfaceAudioComponent" - Source
  */
 
-#include "SurfaceAudioComponent.h"
+#include "Audio/ModularSurface/Components/SurfaceAudioComponent.h"
+
+#include "PhysicalMaterials/PhysicalMaterial.h"
 
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
@@ -225,13 +227,24 @@ void USurfaceAudioComponent::PlayFootstepFromNotify(EFootstepFoot Foot, EFootste
         return;
     }
 
-    const EPhysicalSurface Surface = GetSurfaceTypeAtLocation(FootWorld, nullptr);
+    FHitResult Hit;
+    const EPhysicalSurface Surface = GetSurfaceTypeAtLocation(FootWorld, &Hit);
     const FSurfaceAudioEntry& Entry = Library->GetEntry(Surface);
 
     const FSurfaceSoundList& List = SelectFootstepList(Entry.Footsteps, Gait);
+    if (List.Dry.Num() == 0 && List.Wet.Num() == 0)
+    {
+        return;
+    }
+
+    const FVector Location = Hit.bBlockingHit ? FVector(Hit.ImpactPoint) : FootWorld;
+    const FVector Normal = Hit.bBlockingHit ? Hit.ImpactNormal : FVector::UpVector;
 
     // In Switch mode, the wet/dry decision is inside PlayOneShotFromList.
-    PlayOneShotFromList(List, LastFootstepIndex, FootWorld, 1.0f, 1.0f);
+    PlayOneShotFromList(List, LastFootstepIndex, Location, 1.0f, 1.0f);
+
+    const bool bIsWet = (WetPlaybackMode == EWetPlaybackMode::Switch) ? (Wetness >= WetnessThreshold) : (Wetness > 0.0f);
+    OnFootstepPlayed.Broadcast(Foot, Gait, TEnumAsByte<EPhysicalSurface>(Surface), Location, Normal, bIsWet);
 }
 
 void USurfaceAudioComponent::PlayLandingFromHit(const FHitResult& Hit, float ImpactSpeedAbs)

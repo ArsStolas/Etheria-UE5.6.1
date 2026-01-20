@@ -5,7 +5,7 @@
  * Class: "UWindAudioComponent" - Source
  */
 
-#include "WindAudioComponent.h"
+#include "Audio/ModularSurface/Components/WindAudioComponent.h"
 
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"

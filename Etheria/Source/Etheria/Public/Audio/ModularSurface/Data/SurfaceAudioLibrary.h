@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
+ * Created by: "0nnen"
  * Last Updated by: "0nnen"
  * Class: "USurfaceAudioLibrary" - Header
  */
@@ -9,11 +9,11 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "SurfaceAudioTypes.h"
+#include "Audio/ModularSurface/Types/SurfaceAudioTypes.h"
 #include "SurfaceAudioLibrary.generated.h"
 
 UCLASS(BlueprintType)
-class MODULARSURFACEAUDIO_API USurfaceAudioLibrary : public UDataAsset
+class ETHERIA_API USurfaceAudioLibrary : public UDataAsset
 {
     GENERATED_BODY()
 

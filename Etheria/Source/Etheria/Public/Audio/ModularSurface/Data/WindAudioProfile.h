@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
+ * Created by: "0nnen"
  * Last Updated by: "0nnen"
  * Class: "UWindAudioProfile" - Header
  */
@@ -15,7 +15,7 @@
 #include "WindAudioProfile.generated.h"
 
 UCLASS(BlueprintType)
-class MODULARSURFACEAUDIO_API UWindAudioProfile : public UDataAsset
+class ETHERIA_API UWindAudioProfile : public UDataAsset
 {
     GENERATED_BODY()
 

@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
+ * Created by: "0nnen"
  * Last Updated by: "0nnen"
  * Class: "UFootPlacementProviderInterface" - Header
  */
@@ -9,16 +9,16 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
-#include "SurfaceAudioTypes.h"
+#include "Audio/ModularSurface/Types/SurfaceAudioTypes.h"
 #include "FootPlacementProviderInterface.generated.h"
 
 UINTERFACE(BlueprintType)
-class MODULARSURFACEAUDIO_API UFootPlacementProviderInterface : public UInterface
+class ETHERIA_API UFootPlacementProviderInterface : public UInterface
 {
     GENERATED_BODY()
 };
 
-class MODULARSURFACEAUDIO_API IFootPlacementProviderInterface
+class ETHERIA_API IFootPlacementProviderInterface
 {
     GENERATED_BODY()
 

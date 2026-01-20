@@ -5,9 +5,9 @@
  * Class: "UAnimNotify_SurfaceFootstep" - Source
  */
 
-#include "AnimNotify_SurfaceFootstep.h"
+#include "Audio/ModularSurface/Notifies/AnimNotify_SurfaceFootstep.h"
 
-#include "SurfaceAudioComponent.h"
+#include "Audio/ModularSurface/Components/SurfaceAudioComponent.h"
 #include "GameFramework/Actor.h"
 
 void UAnimNotify_SurfaceFootstep::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation)

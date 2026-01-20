@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
+ * Created by: "0nnen"
  * Last Updated by: "0nnen"
  * Class: "UWindAudioComponent" - Header
  */
@@ -11,11 +11,11 @@
 #include "Components/ActorComponent.h"
 #include "Sound/SoundBase.h"
 #include "Components/AudioComponent.h"
-#include "WindAudioProfile.h"
+#include "Audio/ModularSurface/Data/WindAudioProfile.h"
 #include "WindAudioComponent.generated.h"
 
 UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class MODULARSURFACEAUDIO_API UWindAudioComponent : public UActorComponent
+class ETHERIA_API UWindAudioComponent : public UActorComponent
 {
     GENERATED_BODY()
 

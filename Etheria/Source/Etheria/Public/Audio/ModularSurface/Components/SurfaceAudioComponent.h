@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
+ * Created by: "0nnen"
  * Last Updated by: "0nnen"
  * Class: "USurfaceAudioComponent" - Header
  */
@@ -10,13 +10,23 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/EngineTypes.h"
-#include "SurfaceAudioTypes.h"
-#include "SurfaceAudioLibrary.h"
-#include "FootPlacementProviderInterface.h"
+#include "Audio/ModularSurface/Types/SurfaceAudioTypes.h"
+#include "Audio/ModularSurface/Data/SurfaceAudioLibrary.h"
+#include "Audio/ModularSurface/Interfaces/FootPlacementProviderInterface.h"
 #include "SurfaceAudioComponent.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_SixParams(
+    FOnFootstepPlayed,
+    EFootstepFoot, Foot,
+    EFootstepGait, Gait,
+    TEnumAsByte<EPhysicalSurface>, SurfaceType,
+    FVector, Location,
+    FVector, Normal,
+    bool, bIsWet
+);
+
 UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class MODULARSURFACEAUDIO_API USurfaceAudioComponent : public UActorComponent
+class ETHERIA_API USurfaceAudioComponent : public UActorComponent
 {
     GENERATED_BODY()
 
@@ -56,6 +66,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SurfaceAudio|Landing", meta = (ClampMin = "0.01"))
     float LandingVelocitySampleInterval = 0.02f;
 
+
+    UPROPERTY(BlueprintAssignable, Category = "SurfaceAudio|Events")
+    FOnFootstepPlayed OnFootstepPlayed;
     UFUNCTION(BlueprintCallable, Category = "SurfaceAudio|Wet")
     void SetWetness(float NewWetness);
 

@@ -5,7 +5,7 @@
  * Class: "USurfaceAudioLibrary" - Source
  */
 
-#include "SurfaceAudioLibrary.h"
+#include "Audio/ModularSurface/Data/SurfaceAudioLibrary.h"
 
 const FSurfaceAudioEntry& USurfaceAudioLibrary::GetEntry(EPhysicalSurface SurfaceType) const
 {
