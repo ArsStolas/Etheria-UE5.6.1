@@ -139,18 +139,18 @@ void APlayerCharacter::Tick(float DeltaTime)
     UpdateMovementState();
 
     // Keep camera updated if player stays aiming (smooth interpolation)
-    if (bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
-    {
-        const FWeaponRangedConfig& Ranged = CombatComponent->GetCurrentWeaponData()->Ranged;
-        CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, Ranged.AimArmLength, DeltaTime, 8.f);
-        FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, Ranged.AimFOV, DeltaTime, 8.f));
-    }
-    else
-    {
-        // Restore default FOV gradually when not aiming
-        CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, BaseArmLength, DeltaTime, 6.f);
-        FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, BaseFOV, DeltaTime, 6.f));
-    }
+    // if (bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
+    // {
+    //     const FWeaponRangedConfig& Ranged = CombatComponent->GetCurrentWeaponData()->Ranged;
+    //     CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, Ranged.AimArmLength, DeltaTime, 8.f);
+    //     FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, Ranged.AimFOV, DeltaTime, 8.f));
+    // }
+    // else if (!bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
+    // {
+    //     // Restore default FOV gradually when not aiming
+    //     CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, BaseArmLength, DeltaTime, 6.f);
+    //     FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, BaseFOV, DeltaTime, 6.f));
+    // }
 }
 
 
