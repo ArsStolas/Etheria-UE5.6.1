@@ -145,7 +145,7 @@ void APlayerCharacter::Tick(float DeltaTime)
     //     CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, Ranged.AimArmLength, DeltaTime, 8.f);
     //     FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, Ranged.AimFOV, DeltaTime, 8.f));
     // }
-    // else if (!bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
+    // else if (bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
     // {
     //     // Restore default FOV gradually when not aiming
     //     CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, BaseArmLength, DeltaTime, 6.f);
