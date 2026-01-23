@@ -22,7 +22,8 @@ public class Etheria : ModuleRules
 			"GameplayTags",
 			"GameplayStateTreeModule",
 			"CableComponent",
-			"PhysicsCore"
+			"PhysicsCore",
+			"AnimGraphRuntime"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { 

@@ -9,8 +9,48 @@
 
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PhysicsVolume.h"
+
+USwimComponent* USwimBlueprintLibrary::GetSwimComponentFromActor(const AActor* Actor)
+{
+	if (!Actor)
+	{
+		return nullptr;
+	}
+
+	return Actor->FindComponentByClass<USwimComponent>();
+}
+
+USwimComponent* USwimBlueprintLibrary::GetSwimComponentFromCharacter(const ACharacter* Character)
+{
+	return GetSwimComponentFromActor(Character);
+}
+
+bool USwimBlueprintLibrary::IsCharacterSwimmingMovementMode(const ACharacter* Character)
+{
+	if (!Character)
+	{
+		return false;
+	}
+
+	const UCharacterMovementComponent* MoveComp = Character->GetCharacterMovement();
+	return MoveComp && MoveComp->MovementMode == MOVE_Swimming;
+}
+
+bool USwimBlueprintLibrary::IsCharacterSwimmingActive(const ACharacter* Character)
+{
+	const USwimComponent* SwimComp = GetSwimComponentFromCharacter(Character);
+	return SwimComp ? SwimComp->IsSwimmingActive() : false;
+}
+
+bool USwimBlueprintLibrary::IsCharacterUnderwater(const ACharacter* Character)
+{
+	const USwimComponent* SwimComp = GetSwimComponentFromCharacter(Character);
+	return SwimComp ? SwimComp->IsUnderwater() : false;
+}
 
 bool USwimBlueprintLibrary::IsCharacterInWaterVolume(const ACharacter* Character)
 {
@@ -38,6 +78,8 @@ bool USwimBlueprintLibrary::GetCharacterFloorDistance(const ACharacter* Characte
 		return false;
 	}
 
+	const UCharacterMovementComponent* MoveComp = Character->GetCharacterMovement();
+
 	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
 	const float Radius = Capsule->GetScaledCapsuleRadius();
 
@@ -47,7 +89,7 @@ bool USwimBlueprintLibrary::GetCharacterFloorDistance(const ACharacter* Characte
 	const FVector Start = Bottom + FVector(0.f, 0.f, 10.f);
 	const FVector End = Start - FVector(0.f, 0.f, FMath::Max(TraceDepth, 10.f));
 
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(SwimLibFloorTrace), false, Character);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SwimHelperFloorTrace), false, Character);
 	FHitResult Hit;
 
 	const bool bHit = Character->GetWorld()->SweepSingleByChannel(
@@ -61,6 +103,11 @@ bool USwimBlueprintLibrary::GetCharacterFloorDistance(const ACharacter* Characte
 	);
 
 	if (!bHit)
+	{
+		return false;
+	}
+
+	if (MoveComp && !MoveComp->IsWalkable(Hit))
 	{
 		return false;
 	}
@@ -79,7 +126,7 @@ FVector USwimBlueprintLibrary::GetSwimForwardDirection(const ACharacter* Charact
 	const AController* Controller = Character->GetController();
 	if (!Controller)
 	{
-		return Character->GetActorForwardVector();
+		return FVector::ForwardVector;
 	}
 
 	const FRotator ControlRot = Controller->GetControlRotation();
@@ -102,7 +149,7 @@ FVector USwimBlueprintLibrary::GetSwimRightDirection(const ACharacter* Character
 	const AController* Controller = Character->GetController();
 	if (!Controller)
 	{
-		return Character->GetActorRightVector();
+		return FVector::RightVector;
 	}
 
 	const FRotator ControlRot = Controller->GetControlRotation();
@@ -117,25 +164,45 @@ void USwimBlueprintLibrary::ApplySwimMovementInput(ACharacter* Character, float 
 		return;
 	}
 
-	if (FMath::IsNearlyZero(ForwardAxis) && FMath::IsNearlyZero(RightAxis))
-	{
-		return;
-	}
-
 	const FVector ForwardDir = GetSwimForwardDirection(Character, bUsePitchForForward);
 	const FVector RightDir = GetSwimRightDirection(Character);
 
-	Character->AddMovementInput(ForwardDir, ForwardAxis);
-	Character->AddMovementInput(RightDir, RightAxis);
+	if (!FMath::IsNearlyZero(ForwardAxis))
+	{
+		Character->AddMovementInput(ForwardDir, ForwardAxis);
+	}
+	if (!FMath::IsNearlyZero(RightAxis))
+	{
+		Character->AddMovementInput(RightDir, RightAxis);
+	}
 }
 
 FName USwimBlueprintLibrary::SwimModeToName(EPlayerSwimMode Mode)
 {
 	switch (Mode)
 	{
-	case EPlayerSwimMode::None:       return FName("None");
-	case EPlayerSwimMode::Surface:    return FName("Surface");
-	case EPlayerSwimMode::Underwater: return FName("Underwater");
-	default:                          return FName("Unknown");
+	case EPlayerSwimMode::None:       return TEXT("None");
+	case EPlayerSwimMode::Surface:    return TEXT("Surface");
+	case EPlayerSwimMode::Underwater: return TEXT("Underwater");
+	default:                          return TEXT("Unknown");
 	}
+}
+
+FString USwimBlueprintLibrary::GetSwimDebugString(const ACharacter* Character)
+{
+	const USwimComponent* SwimComp = GetSwimComponentFromCharacter(Character);
+	if (!SwimComp)
+	{
+		const bool bInWater = IsCharacterInWaterVolume(Character);
+		const bool bModeSwim = IsCharacterSwimmingMovementMode(Character);
+		return FString::Printf(TEXT("SwimComp=None | InWater=%s | MoveModeSwim=%s"),
+			bInWater ? TEXT("true") : TEXT("false"),
+			bModeSwim ? TEXT("true") : TEXT("false"));
+	}
+
+	const FString ModeStr = SwimModeToName(SwimComp->GetSwimMode()).ToString();
+	return FString::Printf(TEXT("InWater=%s | Mode=%s | Sprint=%s"),
+		SwimComp->IsInWater() ? TEXT("true") : TEXT("false"),
+		*ModeStr,
+		SwimComp->IsSwimSprinting() ? TEXT("true") : TEXT("false"));
 }

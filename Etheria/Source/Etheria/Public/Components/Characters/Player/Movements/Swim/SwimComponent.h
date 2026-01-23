@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: "0nnen"
+ * Created by:  "0nnen"
  * Last Updated by: "0nnen"
  * Class: "USwimComponent" - Header
  */
@@ -13,6 +13,7 @@
 
 class ACharacter;
 class UCharacterMovementComponent;
+class USwimAnimationSet;
 
 /**
  * Swim mode state for player.
@@ -39,12 +40,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSwimModeChanged, EPlayerSwimMode
  * - Auto activates swim when the character is inside a Water PhysicsVolume and has no foot (no walkable floor).
  * - Can dive underwater with an input (toggle or hold).
  * - Sprint increases swim speed.
- *
- * IMPORTANT:
- * This component does NOT change your existing movement bindings by itself.
- * You can either:
- * 1) Call Input_SetMoveAxis() from your input axis events (recommended for BP), OR
- * 2) Call ApplyCachedSwimMovementInput() yourself while swimming.
  */
 UCLASS(ClassGroup=(Movement), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API USwimComponent : public UActorComponent
@@ -74,6 +69,10 @@ public:
 	/** Get whether sprint swim is enabled. */
 	UFUNCTION(BlueprintPure, Category="Swim")
 	bool IsSwimSprinting() const { return bSwimSprinting; }
+
+	/** Get the animation set used by swim animation instance (optional). */
+	UFUNCTION(BlueprintPure, Category="Swim|Animations")
+	USwimAnimationSet* GetAnimationSet() const { return AnimationSet; }
 #pragma endregion
 
 #pragma region BP_Input
@@ -107,18 +106,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Swim")
 	void StopSwimming();
 
-	/**
-	 * Apply cached movement inputs right now (Forward/Right), camera-based.
-	 * Use if you disabled bAutoApplyCachedInput and want manual control.
-	 */
+	/** Apply cached movement inputs right now (Forward/Right), camera-based. */
 	UFUNCTION(BlueprintCallable, Category="Swim")
 	void ApplyCachedSwimMovementInput();
 #pragma endregion
 
 #pragma region Events
+	/** Broadcast when we enter/exit water volume. */
 	UPROPERTY(BlueprintAssignable, Category="Swim|Events")
 	FOnInWaterChanged OnInWaterChanged;
 
+	/** Broadcast when swim mode changes. */
 	UPROPERTY(BlueprintAssignable, Category="Swim|Events")
 	FOnSwimModeChanged OnSwimModeChanged;
 #pragma endregion
@@ -129,67 +127,71 @@ protected:
 
 #pragma region Settings
 	/** Enable automatic swim activation when inside water volume and no foot. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(AllowPrivateAccess="true", ToolTip="Enable automatic swim activation when inside water volume and no walkable floor is detected."))
 	bool bAutoSwim = true;
 
 	/** How often we check the floor while in water (performance-friendly). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="0.01", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="0.01", AllowPrivateAccess="true", ToolTip="How often we trace for a walkable floor while in water."))
 	float FloorCheckInterval = 0.10f;
 
 	/** If floor is closer than this distance, we keep walking (shallow water). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="If walkable floor is closer than this, we stay walking (shallow water)."))
 	float MaxFloorDistanceToStayWalking = 45.f;
 
 	/** If swimming on surface and floor comes closer than this, exit swim to walking. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="If surface swimming and floor becomes close enough, we return to walking."))
 	float MaxFloorDistanceToExitSwim = 55.f;
 
 	/** How deep we trace below the capsule bottom to find floor. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="10.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(ClampMin="10.0", AllowPrivateAccess="true", ToolTip="Depth of the floor sweep below capsule bottom."))
 	float FloorTraceDepth = 220.f;
 
 	/** Collision channel used for floor trace. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Auto", meta=(AllowPrivateAccess="true", ToolTip="Collision channel used for floor sweep."))
 	TEnumAsByte<ECollisionChannel> FloorTraceChannel = ECC_Visibility;
 
 	/** If true, Dive toggles underwater; if false, it's hold-to-dive. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Control", meta=(AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Control", meta=(AllowPrivateAccess="true", ToolTip="Toggle or hold dive input."))
 	bool bDiveToggle = true;
 
 	/** If true, underwater forward uses camera pitch (full 3D swim forward). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Control", meta=(AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Control", meta=(AllowPrivateAccess="true", ToolTip="Underwater forward direction uses camera pitch."))
 	bool bUseCameraPitchUnderwater = true;
 
 	/** If true, cached axis inputs are auto-applied every Tick while swimming. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Control", meta=(AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Control", meta=(AllowPrivateAccess="true", ToolTip="If true, cached axes are applied automatically while swimming."))
 	bool bAutoApplyCachedInput = true;
 
+	/** Animation set for swim (optional, but recommended if using PlayerSwimAnimInstance). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Animations", meta=(AllowPrivateAccess="true", ToolTip="Optional swim animation set (BlendSpaces or directional montages)."))
+	TObjectPtr<USwimAnimationSet> AnimationSet = nullptr;
+
 	/** Movement tuning for surface swim. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="Max swim speed on surface."))
 	float SurfaceSpeed = 300.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="Max swim speed on surface while sprinting."))
 	float SurfaceSprintSpeed = 450.f;
 
 	/** Movement tuning for underwater swim. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="Max swim speed underwater."))
 	float UnderwaterSpeed = 260.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="Max swim speed underwater while sprinting."))
 	float UnderwaterSprintSpeed = 380.f;
 
 	/** Swim acceleration and braking (CharacterMovement). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="MaxAcceleration while swimming."))
 	float SwimAcceleration = 2048.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="BrakingDecelerationSwimming while swimming."))
 	float BrakingDecelSwimming = 2048.f;
 
 	/** Buoyancy for surface / underwater. Lower buoyancy makes you sink more. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="Buoyancy while surface swimming."))
 	float SurfaceBuoyancy = 1.10f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Swim|Tuning", meta=(ClampMin="0.0", AllowPrivateAccess="true", ToolTip="Buoyancy while underwater swimming."))
 	float UnderwaterBuoyancy = 0.75f;
 #pragma endregion
 
@@ -200,24 +202,12 @@ private:
 #pragma endregion
 
 #pragma region State
-	UPROPERTY(Transient)
-	bool bInWater = false;
-
-	UPROPERTY(Transient)
-	bool bWantsDive = false;
-
-	UPROPERTY(Transient)
-	bool bSwimSprinting = false;
-
-	UPROPERTY(Transient)
-	EPlayerSwimMode CurrentMode = EPlayerSwimMode::None;
-
-	UPROPERTY(Transient)
-	float CachedForwardAxis = 0.f;
-
-	UPROPERTY(Transient)
-	float CachedRightAxis = 0.f;
-
+	UPROPERTY(Transient) bool bInWater = false;
+	UPROPERTY(Transient) bool bWantsDive = false;
+	UPROPERTY(Transient) bool bSwimSprinting = false;
+	UPROPERTY(Transient) EPlayerSwimMode CurrentMode = EPlayerSwimMode::None;
+	UPROPERTY(Transient) float CachedForwardAxis = 0.f;
+	UPROPERTY(Transient) float CachedRightAxis = 0.f;
 	float NextFloorCheckTime = 0.f;
 #pragma endregion
 
@@ -227,7 +217,6 @@ private:
 
 	void SetMode(EPlayerSwimMode NewMode);
 	void ApplyMovementTuning() const;
-
 	void ApplySwimMovementInput(float ForwardAxis, float RightAxis) const;
 #pragma endregion
 };
