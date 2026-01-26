@@ -358,5 +358,20 @@ if (Condition) { Delegate.AddDynamic(this, &APlayerCharacter::Function); }
 
 #pragma endregion
 
+// ============================================================
+// STATE LOGGING
+// ============================================================
+#pragma region "COMMANDS EXEC"
+
+    UFUNCTION(Exec)
+    void DamageSelf(float Amount = 10.f);
+
+    UFUNCTION(Exec)
+    void HealSelf(float Amount = 10.f);
+
+    UFUNCTION(Exec)
+    void SetHPPercent(float Percent = 0.2f);
+    
+#pragma endregion
 };
 

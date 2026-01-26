@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  "0nnen"
+ * Created by: "0nnen"
  * Last Updated by: "0nnen"
  * Class: "CombatComponent - Header"
  * Notes: Main combat component API and configuration. Implementations are split into feature .cpp files.
@@ -76,6 +76,7 @@ public:
     UFUNCTION(BlueprintCallable, Category="Combat|Window") void BeginAttackWindow();
     /** Summary: Closes the attack hit window. */
     UFUNCTION(BlueprintCallable, Category="Combat|Window") void EndAttackWindow();
+    UFUNCTION(BlueprintCallable, Category="Combat|Window") void EndHitWindow();
 
     /** Summary: Sets whether parry input is currently held. */
     UFUNCTION(BlueprintCallable, Category="Combat|Parry") void SetParryHeld(bool bHeld);
@@ -184,6 +185,13 @@ public:
     void StartRangedFire();
     void StopRangedFire();
 
+    /**
+     * Applies damage for a ranged projectile impact (used by arrow/projectile actors).
+     * AttackId is used to resolve damage/crit settings from the AttackSpec.
+     */
+    UFUNCTION(BlueprintCallable, Category="Combat|Ranged")
+    void HandleRangedProjectileImpact(AActor* HitActor, const FHitResult& Hit, FName AttackId, float ChargeAlpha, float DamageScale = 1.f);
+
 #pragma endregion
 
 protected:
@@ -271,7 +279,6 @@ private:
 #pragma endregion
 
 #pragma region DODGE
-#pragma region DODGE
     /** Base dodge i-frame duration if no override is provided. */
     UPROPERTY(EditAnywhere, Category="Combat|Dodge", meta=(ClampMin="0.05")) float DodgeIFrameDuration = 0.35f;
 
@@ -316,6 +323,7 @@ private:
 
 #pragma region RUNTIME
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") FName CurrentAttackId = NAME_None;
+    UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") TObjectPtr<UAnimMontage> CurrentAttackMontage = nullptr;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") FName LastAttackId = NAME_None;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") bool bInAttackWindow = false;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") float CooldownEndTime = 0.f;

@@ -20,11 +20,13 @@ public class Etheria : ModuleRules
 			"NavigationSystem", 
 			"GameplayTasks",
 			"GameplayTags",
-			"UMGEditor",
 			"GameplayStateTreeModule",
 			"CableComponent",
+			"PhysicsCore"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+		PrivateDependencyModuleNames.AddRange(new string[] { 
+			//"UMGEditor"
+		});
 	}
 }

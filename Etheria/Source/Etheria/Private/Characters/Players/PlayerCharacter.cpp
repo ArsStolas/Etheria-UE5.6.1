@@ -1014,3 +1014,37 @@ void APlayerCharacter::LogDeath()
 }
 
 #pragma endregion
+
+#pragma region "COMMANDS EXEC"
+
+void APlayerCharacter::DamageSelf(float Amount)
+{
+    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    {
+        HC->TakeDamage(FMath::Max(0.f, Amount));
+    }
+}
+
+void APlayerCharacter::HealSelf(float Amount)
+{
+    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    {
+        HC->Heal(FMath::Max(0.f, Amount));
+    }
+}
+
+void APlayerCharacter::SetHPPercent(float Percent)
+{
+    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    {
+        const float P = FMath::Clamp(Percent, 0.f, 1.f);
+        const float Target = HC->GetMaxHealth() * P;
+        const float Current = HC->GetHealth();
+        const float Delta = Target - Current;
+
+        if (Delta > 0.f) HC->Heal(Delta);
+        else HC->TakeDamage(-Delta);
+    }
+}
+
+#pragma endregion

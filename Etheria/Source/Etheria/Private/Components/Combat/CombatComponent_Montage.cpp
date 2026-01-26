@@ -55,6 +55,12 @@ void UCombatComponent::HandleMontageEnded_RestoreAnimClass(UAnimMontage* Montage
 
     bUsingFallbackAnimClass = false;
     SavedAnimClass = nullptr;
+
+    // Fail-safe: if an attack has no HitWindow and relies on montage completion, close it here.
+    if (CurrentAttackId != NAME_None && CurrentAttackMontage == Montage && !bInAttackWindow)
+    {
+        CloseCurrentAttack();
+    }
 }
 
 void UCombatComponent::PlayOrJumpMontageSection(const FAttackSpecConfig& Spec)
