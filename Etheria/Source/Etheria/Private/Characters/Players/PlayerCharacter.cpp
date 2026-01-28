@@ -20,7 +20,6 @@
 #include "Components/Characters/Player/Rope/RopeLengthControllerComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
 #include "Components/Characters/Player/Rope/RopeSwingComponent.h"
-#include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTarget/LockTargetComponent.h"
@@ -274,10 +273,10 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         }
     #pragma endregion
         
-#pragma region "SWIM BINDS"
-        // SWIM BIND 
+    #pragma region "SWIM BINDS"
+            // SWIM BIND 
 
-#pragma endregion
+    #pragma endregion
     }
 }
 
