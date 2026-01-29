@@ -6,11 +6,16 @@
  */
 #pragma once
 
+#include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+
 // Forward include to reuse combat structs in the data asset
 // We include the header here because this data asset only stores data types declared there.
 #include "Components/Combat/CombatComponent.h"
 #include "WeaponData.generated.h"
+
+class UStaticMesh;
+class USkeletalMesh;
 
 /**
  * Kind of ranged weapon behavior.
@@ -83,6 +88,36 @@ struct FWeaponRangedConfig
 };
 
 /**
+ * Visual data applied to the owning character's "weapon-in-hand" mesh components.
+ *
+ * Your BP_PlayerCharacter already has 2 child components:
+ *  - WeaponRHand
+ *  - WeaponLHand
+ *
+ * UEquipmentComponent reads these values and swaps meshes automatically when the equipped weapon changes.
+ */
+USTRUCT(BlueprintType)
+struct FWeaponHandVisual
+{
+    GENERATED_BODY()
+
+    // If your hand component is a StaticMeshComponent, this is used.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visual")
+    TObjectPtr<UStaticMesh> StaticMesh = nullptr;
+
+    // If your hand component is a SkeletalMeshComponent, this is used.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visual")
+    TObjectPtr<USkeletalMesh> SkeletalMesh = nullptr;
+
+    // Optional per-weapon adjustment (useful if you keep the hand component attached to a socket).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visual")
+    bool bApplyRelativeTransform = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visual", meta=(EditCondition="bApplyRelativeTransform"))
+    FTransform RelativeTransform = FTransform::Identity;
+};
+
+/**
  * Data asset that defines the full attack and combo configuration for a weapon.
  * This allows swapping weapon behavior without touching the component.
  */
@@ -105,6 +140,16 @@ public:
     // Ranged configuration (bow / semi-auto / full-auto)
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Ranged")
     FWeaponRangedConfig Ranged;
+
+    // ---- Visuals (hands) ----
+
+    // Mesh to display in the owning character's right hand.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Visual")
+    FWeaponHandVisual RightHand;
+
+    // Mesh to display in the owning character's left hand.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Visual")
+    FWeaponHandVisual LeftHand;
 
     // Optional tuning overrides
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Tuning")
