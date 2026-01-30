@@ -25,6 +25,8 @@ class UDecalComponent;
 class UWeaponData;
 class AActor;
 class UCharacterStateComponent;
+class UMeshComponent;
+class UMaterialInstanceDynamic;
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API UCombatComponent : public UActorComponent
@@ -34,6 +36,8 @@ class ETHERIA_API UCombatComponent : public UActorComponent
 public:
     UCombatComponent();
 
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnWeaponDissolveRequest);
+	
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     const TArray<FAttackSpecConfig>& GetAttacks() const { return Attacks; }
@@ -116,17 +120,52 @@ public:
     /** Summary: Clears all combo cooldowns (debug / reset). */
     UFUNCTION(BlueprintCallable, Category="Combat|Combo") void ClearAllComboCooldowns();
 
-    /** If true, use these values instead of those from WeaponData->Ranged */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat|Ranged|Camera") bool bUseCameraOverrides = false;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat|Ranged|Camera", meta=(EditCondition="bUseCameraOverrides")) float AimArmLengthOverride = 220.f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat|Ranged|Camera", meta=(EditCondition="bUseCameraOverrides")) float AimFOVOverride = 70.f;
 
     // Weapon data hot-swap
     UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void SetWeaponData(UWeaponData* InData);
     /** Summary: Applies the currently active weapon data to runtime attack/combo lists. */
     UFUNCTION(BlueprintCallable, Category="Combat|Weapon") void ApplyWeaponData();
 
+#pragma region WEAPON DISSOLVE
+
+	/** Call this on every "weapon used" moment (attack start / hit notify / etc.). Resets the auto-hide delay. */
+	UFUNCTION(BlueprintCallable, Category="Weapon|Dissolve")
+	void WeaponDissolve_PingActivity();
+
+	/** Prevent auto-hide while >0 (charged attacks: Push on charge start, Pop on release). */
+	UFUNCTION(BlueprintCallable, Category="Weapon|Dissolve")
+	void WeaponDissolve_PushHold();
+
+	UFUNCTION(BlueprintCallable, Category="Weapon|Dissolve")
+	void WeaponDissolve_PopHold();
+
+	/** Called by BP Timeline Update (3 floats) */
+	UFUNCTION(BlueprintCallable, Category="Weapon|Dissolve")
+	void WeaponDissolve_ApplyParams(float Dissolve, float ColorOpacity, float StrengthVN);
+
+	/** Called by BP when timeline finished (hide finished -> set hidden; show finished -> keep visible). */
+	UFUNCTION(BlueprintCallable, Category="Weapon|Dissolve")
+	void WeaponDissolve_SetMeshesHidden(bool bHidden);
+
+	/** Rebuild caches (after equip / weapon swap). */
+	UFUNCTION(BlueprintCallable, Category="Weapon|Dissolve")
+	void WeaponDissolve_RefreshCaches();
+
+	/** BP binds to these to Play/Reverse its Timeline */
+	UPROPERTY(BlueprintAssignable, Category="Weapon|Dissolve|Events")
+	FOnWeaponDissolveRequest OnWeaponShowRequested;
+
+	UPROPERTY(BlueprintAssignable, Category="Weapon|Dissolve|Events")
+	FOnWeaponDissolveRequest OnWeaponHideRequested;
+
+#pragma endregion
+	
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat|Weapon") UWeaponData* WeaponData = nullptr;
+	
+    /** If true, use these values instead of those from WeaponData->Ranged */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat|Ranged|Camera") bool bUseCameraOverrides = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat|Ranged|Camera", meta=(EditCondition="bUseCameraOverrides")) float AimArmLengthOverride = 220.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat|Ranged|Camera", meta=(EditCondition="bUseCameraOverrides")) float AimFOVOverride = 70.f;
 
     // Combo buffer timeout (editor tweak)
     UPROPERTY(EditAnywhere, Category="Combat|Combo", meta=(ClampMin="0.0")) float MaxComboBufferTime = 1.0f; // seconds
@@ -372,6 +411,59 @@ private:
     TWeakObjectPtr<UCharacterStateComponent> StateComp;
     float BaseWalkSpeed = -1.f;
     float BaseGlobalAnimRate = 1.f;
+#pragma endregion
+
+#pragma region WEAPON DISSOLVE
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	TArray<FComponentReference> WeaponMeshReferences;
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	bool bWeaponAutoCollectByTag = true;
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve", meta=(EditCondition="bWeaponAutoCollectByTag"))
+	FName WeaponAutoCollectTag = TEXT("Weapon");
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	FName DissolveParamName = TEXT("Dissolve");
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	FName ColorOpacityParamName = TEXT("Color Opacity");
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	FName StrengthVNParamName = TEXT("Strength VN");
+
+	/** How long weapons stay visible after last activity. Reset each PingActivity. */
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve", meta=(ClampMin="0.0"))
+	float WeaponAutoHideDelay = 1.25f;
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	bool bWeaponStartHidden = true;
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	float HiddenDissolve = 1.0f;
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	float HiddenColorOpacity = 0.0f;
+
+	UPROPERTY(EditAnywhere, Category="Weapon|Dissolve")
+	float HiddenStrengthVN = 0.0f;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMeshComponent>> WeaponMeshesCached;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> WeaponMIDsCached;
+
+	FTimerHandle WeaponAutoHideTimer;
+
+	int32 WeaponVisibilityHoldCount = 0;
+	bool bWeaponRequestedVisible = false;
+
+	void WeaponDissolve_RequestShow_Internal();
+	void WeaponDissolve_RequestHide_Internal();
+	void WeaponDissolve_OnAutoHideTimer();
+
 #pragma endregion
 
 #pragma region CONFIG
