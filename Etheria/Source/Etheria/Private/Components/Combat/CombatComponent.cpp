@@ -13,8 +13,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/Characters/CharacterStateComponent.h"
-#include "Engine/EngineTypes.h"
-#include "TimerManager.h"
 
 UCombatComponent::UCombatComponent()
 {
@@ -52,21 +50,6 @@ void UCombatComponent::BeginPlay()
     {
         // Keep current weapon data in sync so aiming/ranged systems can read Ranged config.
         SetCurrentWeaponData(WeaponData);
-    }
-    
-    // ------------------------------
-    // Weapon Dissolve init
-    // ------------------------------
-    WeaponDissolve_RefreshCaches();
-    if (bWeaponStartHidden)
-    {
-        WeaponDissolve_ApplyParams(HiddenDissolve, HiddenColorOpacity, HiddenStrengthVN);
-        WeaponDissolve_SetMeshesHidden(true);
-    }
-    else
-    {
-        WeaponDissolve_SetMeshesHidden(false);
-        bWeaponRequestedVisible = true;
     }
 }
 

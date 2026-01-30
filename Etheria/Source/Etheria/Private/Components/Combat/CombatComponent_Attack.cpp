@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: 0nnen
+ * Created by:  0nnen
  * Last Updated by: 0nnen
  * Class: "CombatComponent - Source (Attacks)"
  * Notes: Attack execution, traces, target assist, and damage application.
@@ -159,8 +159,6 @@ void UCombatComponent::ExecuteAttack(const FAttackSpecConfig& Spec, float Damage
     OnAttackStarted.Broadcast(Spec.AttackId);
 
     CurrentAttackMontage = Spec.Montage;
-    
-    WeaponDissolve_PingActivity();
 
     if (StateComp.IsValid())
     {
@@ -206,17 +204,17 @@ void UCombatComponent::CloseCurrentAttack()
     OnAttackEnded.Broadcast(CurrentAttackId);
     OnCue.Broadcast(FName("AttackEnd"), ECombatCuePhase::End);
 
+    if (StateComp.IsValid())
+    {
+        StateComp->ClearCombatState();
+    }
+
     CurrentAttackMontage = nullptr;
 
     LastAttackId = CurrentAttackId;
     CurrentAttackId = NAME_None;
 
     AdvanceComboIfRequested();
-    
-    if (StateComp.IsValid())
-    {
-        StateComp->ClearCombatState();
-    }
 }
 
 void UCombatComponent::BeginAttackWindow()
