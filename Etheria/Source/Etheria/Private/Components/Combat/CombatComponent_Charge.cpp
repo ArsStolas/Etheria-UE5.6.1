@@ -130,8 +130,6 @@ void UCombatComponent::BeginCharge(FName AttackId, float ExpectedDuration)
     }
 
     OnCue.Broadcast(FName("ChargeStart"), ECombatCuePhase::Start);
-    WeaponDissolve_PushHold();
-    WeaponDissolve_PingActivity();
 }
 
 void UCombatComponent::UpdateChargeProgress(float DeltaTime)
@@ -273,8 +271,6 @@ void UCombatComponent::EndCharge(bool bCanceled)
     {
         PerformFrontalRect(*Spec, DamageScale, RangeScale);
     }
-    WeaponDissolve_PopHold();
-    WeaponDissolve_PingActivity();
 }
 
 #pragma endregion
