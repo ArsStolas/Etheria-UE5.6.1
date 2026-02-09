@@ -43,6 +43,11 @@ public:
     const TArray<FAttackSpecConfig>& GetAttacks() const { return Attacks; }
     const TArray<FComboSpecConfig>& GetCombos() const { return Combos; }
 
+    /** Helper Range For IA*/
+    UFUNCTION(BlueprintCallable, Category="Combat")
+    float GetCurrentAttackRange() const;
+
+    
     /** Returns the currently active weapon data if any. */
     UPROPERTY() UWeaponData* CurrentWeaponData = nullptr;
 
