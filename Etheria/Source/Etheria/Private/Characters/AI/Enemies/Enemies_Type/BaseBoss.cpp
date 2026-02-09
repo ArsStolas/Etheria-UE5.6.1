@@ -4,9 +4,3 @@
  * Last Updated by: ArsStolas
  * Class: BaseBoss - Source
 */
-
-#include "Characters/AI/Enemies/Enemies_Type/BaseBoss.h"
-
-ABaseBoss::ABaseBoss()
-{
-}

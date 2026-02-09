@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
  */
 
@@ -20,6 +20,7 @@
 #include "Components/Characters/Player/Rope/RopeLengthControllerComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
 #include "Components/Characters/Player/Rope/RopeSwingComponent.h"
+#include "Components/Interaction/InteractorComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTarget/LockTargetComponent.h"
@@ -28,7 +29,6 @@
 #include "Core/System/EtheriaGameplayTags.h"
 #include "Data/Weapons/WeaponData.h"
 #include "World/Rope/RopeAttachPoint.h"
-#include "Components/Characters/Player/Movements/Swim/SwimComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -76,9 +76,6 @@ APlayerCharacter::APlayerCharacter()
     RopeConstraintComponent = CreateDefaultSubobject<URopeConstraintComponent>(TEXT("BPC_RopeConstraintComponent"));
     RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
     RopeLengthControllerComponent = CreateDefaultSubobject<URopeLengthControllerComponent>(TEXT("BPC_RopeLengthController"));
-    
-    // --- SWIM COMPONENTS ---
-    SwimComponent = CreateDefaultSubobject<USwimComponent>(TEXT("BPC_Swim"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -142,18 +139,18 @@ void APlayerCharacter::Tick(float DeltaTime)
     UpdateMovementState();
 
     // Keep camera updated if player stays aiming (smooth interpolation)
-    // if (bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
-    // {
-    //     const FWeaponRangedConfig& Ranged = CombatComponent->GetCurrentWeaponData()->Ranged;
-    //     CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, Ranged.AimArmLength, DeltaTime, 8.f);
-    //     FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, Ranged.AimFOV, DeltaTime, 8.f));
-    // }
-    // else if (bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
-    // {
-    //     // Restore default FOV gradually when not aiming
-    //     CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, BaseArmLength, DeltaTime, 6.f);
-    //     FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, BaseFOV, DeltaTime, 6.f));
-    // }
+    if (bIsAiming && CombatComponent && CombatComponent->GetCurrentWeaponData())
+    {
+        const FWeaponRangedConfig& Ranged = CombatComponent->GetCurrentWeaponData()->Ranged;
+        CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, Ranged.AimArmLength, DeltaTime, 8.f);
+        FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, Ranged.AimFOV, DeltaTime, 8.f));
+    }
+    else
+    {
+        // Restore default FOV gradually when not aiming
+        CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, BaseArmLength, DeltaTime, 6.f);
+        FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, BaseFOV, DeltaTime, 6.f));
+    }
 }
 
 
@@ -188,16 +185,9 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     #pragma endregion
 
     #pragma region "FLIGHT MODE BINDS"
-        // GLIDER x SWIM BINDS
+        // GLIDER BINDS
         EIC->BindAction(GliderAction, ETriggerEvent::Started,   this, &APlayerCharacter::ToggleGlideMode);
-        
-        // --- DIVE (routes to Swim when in water, otherwise flight dive) ---
-        UInputAction* EffectiveDiveAction = SwimDiveAction ? SwimDiveAction : DiveAction;
-        if (EffectiveDiveAction)
-        {
-            EIC->BindAction(EffectiveDiveAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnDiveInputPressed);
-            EIC->BindAction(EffectiveDiveAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnDiveInputReleased);
-        }
+        EIC->BindAction(DiveAction,   ETriggerEvent::Started,   this, &APlayerCharacter::ToggleDiveMode);
     #pragma endregion
 
     #pragma region "INVENTORY BINDS"
@@ -208,10 +198,10 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         EIC->BindAction(DropItemAction, ETriggerEvent::Started, this, &ThisClass::Input_DropItem);
     #pragma endregion
 
-    #pragma region "INTERACTION BINDS"
-         // INTERACTION BIND 
-        EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &ThisClass::Input_Interact);
-    #pragma endregion
+    //#pragma region "INTERACTION BINDS"
+        // INTERACTION BIND
+        //EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &ThisClass::Input_Interact);
+    //#pragma endregion
 
     #pragma region "COMBAT BINDS"
         // COMBAT BINDS
@@ -271,11 +261,6 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
             EIC->BindAction(ClimbRopeAction, ETriggerEvent::Triggered, this, &APlayerCharacter::ClimbRopeInput);
             EIC->BindAction(ClimbRopeAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopClimbRopeInput);
         }
-    #pragma endregion
-        
-    #pragma region "SWIM BINDS"
-            // SWIM BIND 
-
     #pragma endregion
     }
 }
@@ -382,13 +367,7 @@ void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal
 void APlayerCharacter::StartSprint()
 {
     if (!StateComponent) return;
-    
-    if (SwimComponent && SwimComponent->IsSwimmingActive())
-    {
-        SwimComponent->SetSwimSprinting(true);
-        return;
-    }
-    
+
     GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
 
     // --- Double-tap = Dodge ---
@@ -423,12 +402,6 @@ void APlayerCharacter::StartSprint()
 
 void APlayerCharacter::StopSprint()
 {
-    if (SwimComponent && SwimComponent->IsSwimmingActive())
-    {
-        SwimComponent->SetSwimSprinting(false);
-        return;
-    }
-    
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
@@ -436,8 +409,7 @@ void APlayerCharacter::OnJumpPressed()
 {
     if (!CombatComponent) { Jump(); return; }
     if (CombatComponent->IsJumpBlocked()) return;
-    if (SwimComponent && SwimComponent->IsSwimmingActive()) return; 
-    
+
     if (CombatComponent->IsAttackActive())
     {
         bJumpBuffered = true;
@@ -551,20 +523,6 @@ void APlayerCharacter::UpdateMovementState()
         HandleAirborneState();
     else
         HandleGroundedState();
-    
-    // --- Swim overrides grounded/airborne state ---
-    if (SwimComponent && SwimComponent->IsSwimmingActive())
-    {
-        if (SwimComponent->IsUnderwater())
-        {
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Swim_Underwater);
-        }
-        else
-        {
-            StateComponent->SetMovementState(EtheriaTags::State_Movement_Swim_Surface);
-        }
-        return;
-    }
 }
 
 void APlayerCharacter::HandleGroundedState()
@@ -1019,29 +977,6 @@ void APlayerCharacter::StopClimbRopeInput(const FInputActionValue& Value)
         RopeLengthControllerComponent->SetClimbInput(0.f);
 }
 
-#pragma endregion
-
-#pragma region "SWIM INPUTS"
-void APlayerCharacter::OnDiveInputPressed()
-{
-    // If we're in water (or currently swimming), this input is for Swim
-    if (SwimComponent && (SwimComponent->IsInWater() || SwimComponent->IsSwimmingActive()))
-    {
-        SwimComponent->Input_DivePressed();
-        return;
-    }
-
-    // Otherwise keep existing flight behavior
-    ToggleDiveMode();
-}
-
-void APlayerCharacter::OnDiveInputReleased()
-{
-    if (SwimComponent && (SwimComponent->IsInWater() || SwimComponent->IsSwimmingActive()))
-    {
-        SwimComponent->Input_DiveReleased();
-    }
-}
 #pragma endregion
 
 #pragma region "STATE LOGS"

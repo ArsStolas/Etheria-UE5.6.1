@@ -8,13 +8,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Characters/AI/NPCs/BaseNPC.h"
+#include "Characters/AI/BaseAI.h"
+#include "Components/Quests/QuestGiverComponent.h"
 #include "BaseQuestGiver.generated.h"
 
 UCLASS()
-class ETHERIA_API ABaseQuestGiver : public ABaseNPC
+class ETHERIA_API ABaseQuestGiver : public ABaseAI
 {
-	GENERATED_BODY()
+ GENERATED_BODY()
+
 public:
-	ABaseQuestGiver();
+ ABaseQuestGiver();
+
+protected:
+ virtual void BeginPlay() override;
+
+public:
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
+ UQuestGiverComponent* QuestGiverComp;
 };
