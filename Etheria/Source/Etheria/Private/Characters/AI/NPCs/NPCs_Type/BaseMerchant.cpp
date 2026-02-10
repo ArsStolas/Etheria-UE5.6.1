@@ -4,9 +4,3 @@
  * Last Updated by: ArsStolas
  * Class: BaseMerchant - Source
 */
-
-#include "Characters/AI/NPCs/NPCs_Type/BaseMerchant.h"
-
-ABaseMerchant::ABaseMerchant()
-{
-}

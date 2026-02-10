@@ -21,6 +21,10 @@ UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Rope_Detached, "State.Movemen
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Rope_Climbing, "State.Movement.Rope.Climbing");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Rope_Pulling, "State.Movement.Rope.Pulling");
 
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Swim, "State.Movement.Swim");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Swim_Surface, "State.Movement.Swim.Surface");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Swim_Underwater, "State.Movement.Swim.Underwater");
+
 // === Combat ===
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat, "State.Combat");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat_Attacking, "State.Combat.Attacking");
@@ -33,3 +37,11 @@ UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Life, "State.Life");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Life_TakingDamage, "State.Life.TakingDamage");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Life_Healing, "State.Life.Healing");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Life_Dead, "State.Life.Dead");
+
+// === IA ===
+	// === Movement ===
+	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Chase, "State.Movement.Chase");
+	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Wander, "State.Movement.Wander");
+	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Patrol, "State.Movement.Patrol");
+	// === Combat ===
+	UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Fight, "State.Movement.Fight");

@@ -29,6 +29,9 @@ namespace EtheriaTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope_Climbing);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope_Pulling);
 	
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Swim)
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Swim_Surface)
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Swim_Underwater)
 
 	// === Combat ===
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat);
@@ -42,4 +45,13 @@ namespace EtheriaTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Life_TakingDamage);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Life_Healing);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Life_Dead);
+
+	// === IA ===
+		// === Movement ===
+		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Chase);
+		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Patrol);
+		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Wander);
+	// === Combat ===
+		UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Fight);
+
 }

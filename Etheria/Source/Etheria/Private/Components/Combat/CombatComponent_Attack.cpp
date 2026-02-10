@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by:  0nnen
+ * Created by: 0nnen
  * Last Updated by: 0nnen
  * Class: "CombatComponent - Source (Attacks)"
  * Notes: Attack execution, traces, target assist, and damage application.
@@ -158,6 +158,10 @@ void UCombatComponent::ExecuteAttack(const FAttackSpecConfig& Spec, float Damage
     OnCue.Broadcast(FName("AttackStart"), ECombatCuePhase::Start);
     OnAttackStarted.Broadcast(Spec.AttackId);
 
+    CurrentAttackMontage = Spec.Montage;
+    
+    WeaponDissolve_PingActivity();
+
     if (StateComp.IsValid())
     {
         StateComp->SetCombatState(EtheriaTags::State_Combat_Attacking);
@@ -202,15 +206,17 @@ void UCombatComponent::CloseCurrentAttack()
     OnAttackEnded.Broadcast(CurrentAttackId);
     OnCue.Broadcast(FName("AttackEnd"), ECombatCuePhase::End);
 
-    if (StateComp.IsValid())
-    {
-        StateComp->ClearCombatState();
-    }
+    CurrentAttackMontage = nullptr;
 
     LastAttackId = CurrentAttackId;
     CurrentAttackId = NAME_None;
 
     AdvanceComboIfRequested();
+    
+    if (StateComp.IsValid())
+    {
+        StateComp->ClearCombatState();
+    }
 }
 
 void UCombatComponent::BeginAttackWindow()
@@ -242,6 +248,12 @@ void UCombatComponent::EndAttackWindow()
     bInAttackWindow = false;
     OnCue.Broadcast(FName("HitWindow"), ECombatCuePhase::End);
     CloseCurrentAttack();
+}
+
+void UCombatComponent::EndHitWindow()
+{
+    bInAttackWindow = false;
+    OnCue.Broadcast(FName("HitWindow"), ECombatCuePhase::End);
 }
 
 #pragma endregion
@@ -551,6 +563,117 @@ void UCombatComponent::PerformRangedLine(const FAttackSpecConfig& Spec, float Da
 
     OnCue.Broadcast(FName("Impact"), ECombatCuePhase::Impact);
     PushRecentHitActor(Other);
+}
+
+
+void UCombatComponent::HandleRangedProjectileImpact(AActor* HitActor, const FHitResult& Hit, FName AttackId, float ChargeAlpha, float DamageScale)
+{
+    if (!GetWorld() || !GetOwner() || !HitActor) return;
+    if (bIgnoreOwner && HitActor == GetOwner()) return;
+
+    const FAttackSpecConfig* Spec = FindAttack(AttackId);
+    if (!Spec)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[Combat] HandleRangedProjectileImpact: AttackId '%s' not found."), *AttackId.ToString());
+        return;
+    }
+
+    // Resolve charge multipliers from AttackSpec charge levels (optional).
+    float ChargeDamageMul = 1.f;
+    float ChargeRangeMul  = 1.f;
+
+    const float Alpha = FMath::Clamp(ChargeAlpha, 0.f, 1.f);
+    if (Spec->Charge.bChargeable && Spec->Charge.Levels.Num() > 0)
+    {
+        float Total = 0.f;
+        for (const FChargeLevelConfig& L : Spec->Charge.Levels)
+        {
+            Total += FMath::Max(0.001f, L.Time);
+        }
+
+        // Map alpha to a time along the charge curve.
+        float TargetT = Alpha * Total;
+        float Acc = 0.f;
+
+        // Start values (no charge)
+        float PrevDM = 1.f;
+        float PrevRM = 1.f;
+
+        for (int32 i = 0; i < Spec->Charge.Levels.Num(); ++i)
+        {
+            const FChargeLevelConfig& L = Spec->Charge.Levels[i];
+            const float Segment = FMath::Max(0.001f, L.Time);
+            const float NextAcc = Acc + Segment;
+
+            const float NextDM = L.DamageMultiplier;
+            const float NextRM = L.RangeMultiplier;
+
+            if (TargetT <= NextAcc)
+            {
+                const float LocalA = (TargetT - Acc) / Segment;
+                ChargeDamageMul = FMath::Lerp(PrevDM, NextDM, LocalA);
+                ChargeRangeMul  = FMath::Lerp(PrevRM, NextRM, LocalA);
+                break;
+            }
+
+            PrevDM = NextDM;
+            PrevRM = NextRM;
+            Acc = NextAcc;
+
+            // If we exceeded all levels, clamp to last
+            if (i == Spec->Charge.Levels.Num() - 1)
+            {
+                ChargeDamageMul = NextDM;
+                ChargeRangeMul  = NextRM;
+            }
+        }
+    }
+
+    const float FinalDamageScale = DamageScale * ChargeDamageMul;
+
+    bool bCrit = false;
+    const float FinalDamage = ComputeFinalDamageForTarget(
+        HitActor,
+        Spec->BaseDamage * FinalDamageScale,
+        bCrit,
+        Spec->CritChance,
+        Spec->CritMultiplier
+    );
+    if (FinalDamage <= 0.f) return;
+
+    FVector Dir = FVector::ZeroVector;
+    if (!Hit.TraceStart.IsNearlyZero())
+    {
+        Dir = (Hit.ImpactPoint - Hit.TraceStart).GetSafeNormal();
+    }
+    if (Dir.IsNearlyZero())
+    {
+        Dir = (HitActor->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+    }
+
+    UGameplayStatics::ApplyPointDamage(
+        HitActor,
+        FinalDamage,
+        Dir,
+        Hit,
+        GetOwner()->GetInstigatorController(),
+        GetOwner(),
+        nullptr
+    );
+
+    if (bCrit) OnHitCrit.Broadcast(HitActor, FinalDamage);
+    else       OnHit.Broadcast(HitActor, FinalDamage);
+
+    OnCue.Broadcast(FName("Impact"), ECombatCuePhase::Impact);
+    PushRecentHitActor(HitActor);
+
+#if !(UE_BUILD_SHIPPING)
+    if (bDebugDraw)
+    {
+        DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 14.f, bCrit ? FColor::Orange : FColor::Green, false, 1.f);
+        DrawDebugString(GetWorld(), Hit.ImpactPoint + FVector(0,0,12.f), FString::Printf(TEXT("%.0f%%"), Alpha * 100.f), nullptr, FColor::White, 1.f);
+    }
+#endif
 }
 
 void UCombatComponent::PerformAoE(const FAttackSpecConfig& Spec, float DamageScale, float RangeScale)
