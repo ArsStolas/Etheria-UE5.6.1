@@ -4,9 +4,3 @@
  * Last Updated by: ArsStolas
  * Class: BaseCivilian - Source
 */
-
-#include "Characters/AI/NPCs/NPCs_Type/BaseCivilian.h"
-
-ABaseCivilian::ABaseCivilian()
-{
-}

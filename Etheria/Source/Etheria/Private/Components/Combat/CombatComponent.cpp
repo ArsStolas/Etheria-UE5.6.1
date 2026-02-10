@@ -13,6 +13,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/Characters/CharacterStateComponent.h"
+#include "Engine/EngineTypes.h"
+#include "TimerManager.h"
 
 UCombatComponent::UCombatComponent()
 {
@@ -50,6 +52,21 @@ void UCombatComponent::BeginPlay()
     {
         // Keep current weapon data in sync so aiming/ranged systems can read Ranged config.
         SetCurrentWeaponData(WeaponData);
+    }
+    
+    // ------------------------------
+    // Weapon Dissolve init
+    // ------------------------------
+    WeaponDissolve_RefreshCaches();
+    if (bWeaponStartHidden)
+    {
+        WeaponDissolve_ApplyParams(HiddenDissolve, HiddenColorOpacity, HiddenStrengthVN);
+        WeaponDissolve_SetMeshesHidden(true);
+    }
+    else
+    {
+        WeaponDissolve_SetMeshesHidden(false);
+        bWeaponRequestedVisible = true;
     }
 }
 
@@ -190,4 +207,23 @@ void UCombatComponent::GetRecentHitActors(TArray<AActor*>& Out) const
     {
         if (W.IsValid()) Out.Add(W.Get());
     }
+}
+
+/** Config Helper */
+float UCombatComponent::GetCurrentAttackRange() const
+{
+    if (!CurrentWeaponData) return 0.f;
+
+    if (CurrentWeaponData->Ranged.bIsRangedWeapon)
+    {
+        return CurrentWeaponData->Ranged.FullAutoRate > 0.f ?
+               CurrentWeaponData->Ranged.AimArmLength : 
+               200.f;
+    }
+    
+    if (Attacks.Num() > 0)
+    {
+        return Attacks[0].Range;
+    }
+    return 0.f;
 }

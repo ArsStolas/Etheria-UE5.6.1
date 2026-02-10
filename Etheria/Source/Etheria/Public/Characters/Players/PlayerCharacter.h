@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: 0nnen
  * Class: PlayerCharacter - Header
  */
 
@@ -31,6 +31,7 @@ class UInventoryComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
 class UQuestComponent;
+class USwimComponent;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -83,9 +84,9 @@ public:
     FORCEINLINE URopeConstraintComponent* GetRopeConstraintComponent() const { return RopeConstraintComponent; }
     FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
     FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
-
-    // Simple accessor
+    FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
     
+    // Simple accessor
     bool IsGrounded() const;
     
 protected:
@@ -121,9 +122,9 @@ protected:
     //UInteractionComponent* InteractionComponent;
 
     // --- LOCK TARGET ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Combat|LockTarget", meta=(AllowPrivateAccess="true"))
     ULockTargetComponent* LockTargetComponent;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Combat|LockTarget", meta=(AllowPrivateAccess="true"))
     ULockVisualComponent* LockVisualComponent;
 
     // --- QUEST TARGET ---
@@ -147,6 +148,10 @@ protected:
     URopeSwingComponent* RopeSwingComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeLengthControllerComponent* RopeLengthControllerComponent;
+    
+    // --- SWIM ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Movement", meta=(AllowPrivateAccess="true"))
+    USwimComponent* SwimComponent;
 
 #pragma endregion
 
@@ -209,11 +214,11 @@ protected:
     UInputAction* DodgeAction;
 
     // --- LOCK TARGET ---
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat|LockTarget")
     UInputAction* LockToggleAction;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat|LockTarget")
     UInputAction* LockSwitchLeftAction;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat|LockTarget")
     UInputAction* LockSwitchRightAction;
 
     // --- ROPE ---
@@ -222,6 +227,14 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
     UInputAction* ClimbRopeAction;
 
+    // --- SWIM ---
+    /** Optional swim dive input. If unset, DiveAction is used. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input|Swim", meta=(ToolTip="Optional swim dive input. If unset, DiveAction is used for swim too."))
+    UInputAction* SwimDiveAction = nullptr;
+
+    /** Optional swim sprint input. If unset, SprintAction is used. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input|Swim", meta=(ToolTip="Optional swim sprint input. If unset, SprintAction is used for swim sprint too."))
+    UInputAction* SwimSprintAction = nullptr;
 #pragma endregion
 
 // ============================================================
@@ -341,6 +354,10 @@ private:
     void CheckRopeAttachMode();
     void ClimbRopeInput(const FInputActionValue& Value);
     void StopClimbRopeInput(const FInputActionValue& Value);
+    
+    // --- Swim / Dive Input Routing ---
+    void OnDiveInputPressed();
+    void OnDiveInputReleased();
 
 #pragma endregion
 
@@ -364,5 +381,20 @@ if (Condition) { Delegate.AddDynamic(this, &APlayerCharacter::Function); }
 
 #pragma endregion
 
+// ============================================================
+// STATE LOGGING
+// ============================================================
+#pragma region "COMMANDS EXEC"
+
+    UFUNCTION(Exec)
+    void DamageSelf(float Amount = 10.f);
+
+    UFUNCTION(Exec)
+    void HealSelf(float Amount = 10.f);
+
+    UFUNCTION(Exec)
+    void SetHPPercent(float Percent = 0.2f);
+    
+#pragma endregion
 };
 
