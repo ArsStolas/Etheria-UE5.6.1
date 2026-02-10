@@ -12,6 +12,7 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class UCableComponent;
 class URopeLengthControllerComponent;
 class URopeConstraintComponent;
 class URopeSwingComponent;
@@ -75,6 +76,7 @@ public:
     FORCEINLINE float GetHorizontalInput() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE float GetVerticalInput() const   { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
+    FORCEINLINE UCableComponent* GetRopeCableComponent() const { return RopeCableComponent; }
     FORCEINLINE URopeDetectionComponent* GetRopeDetectionComponent() const { return RopeDetectionComponent; }
     FORCEINLINE URopeAttachComponent* GetRopeAttachComponent() const { return RopeAttachComponent; }
     FORCEINLINE URopeLockComponent* GetRopeLockComponent() const { return RopeLockComponent; }
@@ -129,6 +131,10 @@ protected:
     UQuestComponent* QuestComponent;
 
     // --- ROPE ---
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
+    UCableComponent* RopeCableComponent;
+    
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
     URopeDetectionComponent* RopeDetectionComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")

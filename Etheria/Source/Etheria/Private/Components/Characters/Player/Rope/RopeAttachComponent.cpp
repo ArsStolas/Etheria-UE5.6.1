@@ -6,9 +6,10 @@
 */
 
 #include "Components/Characters/Player/Rope/RopeAttachComponent.h"
+
+#include "CableComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
 #include "World/Rope/RopeAttachPoint.h"
-#include "CableComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
 #include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
 #include "Materials/MaterialInterface.h"
@@ -17,7 +18,6 @@ URopeAttachComponent::URopeAttachComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = false;
-    CableComponent = CreateDefaultSubobject<UCableComponent>(TEXT("CableComponent"));
 }
 
 void URopeAttachComponent::BeginPlay()
@@ -27,7 +27,7 @@ void URopeAttachComponent::BeginPlay()
     OwnerCharacter = Cast<APlayerCharacter>(GetOwner());
     if (!OwnerCharacter) return;
 
-    LockComponent = OwnerCharacter->FindComponentByClass<URopeLockComponent>();
+    LockComponent = OwnerCharacter->GetRopeLockComponent();
     if (LockComponent)
     {
         LockComponent->OnLockedPointChanged.AddDynamic(
@@ -35,6 +35,8 @@ void URopeAttachComponent::BeginPlay()
             &URopeAttachComponent::OnLockedPointChanged
         );
     }
+    
+    CableComponent = OwnerCharacter->GetRopeCableComponent();
     
     if (!CableComponent) return;
 

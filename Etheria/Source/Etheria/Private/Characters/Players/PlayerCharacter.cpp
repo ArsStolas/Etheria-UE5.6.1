@@ -6,6 +6,8 @@
  */
 
 #include "Characters/Players/PlayerCharacter.h"
+
+#include "CableComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -70,6 +72,8 @@ APlayerCharacter::APlayerCharacter()
     QuestComponent = CreateDefaultSubobject<UQuestComponent>(TEXT("BPC_QuestComponent"));
 
     // --- ROPE COMPONENTS ---
+    RopeCableComponent = CreateDefaultSubobject<UCableComponent>(TEXT("BPC_RopeCable"));
+    
     RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("BPC_RopeDetectionComponent"));
     RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("BPC_RopeLockComponent"));
     RopeAttachComponent = CreateDefaultSubobject<URopeAttachComponent>(TEXT("BPC_RopeAttachComponent"));
