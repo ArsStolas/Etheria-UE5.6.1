@@ -31,6 +31,7 @@
 #include "Data/Weapons/WeaponData.h"
 #include "World/Rope/RopeAttachPoint.h"
 #include "Components/Characters/Player/Movements/Swim/SwimComponent.h"
+#include "Components/Characters/Player/Rope/URopeCameraComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -73,14 +74,15 @@ APlayerCharacter::APlayerCharacter()
 
     // --- ROPE COMPONENTS ---
     RopeCableComponent = CreateDefaultSubobject<UCableComponent>(TEXT("BPC_RopeCable"));
-    
+
     RopeDetectionComponent = CreateDefaultSubobject<URopeDetectionComponent>(TEXT("BPC_RopeDetectionComponent"));
     RopeLockComponent = CreateDefaultSubobject<URopeLockComponent>(TEXT("BPC_RopeLockComponent"));
     RopeAttachComponent = CreateDefaultSubobject<URopeAttachComponent>(TEXT("BPC_RopeAttachComponent"));
     RopeConstraintComponent = CreateDefaultSubobject<URopeConstraintComponent>(TEXT("BPC_RopeConstraintComponent"));
     RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
     RopeLengthControllerComponent = CreateDefaultSubobject<URopeLengthControllerComponent>(TEXT("BPC_RopeLengthController"));
-    
+    RopeCameraComponent = CreateDefaultSubobject<URopeCameraComponent>(TEXT("BPC_RopeCameraComponent"));
+
     // --- SWIM COMPONENTS ---
     SwimComponent = CreateDefaultSubobject<USwimComponent>(TEXT("BPC_Swim"));
 }
@@ -135,6 +137,15 @@ void APlayerCharacter::BeginPlay()
         FlightComponent->OnGlideStop.AddDynamic(this, &APlayerCharacter::OnGlideStop);
         FlightComponent->OnDiveStart.AddDynamic(this, &APlayerCharacter::OnDiveStart);
         FlightComponent->OnDiveStop.AddDynamic(this, &APlayerCharacter::OnDiveStop);
+    }
+    
+    if (RopeCableComponent)
+    {
+        RopeCableComponent->AttachToComponent(
+            GetMesh(),
+            FAttachmentTransformRules::SnapToTargetIncludingScale,
+            RopeStartSocketName
+        );
     }
 }
 
@@ -438,14 +449,60 @@ void APlayerCharacter::StopSprint()
 
 void APlayerCharacter::OnJumpPressed()
 {
-    if (!CombatComponent) { Jump(); return; }
+    if (!CombatComponent)
+    {
+        Jump();
+        return;
+    }
+
     if (CombatComponent->IsJumpBlocked()) return;
-    if (SwimComponent && SwimComponent->IsSwimmingActive()) return; 
-    
+    if (SwimComponent && SwimComponent->IsSwimmingActive()) return;
+
+    // ===============================
+    // ROPE JUMP HANDLING
+    // ===============================
+
+    if (RopeSwingComponent && RopeSwingComponent->IsSwinging())
+    {
+        FVector LaunchVelocity;
+
+        const bool bDidDetach =
+            RopeSwingComponent->TryJumpOffRope(LaunchVelocity);
+
+        if (bDidDetach)
+        {
+            // Fully detach rope
+            if (RopeAttachComponent)
+            {
+                RopeAttachComponent->DetachRope();
+            }
+
+            LaunchCharacter(LaunchVelocity, true, true);
+
+            if (StateComponent)
+            {
+                StateComponent->SetMovementState(
+                    EtheriaTags::State_Movement_Airborne_Jumping
+                );
+            }
+
+            return; // Do NOT call default Jump()
+        }
+
+        // Not enough speed → stay attached
+        return;
+    }
+
+    // ===============================
+    // NORMAL JUMP
+    // ===============================
+
     if (CombatComponent->IsAttackActive())
     {
         bJumpBuffered = true;
-        JumpBufferExpireAt = GetWorld() ? GetWorld()->GetTimeSeconds() + JumpBufferTime : 0.f;
+        JumpBufferExpireAt = GetWorld()
+            ? GetWorld()->GetTimeSeconds() + JumpBufferTime
+            : 0.f;
         return;
     }
 
@@ -453,12 +510,9 @@ void APlayerCharacter::OnJumpPressed()
 
     if (StateComponent)
     {
-        if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
-            !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
-        {
-            return;
-        }
-        StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Jumping);
+        StateComponent->SetMovementState(
+            EtheriaTags::State_Movement_Airborne_Jumping
+        );
     }
 }
 
@@ -648,7 +702,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 
 void APlayerCharacter::ToggleGlideMode()
 {
-    if (!FlightComponent) return;
+    if (!FlightComponent || RopeAttachComponent->IsAttached()) return;
 
     if (FlightComponent->IsInMode(EFlightMode::Glide))
     {
@@ -667,13 +721,16 @@ void APlayerCharacter::ToggleGlideMode()
 
 void APlayerCharacter::ToggleDiveMode()
 {
-    if (!FlightComponent) return;
+    if (!FlightComponent || RopeAttachComponent->IsAttached()) return;
 
     if (FlightComponent->IsInMode(EFlightMode::Dive))
     {
         FlightComponent->StopMode();
     }
     else if (FlightComponent->IsInMode(EFlightMode::Glide))
+    {
+        FlightComponent->StartDive();
+    } else
     {
         FlightComponent->StartDive();
     }

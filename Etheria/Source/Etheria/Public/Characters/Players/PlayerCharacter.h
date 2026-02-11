@@ -19,6 +19,7 @@ class URopeSwingComponent;
 class URopeAttachComponent;
 class URopeLockComponent;
 class URopeDetectionComponent;
+class URopeCameraComponent;
 struct FInputActionValue;
 
 class USpringArmComponent;
@@ -85,6 +86,8 @@ public:
     FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
     FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
     FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
+    FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+    FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
     
     // Simple accessor
     bool IsGrounded() const;
@@ -148,6 +151,12 @@ protected:
     URopeSwingComponent* RopeSwingComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeLengthControllerComponent* RopeLengthControllerComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeCameraComponent* RopeCameraComponent;
+    
+    /** Socket name where the rope attaches on the character mesh*/
+    UPROPERTY(EditAnywhere, Category="Rope|Attachment")
+    FName RopeStartSocketName = TEXT("hand_r");
     
     // --- SWIM ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Movement", meta=(AllowPrivateAccess="true"))

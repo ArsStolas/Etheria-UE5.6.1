@@ -40,15 +40,6 @@ void URopeAttachComponent::BeginPlay()
     
     if (!CableComponent) return;
 
-    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
-    if (!Mesh) return;
-
-    CableComponent->AttachToComponent(
-        Mesh,
-        FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-        RopeStartSocketName
-    );
-
     // ===== CRITICAL: SET LENGTH FIRST BEFORE SEGMENTS =====
     // Initialize with a safe default length to allocate particle array
     CableComponent->CableLength = 500.f; 
