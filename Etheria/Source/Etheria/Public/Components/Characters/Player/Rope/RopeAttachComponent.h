@@ -84,10 +84,6 @@ protected:
     UPROPERTY(EditAnywhere, Category="Rope|Visual")
     USkeletalMesh* RopeMesh;
     
-    /** Socket name where the rope attaches on the character mesh (try: spine_03, clavicle_r, hand_r) */
-    UPROPERTY(EditAnywhere, Category="Rope|Attachment")
-    FName RopeStartSocketName = TEXT("spine_03");
-    
     /** Vertical offset for the rope attachment point on the anchor (positive = higher) */
     UPROPERTY(EditAnywhere, Category="Rope|Attachment")
     float AnchorAttachmentOffset = 25.f;

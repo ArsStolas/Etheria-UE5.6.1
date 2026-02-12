@@ -74,7 +74,7 @@ void UFlightComponent::StartGlide()
 
 void UFlightComponent::StartDive()
 {
-    if (!Owner || CurrentMode != EFlightMode::Glide)
+    if (!Owner || !Owner->GetCharacterMovement()->IsFalling())
         return;
 
     // Exit Glide, Enter Dive
