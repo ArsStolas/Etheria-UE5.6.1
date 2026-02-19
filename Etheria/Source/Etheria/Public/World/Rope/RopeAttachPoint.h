@@ -1,5 +1,5 @@
 /**
- * Etheria's End Project, 2025
+* Etheria's End Project, 2025
  * Created by: Zhailendra
  * Last Updated by: Zhailendra
  * Class: RopeAttachPoint - Header
@@ -44,8 +44,10 @@ public:
 	bool bDrawBaseDebug = true;
 
 	FORCEINLINE ERopeAttachType GetAttachType() const { return AttachType; }
+	FORCEINLINE UStaticMeshComponent* GetMeshComponent() const { return MeshComponent; }
 
 protected:
-	UPROPERTY(VisibleAnywhere)
-	USceneComponent* Root;
+	/** Unique mesh for both Pull & Swing */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope|Visual")
+	UStaticMeshComponent* MeshComponent;
 };

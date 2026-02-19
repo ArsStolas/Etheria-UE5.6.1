@@ -43,6 +43,7 @@ public:
     FORCEINLINE UCableComponent* GetCableComponent() const { return CableComponent; }
     FORCEINLINE float GetCableLengthOffset() const { return RopeLengthOffset; }
     FORCEINLINE float GetMinRopeLength() const { return MinRopeLength; }
+    FORCEINLINE float GetPullMinRopeLength() const { return PullMinRopeLength; }
     FORCEINLINE float GetMaxRopeLength() const { return MaxRopeLength; }
 
     /** Attach the rope to a target point */
@@ -91,6 +92,9 @@ protected:
     // Min/max width for cable visual
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Rope|Visual")
     float MinRopeWidth = 2.f;
+    
+    UPROPERTY(EditAnywhere, Category="Rope|Pull")
+    float PullMinRopeLength = 100.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Rope|Visual")
     float MaxRopeWidth = 6.f;

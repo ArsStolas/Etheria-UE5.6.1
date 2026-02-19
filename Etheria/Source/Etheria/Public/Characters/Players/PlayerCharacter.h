@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Header
  */
 
@@ -20,6 +20,7 @@ class URopeAttachComponent;
 class URopeLockComponent;
 class URopeDetectionComponent;
 class URopeCameraComponent;
+class URopePullComponent;
 struct FInputActionValue;
 
 class USpringArmComponent;
@@ -85,6 +86,7 @@ public:
     FORCEINLINE URopeConstraintComponent* GetRopeConstraintComponent() const { return RopeConstraintComponent; }
     FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
     FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
+    FORCEINLINE URopePullComponent* GetRopePullComponent() const { return RopePullComponent; }
     FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
     FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
     FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
@@ -153,6 +155,8 @@ protected:
     URopeLengthControllerComponent* RopeLengthControllerComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeCameraComponent* RopeCameraComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopePullComponent* RopePullComponent;
     
     /** Socket name where the rope attaches on the character mesh*/
     UPROPERTY(EditAnywhere, Category="Rope|Attachment")
@@ -234,7 +238,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
     UInputAction* AttachRopeAction;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
-    UInputAction* ClimbRopeAction;
+    UInputAction* RopeLengthAction;
 
     // --- SWIM ---
     /** Optional swim dive input. If unset, DiveAction is used. */
@@ -361,8 +365,8 @@ private:
     // --- Rope ---
     void OnRopeAttachPressed();
     void CheckRopeAttachMode();
-    void ClimbRopeInput(const FInputActionValue& Value);
-    void StopClimbRopeInput(const FInputActionValue& Value);
+    void RopeLengthInput(const FInputActionValue& Value);
+    void StopRopeLengthInput(const FInputActionValue& Value);
     
     // --- Swim / Dive Input Routing ---
     void OnDiveInputPressed();

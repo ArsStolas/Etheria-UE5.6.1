@@ -10,6 +10,8 @@
 #include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
 #include "Components/Characters/Player/Rope/RopeSwingComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
+#include "Components/Characters/Player/Rope/Pulling/RopePullComponent.h"
+#include "World/Rope/RopeAttachPoint.h"
 
 URopeLengthControllerComponent::URopeLengthControllerComponent()
 {
@@ -30,101 +32,134 @@ void URopeLengthControllerComponent::BeginPlay()
         AttachComponent = OwnerCharacter->GetRopeAttachComponent();
         ConstraintComponent = OwnerCharacter->GetRopeConstraintComponent();
         SwingComp = OwnerCharacter->GetRopeSwingComponent();
+        PullComp = OwnerCharacter->GetRopePullComponent();
     }
 }
 
 void URopeLengthControllerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
+
+    if (!AttachComponent || !AttachComponent->IsAttached())
+        return;
+
+    ARopeAttachPoint* Point = AttachComponent->GetAttachedPoint();
+    if (!Point) return;
+
     float CurrentLength = -1.f;
 
-    if (SwingComp && SwingComp->IsSwinging())
+    const bool bIsSwinging = SwingComp && SwingComp->IsSwinging();
+    const bool bIsPull = Point->GetAttachType() == ERopeAttachType::Pull;
+
+    if (bIsSwinging)
     {
         CurrentLength = SwingComp->GetSwingRopeLength();
+    }
+    else if (bIsPull)
+    {
+        UPrimitiveComponent* PullComp2 = Cast<UPrimitiveComponent>(Point->GetMeshComponent());
+        if (PullComp2)
+            CurrentLength = FVector::Distance(OwnerCharacter->GetActorLocation(), PullComp2->GetComponentLocation());
     }
     else if (ConstraintComponent && ConstraintComponent->IsActive())
     {
         CurrentLength = ConstraintComponent->GetRopeLength();
     }
 
-    if (CurrentLength > 0.f && AttachComponent)
+    if (CurrentLength > 0.f)
     {
         AttachComponent->UpdateVisualCableLength(CurrentLength, DeltaTime);
     }
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("[RopeClimb] Current Rope Length: %.2f"), CurrentLength);
-    
-    ProcessClimbing(DeltaTime);
+
+    ProcessRopeLength(DeltaTime);
 }
 
-void URopeLengthControllerComponent::SetClimbInput(float Value)
+void URopeLengthControllerComponent::SetRopeLengthInput(float Value)
 {
-    ClimbInput = FMath::Clamp(Value, -1.f, 1.f);
-    const bool bIsClimbing = !FMath::IsNearlyZero(ClimbInput);
-    
-    if (IsComponentTickEnabled() != bIsClimbing)
+    RopeLengthInput = FMath::Clamp(Value, -1.f, 1.f);
+    const bool bIsAdjusting = !FMath::IsNearlyZero(RopeLengthInput);
+
+    if (IsComponentTickEnabled() != bIsAdjusting)
     {
-        SetComponentTickEnabled(bIsClimbing);
-        CLIMB_LOG(LogTemp, Verbose, TEXT("[RopeClimb] Tick %s"), bIsClimbing ? TEXT("ENABLED") : TEXT("DISABLED"));
+        SetComponentTickEnabled(bIsAdjusting);
+        ROPE_LENGHT_LOG(LogTemp, Verbose,
+            TEXT("[RopeLength] Tick %s"),
+            bIsAdjusting ? TEXT("ENABLED") : TEXT("DISABLED"));
     }
-    
+
     if (SwingComp && SwingComp->IsSwinging())
     {
-        SwingComp->SetClimbActive(bIsClimbing);
+        SwingComp->SetClimbActive(bIsAdjusting);
+    }
+
+    if (PullComp)
+    {
+        if (AttachComponent && AttachComponent->IsAttached())
+        {
+            ARopeAttachPoint* Point = AttachComponent->GetAttachedPoint();
+            if (Point && Point->GetAttachType() == ERopeAttachType::Pull)
+                PullComp->SetPullInput(RopeLengthInput);
+            else
+                PullComp->SetPullInput(0.f);
+        }
     }
 }
 
-void URopeLengthControllerComponent::ProcessClimbing(float DeltaTime)
+
+void URopeLengthControllerComponent::ProcessRopeLength(float DeltaTime)
 {
-    if (FMath::IsNearlyZero(ClimbInput)) return;
+    if (FMath::IsNearlyZero(RopeLengthInput))
+        return;
 
     if (!AttachComponent || !AttachComponent->IsAttached())
-    {
         return;
-    }
+
+    ARopeAttachPoint* Point = AttachComponent->GetAttachedPoint();
+    if (!Point)
+        return;
 
     const bool bIsSwinging = SwingComp && SwingComp->IsSwinging();
+    const bool bIsPull = Point->GetAttachType() == ERopeAttachType::Pull;
+
+    if (bIsPull && PullComp && PullComp->bObjectTooHeavy && RopeLengthInput > 0.f)
+        return;
+
     float CurrentLength = 0.f;
 
-    if (bIsSwinging) 
+    if (bIsSwinging)
     {
         CurrentLength = SwingComp->GetSwingRopeLength();
-    } 
-    else if (ConstraintComponent && ConstraintComponent->IsActive()) 
+    }
+    else if (bIsPull && ConstraintComponent)
+    {
+        CurrentLength = ConstraintComponent->GetCurrentPullRopeLength();
+    }
+    else if (ConstraintComponent && ConstraintComponent->IsActive())
     {
         CurrentLength = ConstraintComponent->GetRopeLength();
-    } 
-    else 
-    {
-        return; 
     }
 
-    // Compute new length
-    float NewLength = CurrentLength - (ClimbInput * ClimbSpeed * DeltaTime);
-    
-    // Clamp to min/max
-    if (AttachComponent)
+    if (CurrentLength <= 0.f)
+        return;
+
+    float NewLength = CurrentLength - (RopeLengthInput * RopeAdjustSpeed * DeltaTime);
+
+    if (bIsSwinging)
     {
-        NewLength = FMath::Clamp(
-            NewLength,
-            AttachComponent->GetMinRopeLength(),
-            AttachComponent->GetMaxRopeLength()
-        );
-    }
-    
-    // Apply to physics systems
-    if (bIsSwinging) 
-    {
+        float MinLength = AttachComponent->GetMinRopeLength();
+        float MaxLength = AttachComponent->GetMaxRopeLength();
+        NewLength = FMath::Clamp(NewLength, MinLength, MaxLength);
         SwingComp->SetBaseRopeLength(NewLength);
-    } 
-    else if (ConstraintComponent)
+    }
+    else if (bIsPull && ConstraintComponent)
     {
-        // SetRopeLength now handles visual sync internally
+        float MinLength = AttachComponent->GetPullMinRopeLength();
+        float MaxLength = AttachComponent->GetMaxRopeLength();
+        NewLength = FMath::Clamp(NewLength, MinLength, MaxLength);
+        ConstraintComponent->SetCurrentPullRopeLength(NewLength);
+    }
+    else if (ConstraintComponent && ConstraintComponent->IsActive())
+    {
         ConstraintComponent->SetRopeLength(NewLength);
     }
-
-    FColor DebugColor = bIsSwinging ? FColor::Cyan : FColor::Green;
-    CLIMB_SCREEN_MSG(104, DebugColor, TEXT("Climb: %.2f (Mode: %s)"), 
-        NewLength, bIsSwinging ? TEXT("SWING") : TEXT("STATIC"));
 }

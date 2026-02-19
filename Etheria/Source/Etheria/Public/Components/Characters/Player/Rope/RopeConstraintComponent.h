@@ -13,9 +13,12 @@
 
 #if UE_BUILD_SHIPPING
 	#define CONSTRAINT_LOG(Category, Verbosity, Format, ...)
+	#define CONSTRAINT_SCREEN_MSG(Key, Color, Format, ...)
 #else
 	#define CONSTRAINT_LOG(Category, Verbosity, Format, ...) \
 	if (bConstraintDebugMode) UE_LOG(Category, Verbosity, Format, ##__VA_ARGS__)
+	#define CONSTRAINT_SCREEN_MSG(Key, Color, Format, ...) \
+	if (bConstraintDebugMode && GEngine) GEngine->AddOnScreenDebugMessage(Key, 0.1f, Color, FString::Printf(Format, ##__VA_ARGS__))
 #endif
 
 class APlayerCharacter;
@@ -43,6 +46,8 @@ public:
 	FORCEINLINE bool IsActive() const { return bIsActive; }
 	FORCEINLINE ARopeAttachPoint* GetAnchor() const { return Anchor.Get(); }
 	FORCEINLINE float GetRopeLength() const { return RopeLength; }
+	FORCEINLINE float GetCurrentPullRopeLength() const { return CurrentPullRopeLength; }
+	void SetCurrentPullRopeLength(float NewLength) { CurrentPullRopeLength = FMath::Max(0.f, NewLength); }
 
 	void ActivateConstraint(ARopeAttachPoint* InAnchor, float InRopeLength);
 
@@ -69,6 +74,21 @@ private:
 
 	float RopeLength = 0.f;
 	bool bIsActive = false;
+	
+	// Tracking Pull
+	float CurrentPullRopeLength = 0.f;
+	float LastPlayerObjectDistance = 0.f;
+	FVector LastObjectLocation = FVector::ZeroVector;
+
+	// Détection blocage robuste
+	float BlockedAccumulator = 0.f;          // temps accumulé de tension sans mouvement objet
+	float BlockedConfirmDelay = 0.15f;       // secondes avant de confirmer le blocage
+	float UnblockedAccumulator = 0.f;        // temps accumulé sans tension
+	float UnblockedConfirmDelay = 0.1f;      // secondes avant de confirmer le déblocage
+	bool bIsObjectBlocked = false;
+
+	UPROPERTY(EditAnywhere, Category="Rope|Pull|Debug")
+	float BlockDetectionSensitivity = 3.f;   // cm/frame en dessous desquels on considère l'objet immobile
 	
 	/** Smoothing for constraint application (prevents jitter) */
 	UPROPERTY(EditAnywhere, Category="Rope|Constraint")

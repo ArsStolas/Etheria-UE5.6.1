@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
  */
 
@@ -32,6 +32,7 @@
 #include "World/Rope/RopeAttachPoint.h"
 #include "Components/Characters/Player/Movements/Swim/SwimComponent.h"
 #include "Components/Characters/Player/Rope/URopeCameraComponent.h"
+#include "Components/Characters/Player/Rope/Pulling/RopePullComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -82,6 +83,7 @@ APlayerCharacter::APlayerCharacter()
     RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
     RopeLengthControllerComponent = CreateDefaultSubobject<URopeLengthControllerComponent>(TEXT("BPC_RopeLengthController"));
     RopeCameraComponent = CreateDefaultSubobject<URopeCameraComponent>(TEXT("BPC_RopeCameraComponent"));
+    RopePullComponent = CreateDefaultSubobject<URopePullComponent>(TEXT("BPC_RopePullComponent"));
 
     // --- SWIM COMPONENTS ---
     SwimComponent = CreateDefaultSubobject<USwimComponent>(TEXT("BPC_Swim"));
@@ -281,10 +283,10 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
             EIC->BindAction(AttachRopeAction, ETriggerEvent::Started, this, &APlayerCharacter::OnRopeAttachPressed);
         }
         
-        if (ClimbRopeAction)
+        if (RopeLengthAction)
         {
-            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Triggered, this, &APlayerCharacter::ClimbRopeInput);
-            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopClimbRopeInput);
+            EIC->BindAction(RopeLengthAction, ETriggerEvent::Triggered, this, &APlayerCharacter::RopeLengthInput);
+            EIC->BindAction(RopeLengthAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopRopeLengthInput);
         }
     #pragma endregion
         
@@ -1039,45 +1041,54 @@ void APlayerCharacter::CheckRopeAttachMode()
 
     switch (LockedPoint->AttachType)
     {
-    case ERopeAttachType::Swing:
-        {
-            RopeSwingComponent->StopSwing();
+        case ERopeAttachType::Swing:
+            {
+                RopeSwingComponent->StopSwing();
+                break;
+            }
+        case ERopeAttachType::Pull:
+            GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Point Pull, pas de swing"));
             break;
-        }
-    case ERopeAttachType::Pull:
-        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Point Pull, pas de swing"));
-        break;
-    default:
-        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("AttachType non géré"));
-        break;
+        default:
+            GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("AttachType non géré"));
+            break;
     }
 }
 
-void APlayerCharacter::ClimbRopeInput(const FInputActionValue& Value)
+void APlayerCharacter::RopeLengthInput(const FInputActionValue& Value)
 {
-    float AxisVal = Value.Get<float>();
-    
-    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
-    {
+    const float AxisVal = Value.Get<float>();
+
+    if (!RopeAttachComponent || !RopeAttachComponent->IsAttached())
         return;
-    }
-    
+
+    ARopeAttachPoint* AttachPoint = RopeAttachComponent->GetAttachedPoint();
+    if (!AttachPoint)
+        return;
+
     if (RopeLengthControllerComponent)
-        RopeLengthControllerComponent->SetClimbInput(AxisVal);
-    
-    if (StateComponent)
-        StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Climbing);
+        RopeLengthControllerComponent->SetRopeLengthInput(AxisVal);
+
+    switch (AttachPoint->GetAttachType())
+    {
+        case ERopeAttachType::Swing:
+            if (StateComponent)
+                StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Climbing);
+            break;
+
+        case ERopeAttachType::Pull:
+            if (StateComponent)
+                StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Pulling);
+            break;
+
+        default: break;
+    }
 }
 
-void APlayerCharacter::StopClimbRopeInput(const FInputActionValue& Value)
+void APlayerCharacter::StopRopeLengthInput(const FInputActionValue& Value)
 {
-    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
-    {
-        return;
-    }
-    
     if (RopeLengthControllerComponent)
-        RopeLengthControllerComponent->SetClimbInput(0.f);
+        RopeLengthControllerComponent->SetRopeLengthInput(0.f);
 }
 
 #pragma endregion
