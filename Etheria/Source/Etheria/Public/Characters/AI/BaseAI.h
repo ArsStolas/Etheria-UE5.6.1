@@ -10,37 +10,65 @@
 #include "CoreMinimal.h"
 #include "Characters/BaseCharacter.h"
 #include "Components/Characters/CharacterStateComponent.h"
+#include "Engine/EngineTypes.h"
+#include "GameplayTagContainer.h"
 #include "BaseAI.generated.h"
 
 UENUM(BlueprintType)
 enum class EAIType : uint8
 {
-	Neutral,
-	Hostile
+    Friendly,
+    Neutral,
+    Hostile
 };
 
 UCLASS()
 class ETHERIA_API ABaseAI : public ABaseCharacter
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	ABaseAI();
+    ABaseAI();
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
-	EAIType AIType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")
+    EAIType AIType = EAIType::Neutral;
 
-	bool IsHostile() const { return AIType == EAIType::Hostile; }
-	bool IsNeutral() const { return AIType == EAIType::Neutral; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Teams")
+    FGameplayTagContainer TeamTags;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
-	UCharacterStateComponent* StateComp;
+    bool IsFriendly() const { return AIType == EAIType::Friendly; }
+    bool IsNeutral()  const { return AIType == EAIType::Neutral; }
+    bool IsHostile()  const { return AIType == EAIType::Hostile; }
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
-	class UCombatComponent* CombatComp;
+    UFUNCTION(BlueprintCallable, Category="AI|Combat")
+    bool IsTargetHostile(AActor* InTargetActor) const;
 
-	virtual void TryAttack(AActor* TargetActor) { }
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
+    UCharacterStateComponent* StateComp = nullptr;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
+    class UCombatComponent* CombatComp = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat")
+    AActor* TargetActor = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat", meta=(ClampMin="100", ClampMax="1000"))
+    float AttackRange = 300.f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI|Combat")
+    FTimerHandle CombatTimerHandle;
+
+    virtual void TryAttack(AActor* InTargetActor);
+
+    UFUNCTION(BlueprintCallable, Category="AI|Combat")
+    void StartHostileCombatLoop();
 
 protected:
-	virtual void BeginPlay() override;
+    virtual void BeginPlay() override;
+
+    UFUNCTION(BlueprintCallable, Category="AI|Teams")
+    virtual void SetupTeamTags();
+
+    UFUNCTION(BlueprintCallable, Category="Combat")
+    virtual void PerformAIAttack(AActor* InTargetActor);
 };
