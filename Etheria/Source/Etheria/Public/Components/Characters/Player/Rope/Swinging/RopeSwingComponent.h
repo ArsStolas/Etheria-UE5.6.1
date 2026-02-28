@@ -183,7 +183,7 @@ private:
     
     /** Minimum speed required to detach from rope */
     UPROPERTY(EditAnywhere, Category="Rope|Swing|Jump")
-    float MinSpeedToDetach = 500.f;
+    float MinSpeedToDetach = 250.f;
 
     /** Multiplier applied to current swing velocity */
     UPROPERTY(EditAnywhere, Category="Rope|Swing|Jump")

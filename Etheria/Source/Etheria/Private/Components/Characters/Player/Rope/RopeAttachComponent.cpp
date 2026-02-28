@@ -100,52 +100,44 @@ void URopeAttachComponent::BeginPlay()
 void URopeAttachComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!CableComponent || !OwnerCharacter || !AttachedPoint.IsValid()) 
+
+    if (!CableComponent || !OwnerCharacter || !AttachedPoint.IsValid())
     {
         ROPE_LOG(LogTemp, Warning, TEXT("[RopeAttach] Tick DISABLED (guard) — CableComponent=%s OwnerCharacter=%s AttachedPoint=%s"),
-            CableComponent      ? TEXT("OK") : TEXT("NULL"),
-            OwnerCharacter      ? TEXT("OK") : TEXT("NULL"),
+            CableComponent          ? TEXT("OK") : TEXT("NULL"),
+            OwnerCharacter          ? TEXT("OK") : TEXT("NULL"),
             AttachedPoint.IsValid() ? TEXT("OK") : TEXT("NULL"));
         SetComponentTickEnabled(false);
         return;
     }
 
-    // Get actual distance between player and anchor
-    FVector PlayerLoc = OwnerCharacter->GetActorLocation();
-    FVector AnchorLoc = AttachedPoint->GetActorLocation();
-    float TrueDistance = FVector::Distance(PlayerLoc, AnchorLoc);
+    const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
+    const FVector AnchorLoc = AttachedPoint->GetAnchorLocation(); // << ICI
+    const float TrueDistance = FVector::Distance(PlayerLoc, AnchorLoc);
 
-    // Smoothly interpolate visual length towards target
-    float CurrentVisual = CableComponent->CableLength;
     float TargetVisual = TargetCableLength;
-    
-    // Allow some slack: if actual distance is larger than target, give some extra length
-    // This prevents visual disconnect and makes rope feel more natural
+
     float SlackAmount = FMath::Max(0.f, TrueDistance - TargetCableLength);
-    if (SlackAmount > 10.f) // Only add slack if significant
+    if (SlackAmount > 10.f)
     {
         TargetVisual = TrueDistance + RopeLengthOffset;
     }
-    
-    // Interpolate smoothly
+
     CableComponent->CableLength = FMath::FInterpTo(
-        CurrentVisual,
+        CableComponent->CableLength,
         TargetVisual,
         DeltaTime,
         CableLengthInterpSpeed
     );
 
-    // Update tension-based width
     float TensionRatio = FMath::Clamp(
         (TrueDistance - MinRopeLength) / (MaxRopeLength - MinRopeLength),
         0.f, 1.f
     );
 
-    float NewCableWidth = FMath::Lerp(MinRopeWidth, MaxRopeWidth, TensionRatio * TensionWidthMultiplier);
-    CableComponent->CableWidth = NewCableWidth;
-    
-    ROPE_SCREEN_MSG(200, FColor::Cyan, TEXT("Cable: Target=%.0f Current=%.0f TrueDist=%.0f"), 
+    CableComponent->CableWidth = FMath::Lerp(MinRopeWidth, MaxRopeWidth, TensionRatio * TensionWidthMultiplier);
+
+    ROPE_SCREEN_MSG(200, FColor::Cyan, TEXT("Cable: Target=%.0f Current=%.0f TrueDist=%.0f"),
         TargetCableLength, CableComponent->CableLength, TrueDistance);
 }
 
@@ -162,40 +154,34 @@ void URopeAttachComponent::AttachRope(ARopeAttachPoint* TargetPoint)
     AttachedPoint = TargetPoint;
 
     const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
-    const FVector AnchorLoc = TargetPoint->GetActorLocation();
+    const FVector AnchorLoc = TargetPoint->GetAnchorLocation();
 
     const float RopeLength = FVector::Dist(PlayerLoc, AnchorLoc);
 
-    // Visual setup - Attach to the point's root with an offset
     TargetCableLength = RopeLength + RopeLengthOffset;
     CableComponent->CableLength = TargetCableLength;
-    
-    // Attach to the anchor point
-    CableComponent->SetAttachEndToComponent(TargetPoint->GetRootComponent(), NAME_None);
-    
-    // Apply vertical offset to raise the attachment point
-    CableComponent->EndLocation = FVector(0.f, 0.f, AnchorAttachmentOffset);
-    
+
+    // Attache au AnchorPoint component directement
+    CableComponent->SetAttachEndToComponent(TargetPoint->GetAnchorComponent(), NAME_None);
+    CableComponent->EndLocation = FVector::ZeroVector; // Plus besoin d'offset manuel
+
     CableComponent->SetVisibility(true);
-    
-    // Enable tick for smooth updates
+
     SetComponentTickEnabled(true);
-    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Tick ENABLED — attached to %s | Length: %.2f"), 
+    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Tick ENABLED — attached to %s | Length: %.2f"),
         *TargetPoint->GetName(), RopeLength);
-    
-    // Physics setup
+
     OwnerCharacter->GetRopeConstraintComponent()->ActivateConstraint(
         TargetPoint,
         RopeLength
     );
 
-    // Lock setup
     if (LockComponent)
     {
         LockComponent->SetPhysicallyAttached(true);
     }
 
-    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Rope attached to %s - Length: %.2f"), 
+    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Rope attached to %s - Length: %.2f"),
         *TargetPoint->GetName(), RopeLength);
 }
 

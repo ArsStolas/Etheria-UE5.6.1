@@ -21,6 +21,20 @@ ARopeAttachPoint::ARopeAttachPoint()
 	MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	MeshComponent->SetCollisionObjectType(ECC_PhysicsBody);
 	MeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
+
+	// Point d'ancrage positionnable librement dans l'éditeur
+	AnchorPoint = CreateDefaultSubobject<USceneComponent>(TEXT("AnchorPoint"));
+	AnchorPoint->SetupAttachment(MeshComponent);
+	AnchorPoint->SetRelativeLocation(FVector::ZeroVector);
+}
+
+FVector ARopeAttachPoint::GetAnchorLocation() const
+{
+	if (AnchorPoint)
+	{
+		return AnchorPoint->GetComponentLocation();
+	}
+	return GetActorLocation();
 }
 
 void ARopeAttachPoint::BeginPlay()
