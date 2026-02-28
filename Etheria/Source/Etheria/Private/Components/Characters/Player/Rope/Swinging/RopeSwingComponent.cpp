@@ -5,7 +5,7 @@
  * Class: RopeSwingComponent - Source
 */
 
-#include "Components/Characters/Player/Rope/RopeSwingComponent.h"
+#include "Components/Characters/Player/Rope/Swinging//RopeSwingComponent.h"
 #include "Characters/Players/PlayerCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/Characters/Player/Rope/RopeAttachComponent.h"
@@ -45,7 +45,16 @@ void URopeSwingComponent::BeginPlay()
 void URopeSwingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    if (bIsSwinging) UpdateSwing(DeltaTime);
+
+    // Guard : si le swing s'est arrêté mais que le tick tourne encore, on se coupe proprement
+    if (!bIsSwinging)
+    {
+        PrimaryComponentTick.SetTickFunctionEnable(false);
+        SWING_LOG(LogTemp, Warning, TEXT("[RopeSwing] Tick DISABLED (guard) — bIsSwinging=false, shutting down"));
+        return;
+    }
+
+    UpdateSwing(DeltaTime);
 }
 
 void URopeSwingComponent::StartSwing()
@@ -60,7 +69,7 @@ void URopeSwingComponent::StartSwing()
         OwnerCharacter->GetStateComponent()->SetMovementState(EtheriaTags::State_Movement_Rope_Swinging);
     }
 
-    InitialSwingLocation = OwnerCharacter->GetActorLocation(); // Lock initial position
+    InitialSwingLocation = OwnerCharacter->GetActorLocation();
     const FVector Anchor = SwingPoint->GetActorLocation();
     
     BaseRopeLength = FVector::Dist(InitialSwingLocation, Anchor);
@@ -73,21 +82,21 @@ void URopeSwingComponent::StartSwing()
     bIsSwinging = true;
     bFirstFrame = true;
     
-    // Switch to MOVE_Custom to prevent Unreal from applying default forces
     MoveComp->SetMovementMode(MOVE_Custom); 
     
     if(ConstraintComponent) ConstraintComponent->DeactivateConstraint();
 
     PrimaryComponentTick.SetTickFunctionEnable(true);
+    SWING_LOG(LogTemp, Log, TEXT("[RopeSwing] Tick ENABLED — swing started on %s | Length=%.2f | InitVel=%.2f"),
+        *SwingPoint->GetName(), RopeLength, SwingVelocity.Size());
     
-    bIsSwinging = true;
     OnSwingStarted.Broadcast();
     
     SWING_LOG(LogTemp, Warning, TEXT("SWING START: Length = %f | Initial Vel = %f | Player Pos = %s"), 
         RopeLength, SwingVelocity.Size(), *OwnerCharacter->GetActorLocation().ToString());
 }
 
-void URopeSwingComponent::StopSwing()
+void URopeSwingComponent::StopSwing(bool bDetaching)
 {
     if (!bIsSwinging) return;
     
@@ -98,25 +107,28 @@ void URopeSwingComponent::StopSwing()
 
     bIsSwinging = false;
     PrimaryComponentTick.SetTickFunctionEnable(false);
+    SWING_LOG(LogTemp, Log, TEXT("[RopeSwing] Tick DISABLED — swing stopped | FinalVel=%.2f | PlayerPos=%s"),
+        SwingVelocity.Size(), *OwnerCharacter->GetActorLocation().ToString());
     
     bFirstFrame = true; 
 
     if (MoveComp)
     {
-        MoveComp->SetMovementMode(MOVE_Falling); // Return control to Unreal
+        MoveComp->SetMovementMode(MOVE_Falling);
         MoveComp->Velocity = SwingVelocity;
     }
 
-    if (ConstraintComponent && AttachComponent && AttachComponent->IsAttached())
+    // Ne pas réactiver le constraint si on est en train de se détacher complètement
+    // (ex: TryJumpOffRope) — DetachRope s'occupera de le désactiver juste après,
+    // ce qui évite une frame fantôme où le constraint bloque la vélocité de lancement
+    if (!bDetaching && ConstraintComponent && AttachComponent && AttachComponent->IsAttached())
     {
         if (ARopeAttachPoint* Point = LockComponent->GetLockedPoint())
         {
-            // Reactivate simple distance constraint for static hanging
             ConstraintComponent->ActivateConstraint(Point, RopeLength);
         }
     }
     
-    bIsSwinging = false;
     OnSwingStopped.Broadcast();
     
     SWING_LOG(LogTemp, Warning, TEXT("SWING STOP: Final Vel = %f | Player Pos = %s"), 
@@ -147,7 +159,6 @@ void URopeSwingComponent::UpdateSwing(float DeltaTime)
     ApplyGravity(SwingVelocity, DeltaTime);
     ApplyAirResistance(SwingVelocity, DeltaTime);
     
-    // Reduce input to prevent "rocket effect"
     FVector RopeDir = (CurrentPos - AnchorLoc).GetSafeNormal();
     ApplyPlayerInputForce(SwingVelocity, RopeDir, DeltaTime);
 
@@ -158,7 +169,6 @@ void URopeSwingComponent::UpdateSwing(float DeltaTime)
     UpdateDynamicSlack(DeltaTime, RopeDir);
     
     // --- CONSTRAINT ---
-    // Increase stiffness to prevent player from moving away from rope
     SolveRopeConstraint(NextPos, SwingVelocity, AnchorLoc, DeltaTime);
 
     // --- APPLICATION ---
@@ -190,21 +200,15 @@ void URopeSwingComponent::UpdateDynamicSlack(float DeltaTime, const FVector& Rop
         return;
     }
     
-    // Vitesse verticale
     const float VerticalSpeed = SwingVelocity.Z;
 
-    // Angle par rapport au bas du swing
     const float DotDown =
         FVector::DotProduct(-RopeDir, FVector::UpVector);
 
-    // 1 = bas du swing, 0 = horizontal, négatif = au-dessus
     const float AngleFactor = FMath::Clamp(DotDown, 0.f, 1.f);
 
     float TargetSlack = 0.f;
 
-    // =========================
-    // MONTÉE → SLACK
-    // =========================
     if (VerticalSpeed > SlackVerticalSpeedThreshold)
     {
         TargetSlack =
@@ -213,9 +217,6 @@ void URopeSwingComponent::UpdateDynamicSlack(float DeltaTime, const FVector& Rop
             FMath::Clamp(VerticalSpeed / 600.f, 0.f, 1.f);
     }
 
-    // =========================
-    // CALCUL FINAL
-    // =========================
     const float TargetEffectiveLength = BaseRopeLength + TargetSlack;
 
     const float InterpSpeed =
@@ -268,10 +269,6 @@ void URopeSwingComponent::ApplyPlayerInputForce(
 
     float AppliedForce = SwingForce;
 
-    /* ===============================
-       EXISTING MODULATION (SAFE)
-       =============================== */
-
     if (bGoingUp)
     {
         AppliedForce *= 0.35f;
@@ -281,15 +278,7 @@ void URopeSwingComponent::ApplyPlayerInputForce(
         AppliedForce *= 1.1f;
     }
 
-    /* ===============================
-       PUMP TIMING (BONUS IMPULSE)
-       =============================== */
-
     TryConsumePump(CurrentVelocity, TangentDir);
-
-    /* ===============================
-       CLAMP MAX VELOCITY
-       =============================== */
 
     const float SpeedAlongTangent =
         FVector::DotProduct(CurrentVelocity, TangentDir);
@@ -310,13 +299,11 @@ bool URopeSwingComponent::TryConsumePump(
 {
     bPumpActive = false;
 
-    // Reset when moving upward clearly
     if (CurrentVelocity.Z > PumpResetVerticalSpeed)
     {
         bPumpConsumedThisSwing = false;
     }
 
-    // Detect passage through bottom of swing
     const bool bPassedBottom =
         LastVerticalSpeed < 0.f &&
         CurrentVelocity.Z >= 0.f;
@@ -329,11 +316,9 @@ bool URopeSwingComponent::TryConsumePump(
     if (bPumpConsumedThisSwing)
         return false;
 
-    // PUMP VALID
     bPumpConsumedThisSwing = true;
     bPumpActive = true;
 
-    // Direct impulse (STRENGTH without DeltaTime multiplication)
     SwingVelocity += TangentDir * PumpImpulseStrength;
 
     return true;
@@ -347,7 +332,6 @@ void URopeSwingComponent::SetBaseRopeLength(float NewBaseLength)
 {
     BaseRopeLength = NewBaseLength;
 
-    // Keep effective length consistent
     EffectiveRopeLength = FMath::Max(
         EffectiveRopeLength,
         BaseRopeLength
@@ -361,26 +345,21 @@ bool URopeSwingComponent::TryJumpOffRope(FVector& OutLaunchVelocity)
 
     const float CurrentSpeed = SwingVelocity.Size();
 
-    // Not enough speed → do not detach
     if (CurrentSpeed < MinSpeedToDetach)
     {
         SWING_LOG(LogTemp, Warning, TEXT("Jump blocked: not enough swing speed (%.0f)"), CurrentSpeed);
         return false;
     }
 
-    // Compute tangential direction (natural swing exit direction)
     FVector LaunchDir = SwingVelocity.GetSafeNormal();
 
-    // Compute boost based on current velocity
     FVector BoostVelocity = SwingVelocity * JumpBoostMultiplier;
 
-    // Add slight upward lift for gameplay feel
     BoostVelocity += FVector::UpVector * JumpUpwardBoost;
 
     OutLaunchVelocity = BoostVelocity;
 
-    // Stop swing system
-    StopSwing();
+    StopSwing(true);
 
     SWING_LOG(LogTemp, Warning, TEXT("Jump off rope! Speed=%.0f"), CurrentSpeed);
 
@@ -396,24 +375,18 @@ void URopeSwingComponent::SolveRopeConstraint(FVector& CurrentPosition, FVector&
     FVector ToPlayer = CurrentPosition - AnchorLocation;
     float CurrentDist = ToPlayer.Size();
 
-    // Tolerance: if we're approximately at the right distance, don't force correction
     const float Tolerance = 5.f;
 
     if (CurrentDist > RopeLength + Tolerance)
     {
         FVector RopeDir = ToPlayer / CurrentDist;
 
-        // LESS aggressive: uses weaker interpolation
-        // ConstraintStiffness = 20-30 is better (instead of 60)
-        // Lower = softer and more natural, Higher = stiffer
         FVector TargetPos = AnchorLocation + (RopeDir * RopeLength);
         CurrentPosition = FMath::VInterpTo(CurrentPosition, TargetPos, DeltaTime, ConstraintStiffness);
 
-        // Damp radial velocity when rope tightens
         float RadialSpeed = FVector::DotProduct(CurrentVelocity, RopeDir);
         if (RadialSpeed > 0.f)
         {
-            // Reduce energy: 0.8f = 20% loss, 1.1f = 10% loss
             CurrentVelocity -= RopeDir * RadialSpeed * 0.8f; 
         }
     }
@@ -427,23 +400,17 @@ void URopeSwingComponent::SolveRopeConstraint(FVector& CurrentPosition, FVector&
 
 bool URopeSwingComponent::ShouldStartSwing() const
 {
-    // 1. Basic component checks
     if (!AttachComponent || !AttachComponent->IsAttached()) return false;
     if (!LockComponent || !LockComponent->HasLockedPoint()) return false;
     if (!MoveComp) return false;
 
-    // 2. Verify the locked point is a "Swing" type attach point
     const ARopeAttachPoint* Point = LockComponent->GetLockedPoint();
     if (!Point || Point->AttachType != ERopeAttachType::Swing) return false;
     
-    // 3. Don't swing if on ground (Walking) or moving upward too fast (initial jump)
-    // We want to start swing when falling or at the apex of a jump
     if (MoveComp->IsMovingOnGround()) return false;
     
-    // Verify vertical velocity isn't too positive (prevent swing trigger during upward jump)
     if (MoveComp->Velocity.Z > FallingSpeedToStartSwing) return false; 
 
-    // 4. Safety raycast to prevent swinging too close to ground
     if (!IsFarEnoughFromGround()) return false;
 
     return true;
@@ -457,7 +424,6 @@ bool URopeSwingComponent::IsFarEnoughFromGround() const
 
     const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
     
-    // From capsule base to MinHeightAboveGround
     const FVector Start = OwnerCharacter->GetActorLocation();
     const FVector End   = Start - FVector(0,0, HalfHeight + MinHeightAboveGround);
 
@@ -467,7 +433,6 @@ bool URopeSwingComponent::IsFarEnoughFromGround() const
 
     bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
     
-    // Debug Height Check -> Red = Too Close | Yellow = Safe
     SWING_DEBUG_LINE(GetWorld(), Start, End, bHit ? FColor::Red : FColor::Yellow);
 
     return !bHit;
@@ -482,7 +447,6 @@ bool URopeSwingComponent::HasTouchedGround() const
     
     FCollisionQueryParams Params; Params.AddIgnoredActor(OwnerCharacter);
     return GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params) && SwingVelocity.Z < 50.f;
-
 }
 
 FVector URopeSwingComponent::GetCameraInputDirection() const
@@ -513,16 +477,14 @@ void URopeSwingComponent::OnRopeTensioned()
 
 void URopeSwingComponent::DrawVisualDebug(const FVector& Anchor, const FVector& PlayerPos, const FVector& InputDir)
 {
-    // Lignes de debug dans le monde
-    SWING_DEBUG_LINE(GetWorld(), Anchor, PlayerPos, FColor::Green); // Corde
-    SWING_DEBUG_LINE(GetWorld(), PlayerPos, PlayerPos + SwingVelocity * 0.2f, FColor::Cyan); // Vecteur Vélocité
+    SWING_DEBUG_LINE(GetWorld(), Anchor, PlayerPos, FColor::Green);
+    SWING_DEBUG_LINE(GetWorld(), PlayerPos, PlayerPos + SwingVelocity * 0.2f, FColor::Cyan);
     
     if (!InputDir.IsNearlyZero())
     {
-        SWING_DEBUG_LINE(GetWorld(), PlayerPos, PlayerPos + InputDir * 100.f, FColor::Yellow); // Direction Input
+        SWING_DEBUG_LINE(GetWorld(), PlayerPos, PlayerPos + InputDir * 100.f, FColor::Yellow);
     }
 
-    // --- UI SCREEN DEBUG ---
     FColor VelocityColor = (SwingVelocity.Size() > MaxSwingVelocity * 0.9f) ? FColor::Red : FColor::Cyan;
 
     SWING_SCREEN_MSG(1, FColor::White,  TEXT("=== ROPE SWING DEBUG ==="));
@@ -534,7 +496,6 @@ void URopeSwingComponent::DrawVisualDebug(const FVector& Anchor, const FVector& 
     FString ModeStr = (MoveComp->MovementMode == MOVE_Custom) ? TEXT("CUSTOM (Swing)") : TEXT("OTHER");
     SWING_SCREEN_MSG(6, FColor::White,  TEXT("Movement Mode: %s"), *ModeStr);
     
-    // Pump status
     SWING_SCREEN_MSG(
         8,
         bPumpActive ? FColor::Green : FColor::Silver,
@@ -552,7 +513,6 @@ void URopeSwingComponent::DrawVisualDebug(const FVector& Anchor, const FVector& 
         );
     }
     
-    // Slack amount
     SWING_SCREEN_MSG(
         9,
         FColor::Purple,

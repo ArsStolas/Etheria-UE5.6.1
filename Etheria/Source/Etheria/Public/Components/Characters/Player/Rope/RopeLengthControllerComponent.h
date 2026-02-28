@@ -66,7 +66,7 @@ private:
 	float RopeLengthInput = 0.f;
 
 	/** Climb Settings */
-	UPROPERTY(EditAnywhere, Category="Rope|Climb")
+	UPROPERTY(EditAnywhere, Category="Rope|LengthController|Climb")
 	float RopeAdjustSpeed = 300.f;
 
 	/** Debug */

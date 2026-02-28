@@ -103,6 +103,10 @@ void URopeAttachComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
     
     if (!CableComponent || !OwnerCharacter || !AttachedPoint.IsValid()) 
     {
+        ROPE_LOG(LogTemp, Warning, TEXT("[RopeAttach] Tick DISABLED (guard) — CableComponent=%s OwnerCharacter=%s AttachedPoint=%s"),
+            CableComponent      ? TEXT("OK") : TEXT("NULL"),
+            OwnerCharacter      ? TEXT("OK") : TEXT("NULL"),
+            AttachedPoint.IsValid() ? TEXT("OK") : TEXT("NULL"));
         SetComponentTickEnabled(false);
         return;
     }
@@ -176,6 +180,8 @@ void URopeAttachComponent::AttachRope(ARopeAttachPoint* TargetPoint)
     
     // Enable tick for smooth updates
     SetComponentTickEnabled(true);
+    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Tick ENABLED — attached to %s | Length: %.2f"), 
+        *TargetPoint->GetName(), RopeLength);
     
     // Physics setup
     OwnerCharacter->GetRopeConstraintComponent()->ActivateConstraint(
@@ -188,8 +194,6 @@ void URopeAttachComponent::AttachRope(ARopeAttachPoint* TargetPoint)
     {
         LockComponent->SetPhysicallyAttached(true);
     }
-    
-    
 
     ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Rope attached to %s - Length: %.2f"), 
         *TargetPoint->GetName(), RopeLength);
@@ -215,6 +219,7 @@ void URopeAttachComponent::DetachRope()
     }
     
     SetComponentTickEnabled(false);
+    ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Tick DISABLED — rope detached"));
 
     ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Rope detached"));
 }
@@ -230,6 +235,7 @@ void URopeAttachComponent::UpdateVisualCableLength(float NewTargetLength, float 
     if (!IsComponentTickEnabled())
     {
         SetComponentTickEnabled(true);
+        ROPE_LOG(LogTemp, Log, TEXT("[RopeAttach] Tick ENABLED — re-armed by UpdateVisualCableLength (TargetLength: %.2f)"), TargetCableLength);
     }
 
     ROPE_LOG(LogTemp, VeryVerbose, TEXT("[RopeAttach] Target length set to: %.2f"), TargetCableLength);

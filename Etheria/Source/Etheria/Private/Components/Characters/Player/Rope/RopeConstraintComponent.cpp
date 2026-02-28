@@ -57,10 +57,23 @@ void URopeConstraintComponent::ActivateConstraint(ARopeAttachPoint* InAnchor, fl
     {
         UPrimitiveComponent* PullTarget = Cast<UPrimitiveComponent>(InAnchor->GetMeshComponent());
         if (PullTarget)
+        {
             CurrentPullRopeLength = FVector::Distance(OwnerCharacter->GetActorLocation(), PullTarget->GetComponentLocation());
+            // Initialiser LastObjectLocation avec la vraie position dès l'activation
+            // Évite le faux ObjectMoveDist énorme au premier frame (ZeroVector → position réelle)
+            LastObjectLocation = PullTarget->GetComponentLocation();
+        }
         else
+        {
             CurrentPullRopeLength = InRopeLength;
+        }
     }
+
+    // Réinitialiser le timer de grâce pour la latence physique
+    PullForceGraceTimer = 0.f;
+    bIsObjectBlocked = false;
+    BlockedAccumulator = 0.f;
+    UnblockedAccumulator = 0.f;
 
     Anchor = InAnchor;
     RopeLength = InRopeLength;
@@ -127,7 +140,42 @@ void URopeConstraintComponent::SetRopeLength(float NewLength)
         MaxLength);
 }
 
+void URopeConstraintComponent::ResetPullState()
+{
+    PullForceGraceTimer = 0.f;
+    BlockedAccumulator = 0.f;
+    UnblockedAccumulator = 0.f;
+    bIsObjectBlocked = false;
+}
+
 void URopeConstraintComponent::ApplyConstraint(float DeltaTime)
+{
+    ARopeAttachPoint* AnchorPtr = Anchor.Get();
+    if (!AnchorPtr || !OwnerCharacter)
+        return;
+
+    CONSTRAINT_SCREEN_MSG(
+        999,
+        FColor::White,
+        TEXT("MODE = %d"),
+        Anchor->GetAttachType()
+    );
+
+    switch (Anchor->GetAttachType())
+    {
+    case ERopeAttachType::Pull:
+        HandlePullConstraint(DeltaTime);
+        break;
+
+    case ERopeAttachType::Swing:
+        ResetPullState();
+        HandleSwingConstraint(DeltaTime);
+    default:
+        break;
+    }
+}
+
+void URopeConstraintComponent::HandlePullConstraint(float DeltaTime)
 {
     const FVector AnchorLoc = Anchor->GetActorLocation();
     const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
@@ -135,133 +183,156 @@ void URopeConstraintComponent::ApplyConstraint(float DeltaTime)
     FVector ToPlayer = PlayerLoc - AnchorLoc;
     const float CurrentDist = ToPlayer.Size();
 
-    float EffectiveRopeLength = RopeLength;
-    if (Anchor->GetAttachType() == ERopeAttachType::Pull)
-        EffectiveRopeLength = CurrentPullRopeLength;
+    if (CurrentPullRopeLength <= 0.f)
+        CurrentPullRopeLength = CurrentDist;
 
-    // =========================================================
-    // MODE PULL
-    // =========================================================
-    if (Anchor->GetAttachType() == ERopeAttachType::Pull)
+    float EffectiveRopeLength = CurrentPullRopeLength;
+
+    UPrimitiveComponent* PullTarget =
+        Cast<UPrimitiveComponent>(Anchor->GetMeshComponent());
+
+    if (!PullTarget || !PullTarget->IsSimulatingPhysics())
+        return;
+
+    const bool bRopeIsTaut =
+        CurrentDist > EffectiveRopeLength + KINDA_SMALL_NUMBER;
+
+    if (!bRopeIsTaut)
     {
-        UPrimitiveComponent* PullTarget = Cast<UPrimitiveComponent>(Anchor->GetMeshComponent());
-        if (!PullTarget || !PullTarget->IsSimulatingPhysics())
-            return;
-
-        float ObjectMass = PullTarget->GetMass();
-        float PlayerMass = OwnerCharacter->GetCharacterMovement()->Mass;
-        float MassRatio = ObjectMass / FMath::Max(PlayerMass, 1.f);
-
-        float HeavyRatio = 1.5f;
-        if (URopePullComponent* PullComp = OwnerCharacter->GetRopePullComponent())
-            HeavyRatio = PullComp->GetHeavyObjectRatio();
-
-        const bool bRopeIsTaut = CurrentDist > EffectiveRopeLength + KINDA_SMALL_NUMBER;
-        const FVector RopeDir = bRopeIsTaut ? (ToPlayer / CurrentDist) : FVector::ZeroVector;
-
-        if (MassRatio <= HeavyRatio)
-        {
-            const FVector CurrentObjectLoc = PullTarget->GetComponentLocation();
-            const float ObjectMoveDist = FVector::Distance(CurrentObjectLoc, LastObjectLocation);
-
-            // Bloqué = corde tendue ET objet quasi immobile
-            const bool bObjectNotMoving = bRopeIsTaut && ObjectMoveDist < BlockDetectionSensitivity;
-
-            if (bObjectNotMoving)
-            {
-                BlockedAccumulator += DeltaTime;
-                UnblockedAccumulator = 0.f;
-            }
-            else
-            {
-                UnblockedAccumulator += DeltaTime;
-                BlockedAccumulator = FMath::Max(0.f, BlockedAccumulator - DeltaTime * 2.f);
-            }
-
-            if (bIsObjectBlocked && UnblockedAccumulator >= UnblockedConfirmDelay)
-                bIsObjectBlocked = false;
-
-            if (!bIsObjectBlocked && BlockedAccumulator >= BlockedConfirmDelay)
-                bIsObjectBlocked = true;
-
-            LastObjectLocation = CurrentObjectLoc;
-
-            CONSTRAINT_SCREEN_MSG(401,
-                bIsObjectBlocked ? FColor::Orange : FColor::Green,
-                TEXT("PULL | %s | ObjMove=%.2f Acc=%.2f Dist=%.1f Limit=%.1f"),
-                bIsObjectBlocked ? TEXT("BLOCKED") : TEXT("Following"),
-                ObjectMoveDist, BlockedAccumulator, CurrentDist, EffectiveRopeLength);
-
-            if (!bRopeIsTaut)
-                return;
-
-            if (!bIsObjectBlocked)
-            {
-                // Objet suit le joueur — le ramener dans la limite
-                const FVector TargetObjLoc = PlayerLoc - RopeDir * EffectiveRopeLength;
-                PullTarget->SetWorldLocation(TargetObjLoc, true);
-
-                FVector ObjVel = PullTarget->GetPhysicsLinearVelocity();
-                float RadialSpeed = FVector::DotProduct(ObjVel, -RopeDir);
-                if (RadialSpeed < 0.f)
-                {
-                    ObjVel -= (-RopeDir) * RadialSpeed;
-                    PullTarget->SetPhysicsLinearVelocity(ObjVel);
-                }
-            }
-            else
-            {
-                // Objet bloqué — contraindre le joueur
-                const FVector TargetLoc = AnchorLoc + RopeDir * EffectiveRopeLength;
-                const FVector SmoothedLoc = FMath::Lerp(PlayerLoc, TargetLoc, ConstraintSmoothness);
-                OwnerCharacter->SetActorLocation(SmoothedLoc, true);
-
-                if (MoveComp)
-                {
-                    FVector Vel = MoveComp->Velocity;
-                    float RadialSpeed = FVector::DotProduct(Vel, RopeDir);
-                    if (RadialSpeed > 0.f)
-                    {
-                        Vel -= RopeDir * RadialSpeed;
-                        MoveComp->Velocity = Vel;
-                    }
-                }
-            }
-        }
-        else
-        {
-            // Trop lourd — bloquer le joueur directement
-            LastObjectLocation = PullTarget->GetComponentLocation();
-
-            if (!bRopeIsTaut)
-                return;
-
-            const FVector TargetLoc = AnchorLoc + RopeDir * EffectiveRopeLength;
-            const FVector SmoothedLoc = FMath::Lerp(PlayerLoc, TargetLoc, ConstraintSmoothness);
-            OwnerCharacter->SetActorLocation(SmoothedLoc, true);
-
-            if (MoveComp)
-            {
-                FVector Vel = MoveComp->Velocity;
-                float RadialSpeed = FVector::DotProduct(Vel, RopeDir);
-                if (RadialSpeed > 0.f)
-                {
-                    Vel -= RopeDir * RadialSpeed;
-                    MoveComp->Velocity = Vel;
-                }
-            }
-
-            CONSTRAINT_SCREEN_MSG(401, FColor::Red,
-                TEXT("PULL | TOO HEAVY | Dist=%.1f Limit=%.1f"),
-                CurrentDist, EffectiveRopeLength);
-        }
-
+        ResetPullState();
         return;
     }
 
-    // =========================================================
-    // MODE SWING / STATIC
-    // =========================================================
+    const FVector RopeDir = ToPlayer / CurrentDist;
+
+    float ObjectMass = PullTarget->GetMass();
+    float PlayerMass = OwnerCharacter->GetCharacterMovement()->Mass;
+    float MassRatio = ObjectMass / FMath::Max(PlayerMass, 1.f);
+
+    float HeavyRatio = 1.5f;
+    if (URopePullComponent* PullComp = OwnerCharacter->GetRopePullComponent())
+        HeavyRatio = PullComp->GetHeavyObjectRatio();
+
+    // ======================================
+    // Block Detection
+    // ======================================
+
+    PullForceGraceTimer += DeltaTime;
+
+    float DynamicGrace =
+        PullForceGraceDuration * FMath::Clamp(MassRatio, 1.f, 3.f);
+
+    const bool bGraceExpired =
+        PullForceGraceTimer >= DynamicGrace;
+
+    FVector ObjVelocity =
+        PullTarget->GetPhysicsLinearVelocity();
+
+    float RadialSpeed =
+        FVector::DotProduct(ObjVelocity, -RopeDir);
+
+    const bool bObjectNotMoving =
+        bGraceExpired && RadialSpeed < 5.f;
+
+    if (bObjectNotMoving)
+    {
+        BlockedAccumulator += DeltaTime;
+        UnblockedAccumulator = 0.f;
+    }
+    else
+    {
+        UnblockedAccumulator += DeltaTime;
+        BlockedAccumulator = 0.f;
+        PullForceGraceTimer = 0.f;
+    }
+
+    if (bIsObjectBlocked &&
+        UnblockedAccumulator >= UnblockedConfirmDelay)
+        bIsObjectBlocked = false;
+
+    if (!bIsObjectBlocked &&
+        BlockedAccumulator >= BlockedConfirmDelay)
+        bIsObjectBlocked = true;
+
+    // ======================================
+    // OBJECT FOLLOWS
+    // ======================================
+
+    if (!bIsObjectBlocked && MassRatio <= HeavyRatio)
+    {
+        const FVector TargetObjLoc =
+            PlayerLoc - RopeDir * EffectiveRopeLength;
+
+        const FVector Correction =
+            TargetObjLoc - PullTarget->GetComponentLocation();
+
+        FVector DesiredVel =
+            Correction / FMath::Max(DeltaTime, KINDA_SMALL_NUMBER);
+
+        FVector CurrentVel =
+            PullTarget->GetPhysicsLinearVelocity();
+
+        FVector NewVel =
+            FMath::VInterpTo(CurrentVel, DesiredVel, DeltaTime, 8.f);
+
+        PullTarget->SetPhysicsLinearVelocity(NewVel);
+
+        if (CurrentDist < CurrentPullRopeLength)
+            CurrentPullRopeLength = CurrentDist;
+
+        CONSTRAINT_SCREEN_MSG(
+            401,
+            FColor::Green,
+            TEXT("PULL FOLLOW | Vel=%.1f"),
+            NewVel.Size()
+        );
+    }
+    else
+    {
+        // ==================================
+        // PLAYER CONSTRAINED
+        // ==================================
+
+        const FVector TargetLoc =
+            AnchorLoc + RopeDir * EffectiveRopeLength;
+
+        const FVector SmoothedLoc =
+            FMath::Lerp(PlayerLoc, TargetLoc, ConstraintSmoothness);
+
+        OwnerCharacter->SetActorLocation(SmoothedLoc, true);
+
+        if (MoveComp)
+        {
+            FVector Vel = MoveComp->Velocity;
+            float PlayerRadialSpeed =
+                FVector::DotProduct(Vel, RopeDir);
+
+            if (PlayerRadialSpeed > 0.f)
+            {
+                Vel -= RopeDir * PlayerRadialSpeed;
+                MoveComp->Velocity = Vel;
+            }
+        }
+
+        CONSTRAINT_SCREEN_MSG(
+            402,
+            FColor::Red,
+            TEXT("PLAYER CONSTRAINED")
+        );
+    }
+}
+
+void URopeConstraintComponent::HandleSwingConstraint(float DeltaTime)
+{
+    
+    const FVector AnchorLoc = Anchor->GetActorLocation();
+    const FVector PlayerLoc = OwnerCharacter->GetActorLocation();
+
+    FVector ToPlayer = PlayerLoc - AnchorLoc;
+    const float CurrentDist = ToPlayer.Size();
+
+    float EffectiveRopeLength = RopeLength;
+    
     if (CurrentDist <= EffectiveRopeLength || CurrentDist <= KINDA_SMALL_NUMBER)
         return;
 

@@ -21,7 +21,7 @@
 #include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
 #include "Components/Characters/Player/Rope/RopeLengthControllerComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
-#include "Components/Characters/Player/Rope/RopeSwingComponent.h"
+#include "Components/Characters/Player/Rope/Swinging/RopeSwingComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTarget/LockTargetComponent.h"

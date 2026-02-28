@@ -46,7 +46,7 @@ public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     void StartSwing();
-    void StopSwing();
+    void StopSwing(bool bDetaching = false);
     
     // SLACK DYNAMIQUE
     void SetBaseRopeLength(float NewLength);
@@ -111,36 +111,36 @@ private:
     FVector SwingVelocity = FVector::ZeroVector; 
 
     /* ===== TUNING ===== */
-    UPROPERTY(EditAnywhere, Category="Swing|Physics")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Physics")
     float GravityScale = 2.f;
-    UPROPERTY(EditAnywhere, Category="Swing|Physics")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Physics")
     float AirDrag = 0.3f; // Plus c'est haut, plus ça freine vite
-    UPROPERTY(EditAnywhere, Category="Swing|Control")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Control")
     float SwingForce = 600.f;
-    UPROPERTY(EditAnywhere, Category="Swing|Control")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Control")
     float MaxSwingVelocity = 1400.f;
 
     /* ===== PUMP TIMING ===== */
 
-    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Pump")
     float PumpBonusMultiplier = 1.35f;
 
-    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Pump")
     float PumpVerticalSpeedThreshold = 80.f; // |Z| proche du bas
 
-    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Pump")
     float PumpMinSpeed = 450.f; // vitesse mini pour autoriser pump
 
-    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Pump")
     float PumpCooldown = 0.35f;
     
     float LastVerticalSpeed = 0.f;
     bool bPumpConsumedThisSwing = false;
 
-    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Pump")
     float PumpImpulseStrength = 280.f;
 
-    UPROPERTY(EditAnywhere, Category="Swing|Pump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Pump")
     float PumpResetVerticalSpeed = 120.f; // quand on remonte assez
 
     float LastPumpTime = -1000.f;
@@ -154,16 +154,16 @@ private:
     // Effective length considering slack
     float EffectiveRopeLength;
 
-    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Slack")
     float MaxSlackLength = 120.f;
 
-    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Slack")
     float SlackInterpSpeed = 6.f;
 
-    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Slack")
     float SlackVerticalSpeedThreshold = 50.f;
     
-    UPROPERTY(EditAnywhere, Category="Swing|Slack")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Slack")
     float SlackReleaseSpeed = 10.f; // retension speed
     
     bool bClimbInputActive = false;
@@ -171,26 +171,26 @@ private:
     // Paramètres Anti-Choc
     UPROPERTY()
     FVector InitialSwingLocation;
-    UPROPERTY(EditAnywhere, Category="Swing|Physics")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Physics")
     float ConstraintStiffness = 20.f; // Vitesse de rappel (plus c'est haut, plus c'est sec)
 
-    UPROPERTY(EditAnywhere, Category="Swing|Physics")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Physics")
     float FallingSpeedToStartSwing = 100.f;
-    UPROPERTY(EditAnywhere, Category="Swing|Physics")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Physics")
     float MinHeightAboveGround = 80.f;
-    UPROPERTY(EditAnywhere, Category="Swing|Physics")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Physics")
     float GroundStopDistance = 30.f;
     
     /** Minimum speed required to detach from rope */
-    UPROPERTY(EditAnywhere, Category="Swing|Jump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Jump")
     float MinSpeedToDetach = 500.f;
 
     /** Multiplier applied to current swing velocity */
-    UPROPERTY(EditAnywhere, Category="Swing|Jump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Jump")
     float JumpBoostMultiplier = 1.1f;
 
     /** Extra upward boost */
-    UPROPERTY(EditAnywhere, Category="Swing|Jump")
+    UPROPERTY(EditAnywhere, Category="Rope|Swing|Jump")
     float JumpUpwardBoost = 250.f;
     
     /* Debug */
