@@ -76,6 +76,11 @@ public:
     void StartHostileCombatLoop();
 
 protected:
+    /** Si false, la boucle hostile (timer TryAttack) n'est pas démarrée. Surcharger dans BaseBoss pour laisser le BT gérer le combat. */
+    UFUNCTION(BlueprintNativeEvent, Category="AI|Combat")
+    bool ShouldUseHostileCombatLoop() const;
+    virtual bool ShouldUseHostileCombatLoop_Implementation() const { return true; }
+
     virtual void BeginPlay() override;
 
     UFUNCTION(BlueprintCallable, Category="AI|Teams")

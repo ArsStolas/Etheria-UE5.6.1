@@ -57,7 +57,7 @@ void ABaseAI::BeginPlay()
 
     SetupTeamTags();
 
-    if (IsHostile())
+    if (IsHostile() && ShouldUseHostileCombatLoop())
     {
         GetWorldTimerManager().SetTimerForNextTick(this, &ABaseAI::StartHostileCombatLoop);
     }

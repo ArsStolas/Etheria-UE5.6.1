@@ -36,6 +36,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI")
 	AActor* GetTargetActor() const { return TargetActor; }
 
+	/** True si un RequestMoveToLocation est en cours. */
+	UFUNCTION(BlueprintPure, Category="AI")
+	bool HasMoveToLocationInProgress() const { return bHasMoveToLocationDestination; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
@@ -43,7 +47,7 @@ protected:
 	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
 
 	UFUNCTION()
-	void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+	virtual void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
 	void UpdateChasePath();
 	void UpdateMoveToLocationPath();
