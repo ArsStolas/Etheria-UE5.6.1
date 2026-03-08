@@ -179,26 +179,36 @@ void UEquipmentComponent::ApplyWeaponVisuals(const UWeaponData* DataToApply)
 
 void UEquipmentComponent::RefreshFromActiveSlot()
 {
-    UWeaponData* DataToApply = DefaultUnarmedData;
+	UWeaponData* DataToApply = DefaultUnarmedData;
 
-    if (UItemDefinition* Def = GetItemDefInActiveSlot())
-    {
-        // Only treat as weapon if explicitly marked and has a weapon profile.
-        const bool bIsWeapon = (Def->type == EItemType::Weapon);
-        if (bIsWeapon && Def->weaponData)
-        {
-            DataToApply = Def->weaponData;
-        }
-    }
+	if (OverrideWeaponDataForAI)
+	{
+		DataToApply = OverrideWeaponDataForAI;
+	}
+	else if (UItemDefinition* Def = GetItemDefInActiveSlot())
+	{
+		// Only treat as weapon if explicitly marked and has a weapon profile.
+		const bool bIsWeapon = (Def->type == EItemType::Weapon);
+		if (bIsWeapon && Def->weaponData)
+		{
+			DataToApply = Def->weaponData;
+		}
+	}
 
-    // 1) Combat profile
-    if (Combat.IsValid())
-    {
-        Combat->SetWeaponData(DataToApply);
-    }
+	// 1) Combat profile
+	if (Combat.IsValid())
+	{
+		Combat->SetWeaponData(DataToApply);
+	}
 
-    // 2) Visuals (hands)
-    ApplyWeaponVisuals(DataToApply);
+	// 2) Visuals (hands)
+	ApplyWeaponVisuals(DataToApply);
+}
+
+void UEquipmentComponent::SetOverrideWeaponDataForAI(UWeaponData* InWeaponData)
+{
+	OverrideWeaponDataForAI = InWeaponData;
+	RefreshFromActiveSlot();
 }
 
 void UEquipmentComponent::HandleActiveSlotChanged(int32 /*NewIndex*/)
