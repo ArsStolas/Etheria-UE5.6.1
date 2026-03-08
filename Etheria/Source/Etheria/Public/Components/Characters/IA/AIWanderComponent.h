@@ -18,6 +18,8 @@ class ETHERIA_API UAIWanderComponent : public UActorComponent
 public:
 	void StartWander();
 	void StopWander();
+	/** Appelé par le controller quand la destination wander est atteinte : pause WaitTime puis prochain point. */
+	void OnDestinationReached();
 
 	FTimerHandle WanderTimer;
 
@@ -28,7 +30,12 @@ protected:
 
 protected:
 	UPROPERTY(EditAnywhere, Category="Wander") float WanderRadius = 800.f;
-	UPROPERTY(EditAnywhere, Category="Wander") float WaitTime = 2.f;
+	/** Pause (s) à l'arrivée avant de repartir vers un nouveau point. 0 = repart immédiatement. */
+	UPROPERTY(EditAnywhere, Category="Wander", meta=(ClampMin="0"))
+	float WaitTime = 2.f;
+	/** Délai avant le premier StartWander après BeginPlay (s). */
+	UPROPERTY(EditAnywhere, Category="Wander", meta=(ClampMin="0.01"))
+	float StartWanderDelay = 0.5f;
 
 private:
 };

@@ -52,3 +52,13 @@ void UAnimNotifyState_ComboWindow::NotifyEnd(
         }
     }
 }
+
+void UAnimNotifyState_ComboWindow::NotifyTick(
+    USkeletalMeshComponent* MeshComp,
+    UAnimSequenceBase* Animation,
+    float FrameDeltaTime,
+    const FAnimNotifyEventReference& EventReference)
+{
+    // Optionnel : logique par frame pendant la fenêtre de combo (ex. vérifier input).
+    // Pour l'instant on ne fait rien ; Begin/End suffisent pour ouvrir/fermer la fenêtre.
+}

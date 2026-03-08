@@ -21,11 +21,27 @@ ABaseAI::ABaseAI()
     AIType = EAIType::Neutral;
     PrimaryActorTick.bCanEverTick = true;
     AttackRange = 300.f;
+
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        MoveComp->MaxAcceleration = AIMaxAcceleration;
+        MoveComp->BrakingDecelerationWalking = AIBrakingDeceleration;
+        MoveComp->MaxWalkSpeed = DefaultMaxWalkSpeed;
+        MoveComp->bOrientRotationToMovement = true;
+    }
 }
 
 void ABaseAI::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        MoveComp->MaxAcceleration = AIMaxAcceleration;
+        MoveComp->BrakingDecelerationWalking = AIBrakingDeceleration;
+        MoveComp->MaxWalkSpeed = DefaultMaxWalkSpeed;
+        MoveComp->bOrientRotationToMovement = true;
+    }
 
     if (!StateComp)
     {
