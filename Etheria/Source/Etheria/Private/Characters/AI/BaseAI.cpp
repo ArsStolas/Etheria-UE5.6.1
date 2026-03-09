@@ -96,7 +96,7 @@ bool ABaseAI::IsTargetHostile(AActor* InTargetActor) const
 
     if (ABaseAI* TargetAI = Cast<ABaseAI>(InTargetActor))
     {
-        return !TeamTags.HasAny(TargetAI->TeamTags);
+        return false;
     }
 
     return false;
