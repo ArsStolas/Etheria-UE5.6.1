@@ -21,7 +21,6 @@ class UMaterialInterface;
 class UMeshComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHealthChangedSignature, float, NewHealth, float, MaxHealth);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeathSignature);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API UHealthComponent : public UActorComponent
@@ -69,9 +68,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Health")
 	FOnHealthChangedSignature OnHealthChanged;
 
-	UPROPERTY(BlueprintAssignable, Category="Health")
-	FOnDeathSignature OnDeath;
-
+	TWeakObjectPtr<AActor> OwnerActor;
 	TWeakObjectPtr<ABaseCharacter> OwnerCharacter;
 	TWeakObjectPtr<UCharacterStateComponent> OwnerStateComponent;
 
