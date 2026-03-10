@@ -20,7 +20,7 @@ public class Etheria : ModuleRules
 			"NavigationSystem", 
 			"GameplayTasks",
 			"GameplayTags",
-			"GameplayStateTreeModule",
+			//"GameplayStateTreeModule",
 			"CableComponent",
 			"PhysicsCore"
 		});

@@ -210,3 +210,8 @@ float UCombatComponent::GetCurrentAttackRange() const
     }
     return 0.f;
 }
+
+void UCombatComponent::RequestComboAdvanceAI()
+{
+    bComboAdvanceRequested = true;
+}

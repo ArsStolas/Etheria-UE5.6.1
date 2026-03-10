@@ -21,6 +21,10 @@ UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Rope_Detached, "State.Movemen
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Rope_Climbing, "State.Movement.Rope.Climbing");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Rope_Pulling, "State.Movement.Rope.Pulling");
 
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Swim, "State.Movement.Swim");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Swim_Surface, "State.Movement.Swim.Surface");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Swim_Underwater, "State.Movement.Swim.Underwater");
+
 // === Combat ===
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat, "State.Combat");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Combat_Attacking, "State.Combat.Attacking");

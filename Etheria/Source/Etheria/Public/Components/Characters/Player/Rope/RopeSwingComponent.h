@@ -31,6 +31,9 @@ class URopeLockComponent;
 class ARopeAttachPoint;
 class UCharacterMovementComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSwingStarted);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSwingStopped);
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API URopeSwingComponent : public UActorComponent
 {
@@ -47,6 +50,14 @@ public:
     
     // SLACK DYNAMIQUE
     void SetBaseRopeLength(float NewLength);
+    
+    bool TryJumpOffRope(FVector& OutLaunchVelocity);
+    
+    UPROPERTY(BlueprintAssignable)
+    FOnSwingStarted OnSwingStarted;
+
+    UPROPERTY(BlueprintAssignable)
+    FOnSwingStopped OnSwingStopped;
     
     FORCEINLINE void SetClimbActive(bool bActive) { bClimbInputActive = bActive; }
 
@@ -169,6 +180,18 @@ private:
     float MinHeightAboveGround = 80.f;
     UPROPERTY(EditAnywhere, Category="Swing|Physics")
     float GroundStopDistance = 30.f;
+    
+    /** Minimum speed required to detach from rope */
+    UPROPERTY(EditAnywhere, Category="Swing|Jump")
+    float MinSpeedToDetach = 500.f;
+
+    /** Multiplier applied to current swing velocity */
+    UPROPERTY(EditAnywhere, Category="Swing|Jump")
+    float JumpBoostMultiplier = 1.1f;
+
+    /** Extra upward boost */
+    UPROPERTY(EditAnywhere, Category="Swing|Jump")
+    float JumpUpwardBoost = 250.f;
     
     /* Debug */
     UPROPERTY(EditAnywhere, Category="Rope|Swing|Debug")

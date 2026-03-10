@@ -29,6 +29,9 @@ namespace EtheriaTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope_Climbing);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Rope_Pulling);
 	
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Swim)
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Swim_Surface)
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Swim_Underwater)
 
 	// === Combat ===
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Combat);

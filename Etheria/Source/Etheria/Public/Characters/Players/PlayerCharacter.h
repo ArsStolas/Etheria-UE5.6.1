@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: 0nnen
  * Class: PlayerCharacter - Header
  */
 
@@ -12,12 +12,14 @@
 #include "Characters/BaseCharacter.h"
 #include "PlayerCharacter.generated.h"
 
+class UCableComponent;
 class URopeLengthControllerComponent;
 class URopeConstraintComponent;
 class URopeSwingComponent;
 class URopeAttachComponent;
 class URopeLockComponent;
 class URopeDetectionComponent;
+class URopeCameraComponent;
 struct FInputActionValue;
 
 class USpringArmComponent;
@@ -30,6 +32,7 @@ class UInventoryComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
 class UQuestComponent;
+class USwimComponent;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -75,15 +78,18 @@ public:
     FORCEINLINE float GetHorizontalInput() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE float GetVerticalInput() const   { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
+    FORCEINLINE UCableComponent* GetRopeCableComponent() const { return RopeCableComponent; }
     FORCEINLINE URopeDetectionComponent* GetRopeDetectionComponent() const { return RopeDetectionComponent; }
     FORCEINLINE URopeAttachComponent* GetRopeAttachComponent() const { return RopeAttachComponent; }
     FORCEINLINE URopeLockComponent* GetRopeLockComponent() const { return RopeLockComponent; }
     FORCEINLINE URopeConstraintComponent* GetRopeConstraintComponent() const { return RopeConstraintComponent; }
     FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
     FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
-
-    // Simple accessor
+    FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
+    FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+    FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
     
+    // Simple accessor
     bool IsGrounded() const;
     
 protected:
@@ -119,9 +125,9 @@ protected:
     //UInteractionComponent* InteractionComponent;
 
     // --- LOCK TARGET ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Combat|LockTarget", meta=(AllowPrivateAccess="true"))
     ULockTargetComponent* LockTargetComponent;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="LockTarget", meta=(AllowPrivateAccess="true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Combat|LockTarget", meta=(AllowPrivateAccess="true"))
     ULockVisualComponent* LockVisualComponent;
 
     // --- QUEST TARGET ---
@@ -129,6 +135,10 @@ protected:
     UQuestComponent* QuestComponent;
 
     // --- ROPE ---
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
+    UCableComponent* RopeCableComponent;
+    
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
     URopeDetectionComponent* RopeDetectionComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
@@ -141,6 +151,16 @@ protected:
     URopeSwingComponent* RopeSwingComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
     URopeLengthControllerComponent* RopeLengthControllerComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Rope")
+    URopeCameraComponent* RopeCameraComponent;
+    
+    /** Socket name where the rope attaches on the character mesh*/
+    UPROPERTY(EditAnywhere, Category="Rope|Attachment")
+    FName RopeStartSocketName = TEXT("hand_r");
+    
+    // --- SWIM ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Movement", meta=(AllowPrivateAccess="true"))
+    USwimComponent* SwimComponent;
 
 #pragma endregion
 
@@ -203,11 +223,11 @@ protected:
     UInputAction* DodgeAction;
 
     // --- LOCK TARGET ---
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat|LockTarget")
     UInputAction* LockToggleAction;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat|LockTarget")
     UInputAction* LockSwitchLeftAction;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|LockTarget")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Combat|LockTarget")
     UInputAction* LockSwitchRightAction;
 
     // --- ROPE ---
@@ -216,6 +236,14 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Rope")
     UInputAction* ClimbRopeAction;
 
+    // --- SWIM ---
+    /** Optional swim dive input. If unset, DiveAction is used. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input|Swim", meta=(ToolTip="Optional swim dive input. If unset, DiveAction is used for swim too."))
+    UInputAction* SwimDiveAction = nullptr;
+
+    /** Optional swim sprint input. If unset, SprintAction is used. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input|Swim", meta=(ToolTip="Optional swim sprint input. If unset, SprintAction is used for swim sprint too."))
+    UInputAction* SwimSprintAction = nullptr;
 #pragma endregion
 
 // ============================================================
@@ -335,6 +363,10 @@ private:
     void CheckRopeAttachMode();
     void ClimbRopeInput(const FInputActionValue& Value);
     void StopClimbRopeInput(const FInputActionValue& Value);
+    
+    // --- Swim / Dive Input Routing ---
+    void OnDiveInputPressed();
+    void OnDiveInputReleased();
 
 #pragma endregion
 

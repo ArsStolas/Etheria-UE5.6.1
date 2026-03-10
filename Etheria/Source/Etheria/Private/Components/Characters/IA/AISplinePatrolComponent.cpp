@@ -10,9 +10,9 @@
 #include "DrawDebugHelpers.h"
 #include "NavigationSystem.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "TimerManager.h"
-#include "Navigation/PathFollowingComponent.h"
 
 UAISplinePatrolComponent::UAISplinePatrolComponent()
 {
@@ -32,6 +32,14 @@ void UAISplinePatrolComponent::BeginPlay()
     NextPointIndex          = 0;
     bReturningToSpline      = false;
     bIsChasing              = false;
+
+    if (ACharacter* OwnerChar = Cast<ACharacter>(GetOwner()))
+    {
+        if (UCharacterMovementComponent* MoveComp = OwnerChar->GetCharacterMovement())
+        {
+            CachedDefaultMaxWalkSpeed = MoveComp->MaxWalkSpeed;
+        }
+    }
 
     if (SplinePath)
     {
@@ -78,6 +86,21 @@ void UAISplinePatrolComponent::StartPatrol()
     else
     {
         InitFollowSplineStart();
+    }
+}
+
+void UAISplinePatrolComponent::SetChasing(bool bInChasing)
+{
+    bIsChasing = bInChasing;
+    if (bInChasing)
+    {
+        if (ACharacter* OwnerChar = Cast<ACharacter>(GetOwner()))
+        {
+            if (UCharacterMovementComponent* MoveComp = OwnerChar->GetCharacterMovement())
+            {
+                MoveComp->MaxWalkSpeed = CachedDefaultMaxWalkSpeed;
+            }
+        }
     }
 }
 
@@ -177,16 +200,8 @@ void UAISplinePatrolComponent::MoveToNextPoint_PointsMode()
     {
         if (AAIController_Base* AIController = Cast<AAIController_Base>(OwnerPawn->GetController()))
         {
-            FRotator LookAt = (Dest - OwnerPawn->GetActorLocation()).Rotation();
-            OwnerPawn->SetActorRotation(FRotator(0.f, LookAt.Yaw, 0.f));
-
-            FAIMoveRequest Request;
-            Request.SetGoalLocation(Dest);
-            Request.SetAcceptanceRadius(50.f);
-            Request.SetUsePathfinding(true);
-
             bIsMovingToPoint = true;
-            AIController->MoveTo(Request);
+            AIController->RequestMoveToLocation(Dest);
         }
     }
 
@@ -240,8 +255,11 @@ void UAISplinePatrolComponent::UpdateFollowSpline(float DeltaTime)
     USplineComponent* Spline = SplinePath->GetSpline();
     if (!Spline) return;
 
-    APawn* OwnerPawn = Cast<APawn>(GetOwner());
-    if (!OwnerPawn) return;
+    ACharacter* OwnerChar = Cast<ACharacter>(GetOwner());
+    if (!OwnerChar) return;
+
+    UCharacterMovementComponent* MoveComp = OwnerChar->GetCharacterMovement();
+    if (!MoveComp) return;
 
     const float SplineLength = Spline->GetSplineLength();
     if (SplineLength <= 0.f) return;
@@ -249,7 +267,7 @@ void UAISplinePatrolComponent::UpdateFollowSpline(float DeltaTime)
     const float DistanceStep = FollowSpeed * DeltaTime;
     if (DistanceStep <= 0.f) return;
 
-    static bool bForward = true;
+    MoveComp->MaxWalkSpeed = FollowSpeed;
 
     if (PatrolMode == ESplinePatrolMode::Loop)
     {
@@ -261,13 +279,13 @@ void UAISplinePatrolComponent::UpdateFollowSpline(float DeltaTime)
     }
     else
     {
-        if (bForward)
+        if (bFollowSplineForward)
         {
             CurrentDistanceOnSpline += DistanceStep;
             if (CurrentDistanceOnSpline > SplineLength)
             {
                 CurrentDistanceOnSpline = SplineLength;
-                bForward = false;
+                bFollowSplineForward = false;
             }
         }
         else
@@ -276,7 +294,7 @@ void UAISplinePatrolComponent::UpdateFollowSpline(float DeltaTime)
             if (CurrentDistanceOnSpline < 0.f)
             {
                 CurrentDistanceOnSpline = 0.f;
-                bForward = true;
+                bFollowSplineForward = true;
             }
         }
     }
@@ -292,37 +310,27 @@ void UAISplinePatrolComponent::UpdateFollowSpline(float DeltaTime)
         }
     }
 
-    if (ACharacter* Char = Cast<ACharacter>(GetOwner()))
+    if (UCapsuleComponent* Capsule = OwnerChar->GetCapsuleComponent())
     {
-        if (UCapsuleComponent* Capsule = Char->GetCapsuleComponent())
-        {
-            const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-            TargetLocation.Z += HalfHeight * 0.9f;
-        }
-
-        FHitResult Hit;
-        Char->SetActorLocation(TargetLocation, true, &Hit, ETeleportType::TeleportPhysics);
-    }
-    else if (APawn* Pawn = Cast<APawn>(GetOwner()))
-    {
-        FHitResult Hit;
-        Pawn->SetActorLocation(TargetLocation, true, &Hit, ETeleportType::TeleportPhysics);
-    }
-    else
-    {
-        GetOwner()->SetActorLocation(TargetLocation);
+        const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+        TargetLocation.Z += HalfHeight * 0.9f;
     }
 
-    FVector TangentDir = Spline->GetDirectionAtDistanceAlongSpline(CurrentDistanceOnSpline, ESplineCoordinateSpace::World);
-    FRotator LookAt = TangentDir.Rotation();
-    GetOwner()->SetActorRotation(FRotator(0.f, LookAt.Yaw, 0.f));
+    const FVector CurrentLocation = OwnerChar->GetActorLocation();
+    const FVector ToTarget = TargetLocation - CurrentLocation;
+    const float DistToTarget = ToTarget.Size2D();
+    if (DistToTarget > 2.f)
+    {
+        const FVector MoveDir = ToTarget.GetSafeNormal();
+        OwnerChar->AddMovementInput(MoveDir, 1.f);
+    }
 
     USplineComponent* SplineComp = SplinePath->GetSpline();
     const int32 NumPoints = SplineComp->GetNumberOfSplinePoints();
     if (NumPoints > 0 && NextPointIndex >= 0 && NextPointIndex < NumPoints)
     {
         FVector NextPointLoc = SplineComp->GetLocationAtSplinePoint(NextPointIndex, ESplineCoordinateSpace::World);
-        float   DistToNext   = FVector::Dist(GetOwner()->GetActorLocation(), NextPointLoc);
+        float   DistToNext   = FVector::Dist(CurrentLocation, NextPointLoc);
 
         if (DistToNext <= PointProximityRadius)
         {
@@ -335,17 +343,16 @@ void UAISplinePatrolComponent::UpdateFollowSpline(float DeltaTime)
             }
             else
             {
-                static int32 DirIndex = 1;
-                NextPointIndex += DirIndex;
+                NextPointIndex += FollowSplineDirection;
                 if (NextPointIndex >= NumPoints)
                 {
                     NextPointIndex = NumPoints - 2;
-                    DirIndex = -1;
+                    FollowSplineDirection = -1;
                 }
                 else if (NextPointIndex < 0)
                 {
                     NextPointIndex = 1;
-                    DirIndex = 1;
+                    FollowSplineDirection = 1;
                 }
             }
         }
@@ -424,6 +431,14 @@ void UAISplinePatrolComponent::RequestReturnToSpline()
     APawn* OwnerPawn = Cast<APawn>(GetOwner());
     if (!OwnerPawn) return;
 
+    if (ACharacter* OwnerChar = Cast<ACharacter>(OwnerPawn))
+    {
+        if (UCharacterMovementComponent* MoveComp = OwnerChar->GetCharacterMovement())
+        {
+            MoveComp->MaxWalkSpeed = CachedDefaultMaxWalkSpeed;
+        }
+    }
+
     float ClosestDistSq = FLT_MAX;
     int32 ClosestIndex  = 0;
     const int32 NumPoints = Spline->GetNumberOfSplinePoints();
@@ -452,14 +467,9 @@ void UAISplinePatrolComponent::RequestReturnToSpline()
 
     if (AAIController_Base* AIController = Cast<AAIController_Base>(OwnerPawn->GetController()))
     {
-        FAIMoveRequest Request;
-        Request.SetGoalLocation(Dest);
-        Request.SetAcceptanceRadius(50.f);
-        Request.SetUsePathfinding(true);
-
         bReturningToSpline = true;
         bIsMovingToPoint   = true;
-        AIController->MoveTo(Request);
+        AIController->RequestMoveToLocation(Dest);
 
         CurrentIndex         = ClosestIndex;
         LastPassedPointIndex = ClosestIndex;
