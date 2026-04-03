@@ -129,7 +129,6 @@ void APlayerCharacter::BeginPlay()
     if (HealthComponent)
     {
         BIND_IF(bDebugLifeStateLogs, HealthComponent->OnHealthChanged, LogHealthChanged);
-        BIND_IF(bDebugLifeStateLogs, HealthComponent->OnDeath, LogDeath);
     }
 
     // --- Glider Delegates ---
@@ -1141,46 +1140,37 @@ void APlayerCharacter::LogHealthChanged(float NewHealth, float MaxHealth)
     UE_LOG(LogTemp, Warning, TEXT("[%s] Health changed: %f / %f"), *GetName(), NewHealth, MaxHealth);
 }
 
-void APlayerCharacter::LogDeath()
-{
-    UE_LOG(LogTemp, Warning, TEXT("[%s] Player DIED!"), *GetName());
-    if (StateComponent)
-    {
-        StateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
-    }
-}
-
 #pragma endregion
 
 #pragma region "COMMANDS EXEC"
 
 void APlayerCharacter::DamageSelf(float Amount)
 {
-    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    if (HealthComponent)
     {
-        HC->TakeDamage(FMath::Max(0.f, Amount));
+        HealthComponent->TakeDamage(FMath::Max(0.f, Amount));
     }
 }
 
 void APlayerCharacter::HealSelf(float Amount)
 {
-    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    if (HealthComponent)
     {
-        HC->Heal(FMath::Max(0.f, Amount));
+        HealthComponent->Heal(FMath::Max(0.f, Amount));
     }
 }
 
 void APlayerCharacter::SetHPPercent(float Percent)
 {
-    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    if (HealthComponent)
     {
         const float P = FMath::Clamp(Percent, 0.f, 1.f);
-        const float Target = HC->GetMaxHealth() * P;
-        const float Current = HC->GetHealth();
+        const float Target = HealthComponent->GetMaxHealth() * P;
+        const float Current = HealthComponent->GetHealth();
         const float Delta = Target - Current;
 
-        if (Delta > 0.f) HC->Heal(Delta);
-        else HC->TakeDamage(-Delta);
+        if (Delta > 0.f) HealthComponent->Heal(Delta);
+        else HealthComponent->TakeDamage(-Delta);
     }
 }
 
