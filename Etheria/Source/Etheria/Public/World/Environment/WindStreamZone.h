@@ -13,6 +13,8 @@
 class USplineComponent;
 class USplineMeshComponent;
 class UCapsuleComponent;
+class UStaticMesh;
+class UMaterialInterface;
 class APlayerCharacter;
 class UDiveMode;
 
@@ -29,33 +31,27 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ─── Components ───────────────────────────────────────────────────────────
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="WindStream|Components")
     USplineComponent* Spline;
 
-    // ─── Settings ─────────────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="100", ClampMax="3000"))
-    float BoostStrength = 800.f;
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="500", ClampMax="6000"))
+    float StreamSpeed = 3200.f;
 
-    // Rayon du tube — contrôle la taille des capsules ET la zone de boost
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="50", ClampMax="2000"))
     float StreamRadius = 300.f;
 
-    // Combien le stream guide le Yaw du joueur vers la tangente (0=aucun, 1=fort)
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float DirectionInfluence = 0.4f;
+    float DirectionInfluence = 0.9f;
 
-    // Force de rappel vertical vers la hauteur de la spline (cm/s² par cm d'écart)
-    // 2.0 = correction douce | 8.0 = correction très réactive
-    // Le joueur peut toujours sortir verticalement en pitchant ou en ne pitchant plus
-    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="20.0"))
-    float VerticalCorrectionStrength = 3.5f;
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="25.0"))
+    float CenteringStrength = 8.f;
 
-    // Nombre de capsules de collision le long de la spline
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="0.95"))
+    float FreeMovementRadiusRatio = 0.55f;
+
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="2", ClampMax="32"))
     int32 NumCollisionCapsules = 8;
 
-    // ─── Visual ───────────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, Category="WindStream|Visual")
     UStaticMesh* StreamMesh;
 
@@ -71,7 +67,6 @@ protected:
     UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.0", ClampMax="5.0"))
     float UVScrollSpeed = 1.2f;
 
-    // ─── Debug ────────────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, Category="WindStream|Debug")
     bool bWindDebugMode = false;
 
@@ -90,11 +85,12 @@ private:
     void RebuildVisualTube();
     void RebuildCollisionCapsules();
 
-    float      GetClosestSplineAlpha(const FVector& WorldPosition) const;
-    float      GetRadialFalloff(const FVector& WorldPosition) const;
-    bool       IsPlayerInDiveMode(APlayerCharacter* Player) const;
+    float GetClosestSplineDistance(const FVector& WorldPosition) const;
+    float GetRadialFalloff(const FVector& WorldPosition, float SplineDistance) const;
+    FVector GetPreferredStreamDirection(APlayerCharacter* Player, float SplineDistance) const;
+    bool IsPlayerInDiveMode(APlayerCharacter* Player) const;
     UDiveMode* GetPlayerDiveMode(APlayerCharacter* Player) const;
-    void       ApplyWindEffect(APlayerCharacter* Player, float DeltaTime, float Falloff);
+    void ApplyWindEffect(APlayerCharacter* Player, float DeltaTime, float Falloff);
 
     UFUNCTION()
     void OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,

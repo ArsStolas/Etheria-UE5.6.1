@@ -2,7 +2,7 @@
  * Etheria's End Project, 2025
  * Created by: Zhailendra
  * Class: DiveMode - Header
-*/
+ */
 
 #pragma once
 
@@ -20,14 +20,13 @@ public:
     virtual void Exit() override;
     virtual void TickMode(float DeltaTime) override;
 
-    // Appelé par WindStreamZone chaque tick
-    // SpeedBoost     : boost scalaire ajouté à CurrentSpeed
-    // WindTangent    : direction normalisée de la spline au point le plus proche
-    // Influence      : 0-1, guidance Yaw vers la tangente
-    // VerticalForce  : force en cm/s² à ajouter à Velocity.Z (correction hauteur spline)
-    // DeltaTime      : depuis le tick du stream
-    void ApplyWindBoost(float SpeedBoost, const FVector& WindTangent,
-                        float Influence, float VerticalForce, float DeltaTime);
+    // Called by WindStreamZone once per frame while the player is inside the stream.
+    // TargetSpeed: desired speed enforced by the tunnel.
+    // WindDirection: normalized spline tangent at the closest point.
+    // Influence: 0-1 alignment strength toward the stream.
+    // CenteringAccel: acceleration pulling the player back toward the spline core.
+    void ApplyWindBoost(float TargetSpeed, const FVector& WindDirection,
+                        float Influence, const FVector& CenteringAccel);
 
     float GetCurrentSpeed() const { return CurrentSpeed; }
 
@@ -68,9 +67,11 @@ protected:
     bool bDiveDebugMode = false;
 
 private:
-    float PendingWindSpeedBoost  = 0.f;
-    float PendingWindYaw         = FLT_MAX;
-    float WindYawInterpSpeed     = 0.f;
-    // Force verticale accumulée depuis le stream (contrecarre la gravité dans le tube)
-    float PendingWindVerticalForce = 0.f;
+    bool bWindStreamActive = false;
+    float PendingWindTargetSpeed = 0.f;
+    float PendingWindAlignmentStrength = 0.f;
+    FVector PendingWindDirection = FVector::ZeroVector;
+    FVector PendingWindCenteringAccel = FVector::ZeroVector;
+
+    float ComputeBaseSinkSpeed() const;
 };

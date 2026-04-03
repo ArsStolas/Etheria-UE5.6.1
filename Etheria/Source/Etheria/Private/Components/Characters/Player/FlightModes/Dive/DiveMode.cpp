@@ -2,9 +2,10 @@
  * Etheria's End Project, 2025
  * Created by: Zhailendra
  * Class: DiveMode - Source
-*/
+ */
 
 #include "Components/Characters/Player/FlightModes/Dive/DiveMode.h"
+
 #include "Characters/Players/PlayerCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
@@ -25,161 +26,222 @@ void UDiveMode::Enter()
     StoreMovementSettings();
     Move->SetMovementMode(MOVE_Flying);
     Move->bUseControllerDesiredRotation = false;
-    Move->bOrientRotationToMovement     = false;
-    Move->GravityScale                  = 0.f;
-    Move->AirControl                    = 1.f;
-    Move->BrakingDecelerationFalling    = 0.f;
+    Move->bOrientRotationToMovement = false;
+    Move->GravityScale = 0.f;
+    Move->AirControl = 1.f;
+    Move->BrakingDecelerationFalling = 0.f;
 
-    CurrentSpeed               = MinDiveSpeed;
-    PendingWindSpeedBoost      = 0.f;
-    PendingWindYaw             = FLT_MAX;
-    PendingWindVerticalForce   = 0.f;
+    CurrentSpeed = MinDiveSpeed;
+    bWindStreamActive = false;
+    PendingWindTargetSpeed = 0.f;
+    PendingWindAlignmentStrength = 0.f;
+    PendingWindDirection = FVector::ZeroVector;
+    PendingWindCenteringAccel = FVector::ZeroVector;
 
     if (Owner->GetGliderVisual())
+    {
         Owner->GetGliderVisual()->SetVisibility(false);
+    }
 }
 
 void UDiveMode::Exit()
 {
     if (!Owner || !Move) return;
 
-    FRotator R = Owner->GetActorRotation();
-    Owner->SetActorRotation(FRotator(0.f, R.Yaw, 0.f));
+    const FRotator Rotation = Owner->GetActorRotation();
+    Owner->SetActorRotation(FRotator(0.f, Rotation.Yaw, 0.f));
 
     RestoreMovementSettings();
 
     if (Owner->GetGliderVisual())
-        Owner->GetGliderVisual()->SetVisibility(false);
-
-    CurrentSpeed             = MinDiveSpeed;
-    PendingWindSpeedBoost    = 0.f;
-    PendingWindYaw           = FLT_MAX;
-    PendingWindVerticalForce = 0.f;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ApplyWindBoost — appelé par WindStreamZone avant TickMode
-// ─────────────────────────────────────────────────────────────────────────────
-void UDiveMode::ApplyWindBoost(float SpeedBoost, const FVector& WindTangent,
-                                float Influence, float VerticalForce, float DeltaTime)
-{
-    PendingWindSpeedBoost    += SpeedBoost;
-    PendingWindVerticalForce += VerticalForce;
-
-    if (Influence > 0.f && !WindTangent.IsNearlyZero())
     {
-        PendingWindYaw     = FMath::RadiansToDegrees(FMath::Atan2(WindTangent.Y, WindTangent.X));
-        WindYawInterpSpeed = Influence;
+        Owner->GetGliderVisual()->SetVisibility(false);
     }
+
+    CurrentSpeed = MinDiveSpeed;
+    bWindStreamActive = false;
+    PendingWindTargetSpeed = 0.f;
+    PendingWindAlignmentStrength = 0.f;
+    PendingWindDirection = FVector::ZeroVector;
+    PendingWindCenteringAccel = FVector::ZeroVector;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TickMode
-// ─────────────────────────────────────────────────────────────────────────────
+void UDiveMode::ApplyWindBoost(float TargetSpeed, const FVector& WindDirection,
+                               float Influence, const FVector& CenteringAccel)
+{
+    if (TargetSpeed <= 0.f || WindDirection.IsNearlyZero())
+    {
+        return;
+    }
+
+    bWindStreamActive = true;
+    PendingWindTargetSpeed = FMath::Max(PendingWindTargetSpeed, TargetSpeed);
+    PendingWindAlignmentStrength = FMath::Max(PendingWindAlignmentStrength, Influence);
+    PendingWindDirection = WindDirection.GetSafeNormal();
+    PendingWindCenteringAccel = CenteringAccel;
+}
+
+float UDiveMode::ComputeBaseSinkSpeed() const
+{
+    const float SpeedAlpha = FMath::GetMappedRangeValueClamped(
+        FVector2D(MinDiveSpeed, MaxDiveSpeed),
+        FVector2D(0.f, 1.f),
+        CurrentSpeed);
+
+    return FMath::Lerp(850.f, 120.f, SpeedAlpha);
+}
+
 void UDiveMode::TickMode(float DeltaTime)
 {
-    if (!Owner) return;
+    if (!Owner || !Move) return;
 
-    const int Hor = Owner->GetHorizontalInput();
-    const int Ver = Owner->GetVerticalInput();
+    const float HorizontalInput = Owner->GetHorizontalInput();
+    const float VerticalInput = Owner->GetVerticalInput();
 
-    // ── PITCH / ROLL ──────────────────────────────────────────────────────────
-    const float TargetPitch = FMath::Clamp(-Ver * MaxPitch, -MaxPitch, MaxPitch);
-    const float TargetRoll  = FMath::Clamp(Hor  * MaxRoll,  -MaxRoll,  MaxRoll);
+    const float TargetPitch = FMath::Clamp(-VerticalInput * MaxPitch, -MaxPitch, MaxPitch);
+    const float TargetRoll = FMath::Clamp(HorizontalInput * MaxRoll, -MaxRoll, MaxRoll);
 
     FRotator CurrentRot = Owner->GetActorRotation();
-    FRotator NewRot     = FMath::RInterpTo(CurrentRot,
-        FRotator(TargetPitch, CurrentRot.Yaw, TargetRoll), DeltaTime, 3.f);
-    Owner->SetActorRotation(NewRot);
+    FRotator NewRot = FMath::RInterpTo(
+        CurrentRot,
+        FRotator(TargetPitch, CurrentRot.Yaw, TargetRoll),
+        DeltaTime,
+        3.f);
 
-    const float PitchFactor = NewRot.Pitch / MaxPitch;
-    const float RollFactor  = NewRot.Roll  / MaxRoll;
+    const float PitchFactor = MaxPitch > KINDA_SMALL_NUMBER ? (NewRot.Pitch / MaxPitch) : 0.f;
+    const float RollFactor = MaxRoll > KINDA_SMALL_NUMBER ? (NewRot.Roll / MaxRoll) : 0.f;
 
-    // ── VITESSE SCALAIRE ──────────────────────────────────────────────────────
-    if      (PitchFactor < -0.1f)
+    if (PitchFactor < -0.1f)
+    {
         CurrentSpeed += DiveAcceleration * (1.0f + 0.2f * FMath::Abs(PitchFactor)) * DeltaTime;
-    else if (PitchFactor >  0.1f)
+    }
+    else if (PitchFactor > 0.1f)
+    {
         CurrentSpeed -= DiveDeceleration * (0.6f + 0.4f * PitchFactor) * DeltaTime;
+    }
     else
+    {
         CurrentSpeed -= DiveDeceleration * 0.15f * DeltaTime;
+    }
 
-    // ── WIND SPEED BOOST ──────────────────────────────────────────────────────
-    const bool bHasWind = PendingWindSpeedBoost > 0.f;
+    const bool bHasWind = bWindStreamActive && PendingWindTargetSpeed > 0.f && !PendingWindDirection.IsNearlyZero();
     if (bHasWind)
     {
-        CurrentSpeed += PendingWindSpeedBoost;
-        DIVE_SCREEN(10, FColor::Cyan, TEXT("[Wind] +%.0f cm/s → Speed: %.0f"), PendingWindSpeedBoost, CurrentSpeed);
+        CurrentSpeed = FMath::Max(CurrentSpeed, PendingWindTargetSpeed);
     }
-    PendingWindSpeedBoost = 0.f;
 
     CurrentSpeed = FMath::Clamp(CurrentSpeed, MinDiveSpeed, MaxDiveSpeed * 1.5f);
 
-    // ── YAW joueur ────────────────────────────────────────────────────────────
     if (FMath::Abs(RollFactor) > 0.1f)
     {
         const float SpeedScale = FMath::Clamp(CurrentSpeed / MaxDiveSpeed, 0.6f, 2.0f);
-        FRotator YawRot = Owner->GetActorRotation();
-        YawRot.Yaw += RollFactor * TurnRateDive * SpeedScale * DeltaTime;
-        Owner->SetActorRotation(FRotator(NewRot.Pitch, YawRot.Yaw, NewRot.Roll));
-        NewRot = Owner->GetActorRotation();
+        NewRot.Yaw += RollFactor * TurnRateDive * SpeedScale * DeltaTime;
     }
 
-    // ── WIND GUIDANCE YAW ────────────────────────────────────────────────────
-    // Actif seulement si le joueur ne steer pas fort (il garde le contrôle)
-    const bool bPlayerSteering = FMath::Abs(RollFactor) > 0.4f;
-    if (PendingWindYaw != FLT_MAX && !bPlayerSteering)
+    const bool bPlayerProvidingSteer = !FMath::IsNearlyZero(HorizontalInput) || !FMath::IsNearlyZero(VerticalInput);
+    if (bHasWind)
     {
-        const float InterpSpeed = FMath::Clamp(WindYawInterpSpeed * 60.f, 10.f, 80.f);
-        FRotator GuidedRot = Owner->GetActorRotation();
-        GuidedRot.Yaw = FMath::FInterpTo(GuidedRot.Yaw, PendingWindYaw, DeltaTime, InterpSpeed);
-        Owner->SetActorRotation(FRotator(NewRot.Pitch, GuidedRot.Yaw, NewRot.Roll));
-        NewRot = Owner->GetActorRotation();
-        DIVE_SCREEN(11, FColor::Cyan, TEXT("[Wind] Yaw → %.1f° (interp %.1f)"), PendingWindYaw, InterpSpeed);
-    }
-    PendingWindYaw     = FLT_MAX;
-    WindYawInterpSpeed = 0.f;
+        const float AlignmentStrength = bPlayerProvidingSteer
+            ? PendingWindAlignmentStrength * 0.15f
+            : PendingWindAlignmentStrength;
 
-    // ── VÉLOCITÉ HORIZONTALE ──────────────────────────────────────────────────
-    const FVector ForwardDir = FRotationMatrix(FRotator(0.f, NewRot.Yaw, 0.f)).GetUnitAxis(EAxis::X);
+        if (AlignmentStrength > 0.f)
+        {
+            FRotator WindRot = PendingWindDirection.Rotation();
+            WindRot.Pitch = NewRot.Pitch;
+            WindRot.Roll = NewRot.Roll;
+
+            const float AlignInterpSpeed = FMath::Lerp(1.2f, 5.f, FMath::Clamp(AlignmentStrength, 0.f, 1.f));
+            NewRot = FMath::RInterpTo(NewRot, WindRot, DeltaTime, AlignInterpSpeed);
+        }
+    }
+
+    Owner->SetActorRotation(NewRot);
+
     FVector Velocity = Move->Velocity;
-    Velocity.X = ForwardDir.X * CurrentSpeed;
-    Velocity.Y = ForwardDir.Y * CurrentSpeed;
-
-    // ── GRAVITÉ ARCADE + PORTANCE ─────────────────────────────────────────────
-    const float GravityStrength = 400.f;
-    const float StallSpeed      = MaxDiveSpeed * 0.4f;
-    const float MaxLiftCoeff    = LiftFactor * 1.8f;
-
-    float LiftCoeff = 0.f;
-    if (CurrentSpeed > StallSpeed)
+    if (bHasWind)
     {
-        const float SpeedRatio = FMath::Clamp(
-            (CurrentSpeed - StallSpeed) / (MaxDiveSpeed - StallSpeed), 0.f, 1.f);
-        LiftCoeff = MaxLiftCoeff * SpeedRatio;
+        const FVector CurrentForward = FVector::VectorPlaneProject(
+            Velocity.IsNearlyZero() ? NewRot.Vector() * CurrentSpeed : Velocity,
+            FVector::UpVector);
+
+        const FVector CurrentLateralToStream = FVector::VectorPlaneProject(CurrentForward, PendingWindDirection);
+        const float SteeringCarry = bPlayerProvidingSteer ? 0.95f : 0.75f;
+        const FVector CarriedLateralVelocity = CurrentLateralToStream * SteeringCarry;
+
+        FVector DesiredVelocity = (PendingWindDirection * CurrentSpeed) + CarriedLateralVelocity;
+        DesiredVelocity += PendingWindCenteringAccel * DeltaTime;
+
+        const float MinForwardSpeed = CurrentSpeed * 0.9f;
+        const float ForwardAlongStream = FVector::DotProduct(DesiredVelocity, PendingWindDirection);
+        if (ForwardAlongStream < MinForwardSpeed)
+        {
+            DesiredVelocity += PendingWindDirection * (MinForwardSpeed - ForwardAlongStream);
+        }
+
+        const float MaxAllowedSpeed = CurrentSpeed * (bPlayerProvidingSteer ? 1.1f : 1.02f);
+        Velocity = DesiredVelocity.GetClampedToMaxSize(MaxAllowedSpeed);
+
+        DIVE_SCREEN(10, FColor::Cyan,
+            TEXT("[Wind] Speed %.0f | Align %.2f | VZ %.0f"),
+            CurrentSpeed,
+            PendingWindAlignmentStrength,
+            Velocity.Z);
+    }
+    else
+    {
+        const FVector ForwardDir = FRotationMatrix(FRotator(0.f, NewRot.Yaw, 0.f)).GetUnitAxis(EAxis::X);
+        Velocity.X = ForwardDir.X * CurrentSpeed;
+        Velocity.Y = ForwardDir.Y * CurrentSpeed;
+
+        const float StallSpeed = MaxDiveSpeed * 0.4f;
+        const float MaxLiftCoeff = LiftFactor * 1.8f;
+
+        float LiftCoeff = 0.f;
+        if (CurrentSpeed > StallSpeed)
+        {
+            const float SpeedRatio = FMath::Clamp(
+                (CurrentSpeed - StallSpeed) / (MaxDiveSpeed - StallSpeed),
+                0.f,
+                1.f);
+            LiftCoeff = MaxLiftCoeff * SpeedRatio;
+        }
+
+        float LiftAccelZ = 0.f;
+        if (PitchFactor > 0.f && LiftCoeff > 0.f)
+        {
+            LiftAccelZ = LiftCoeff * FMath::Clamp(PitchFactor, 0.f, 1.f) * (CurrentSpeed * 0.5f);
+        }
+
+        const float DivePushZ = FMath::Abs(FMath::Min(PitchFactor, 0.f)) * FMath::Lerp(350.f, 1100.f, FMath::Clamp(CurrentSpeed / MaxDiveSpeed, 0.f, 1.f));
+        const float BaseSinkSpeed = ComputeBaseSinkSpeed();
+        const float VerticalTargetSpeed = -BaseSinkSpeed - DivePushZ + LiftAccelZ;
+        const float VerticalInterp = (VerticalTargetSpeed < Velocity.Z) ? 2.8f : 1.6f;
+        Velocity.Z = FMath::FInterpTo(Velocity.Z, VerticalTargetSpeed, DeltaTime, VerticalInterp);
+        Velocity.Z = FMath::Clamp(Velocity.Z, -2400.f, 900.f);
     }
 
-    float LiftAccelZ = 0.f;
-    if (PitchFactor > 0.f && LiftCoeff > 0.f)
-        LiftAccelZ = LiftCoeff * FMath::Clamp(PitchFactor, 0.f, 1.f) * (CurrentSpeed * 0.5f);
-
-    // Accélération Z = gravité arcade + portance + correction verticale du wind stream
-    // La correction wind annule partiellement la gravité pour maintenir le joueur
-    // dans le tube — proportionnelle à l'écart Z et au Falloff (voir WindStreamZone)
-    float AccelZ = LiftAccelZ - GravityStrength + PendingWindVerticalForce;
-    PendingWindVerticalForce = 0.f;
-
-    Velocity.Z = FMath::Clamp(Velocity.Z + AccelZ * DeltaTime, -2400.f, 900.f);
     Move->Velocity = Velocity;
 
-    // ── DEBUG SCREEN ──────────────────────────────────────────────────────────
     if (GEngine)
     {
-        const FColor C = (Velocity.Z > 50.f) ? FColor::Green :
-                         (Velocity.Z < -50.f) ? FColor::Red : FColor::White;
-        GEngine->AddOnScreenDebugMessage(1, 0.f, C, FString::Printf(
-            TEXT("Alt: %.0f | VZ: %.0f | Speed: %.0f | Stall: %.0f | Lift: %.2f | Pitch: %.1f° %s"),
-            Owner->GetActorLocation().Z, Velocity.Z, CurrentSpeed,
-            StallSpeed, LiftCoeff, NewRot.Pitch,
-            bHasWind ? TEXT("| 💨 WIND") : TEXT("")));
+        const FColor DebugColor = (Velocity.Z > 50.f) ? FColor::Green :
+                                  (Velocity.Z < -50.f) ? FColor::Red : FColor::White;
+        GEngine->AddOnScreenDebugMessage(
+            1,
+            0.f,
+            DebugColor,
+            FString::Printf(
+                TEXT("Alt: %.0f | VZ: %.0f | Speed: %.0f %s"),
+                Owner->GetActorLocation().Z,
+                Velocity.Z,
+                CurrentSpeed,
+                bHasWind ? TEXT("| WIND STREAM") : TEXT("")));
     }
+
+    bWindStreamActive = false;
+    PendingWindTargetSpeed = 0.f;
+    PendingWindAlignmentStrength = 0.f;
+    PendingWindDirection = FVector::ZeroVector;
+    PendingWindCenteringAccel = FVector::ZeroVector;
 }
