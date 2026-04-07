@@ -383,7 +383,6 @@ private:
     UFUNCTION() void LogCombatStateChanged(FGameplayTag Previous, FGameplayTag New);
     UFUNCTION() void LogLifeStateChanged(FGameplayTag Previous, FGameplayTag New);
     UFUNCTION() void LogHealthChanged(float NewHealth, float MaxHealth);
-    UFUNCTION() void LogDeath();
 
 #pragma endregion
 

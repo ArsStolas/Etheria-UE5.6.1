@@ -34,14 +34,17 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="WindStream|Components")
     USplineComponent* Spline;
 
-    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="500", ClampMax="6000"))
-    float StreamSpeed = 3200.f;
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="500", ClampMax="12000"))
+    float StreamSpeed = 6000.f;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="50", ClampMax="2000"))
     float StreamRadius = 300.f;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="1.0"))
     float DirectionInfluence = 0.9f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float CrossingAssistStrength = 0.12f;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="25.0"))
     float CenteringStrength = 8.f;

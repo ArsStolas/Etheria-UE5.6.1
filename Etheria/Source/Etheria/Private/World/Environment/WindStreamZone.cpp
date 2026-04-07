@@ -394,20 +394,47 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTim
         FMath::Abs(Player->GetHorizontalInput()) + (FMath::Abs(Player->GetVerticalInput()) * 0.35f),
         0.f,
         1.f);
+    const bool bIdleInStream = SteeringInput < 0.1f;
 
-    const float SteeringReduction = FMath::Lerp(1.f, 0.12f, SteeringInput);
-    const float SoftCenteringStrength = CenteringStrength * EdgeAlpha * EdgeAlpha * Falloff * SteeringReduction;
+    FVector ReferenceDirection = Player->GetVelocity().GetSafeNormal();
+    if (ReferenceDirection.IsNearlyZero())
+    {
+        ReferenceDirection = Player->GetActorForwardVector().GetSafeNormal();
+    }
+
+    const float StreamAlignment = FMath::Abs(FVector::DotProduct(ReferenceDirection, StreamDirection));
+    const float AlignmentAssist = FMath::GetMappedRangeValueClamped(
+        FVector2D(0.15f, 0.8f),
+        FVector2D(CrossingAssistStrength, 1.f),
+        StreamAlignment);
+
+    const float EdgeCenteringStrength = CenteringStrength
+        * EdgeAlpha
+        * EdgeAlpha
+        * Falloff
+        * FMath::Lerp(0.09f, 0.025f, SteeringInput);
+
+    const float IdleCenteringStrength = CenteringStrength
+        * RadialRatio
+        * RadialRatio
+        * Falloff
+        * (bIdleInStream ? 0.75f : 0.f);
+
+    const float SoftCenteringStrength = EdgeCenteringStrength + IdleCenteringStrength;
     const FVector CenteringAccel = DistanceToCore > KINDA_SMALL_NUMBER
-        ? CenterOffset.GetSafeNormal() * SoftCenteringStrength
+        ? CenterOffset * SoftCenteringStrength
         : FVector::ZeroVector;
 
-    const float EffectiveInfluence = DirectionInfluence * Falloff;
-    DiveMode->ApplyWindBoost(StreamSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
+    const float EffectiveInfluence = DirectionInfluence * Falloff * AlignmentAssist;
+    const float CurrentDiveSpeed = DiveMode->GetCurrentSpeed();
+    const float TargetSpeed = FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeed), AlignmentAssist);
+
+    DiveMode->ApplyWindBoost(TargetSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
 
     WIND_SCREEN(21, FColor::Cyan,
-        TEXT("[WindStream] %s | Speed %.0f | Falloff %.2f | Center %.0f"),
+        TEXT("[WindStream] %s | Assist %.2f | Falloff %.2f | Center %.0f"),
         *Player->GetName(),
-        StreamSpeed,
+        AlignmentAssist,
         Falloff,
         CenterOffset.Size());
 }

@@ -130,7 +130,10 @@ void UDiveMode::TickMode(float DeltaTime)
         CurrentSpeed = FMath::Max(CurrentSpeed, PendingWindTargetSpeed);
     }
 
-    CurrentSpeed = FMath::Clamp(CurrentSpeed, MinDiveSpeed, MaxDiveSpeed * 1.5f);
+    const float MaxAllowedDiveSpeed = bHasWind
+        ? FMath::Max(MaxDiveSpeed * 1.5f, PendingWindTargetSpeed * 1.15f)
+        : MaxDiveSpeed * 1.5f;
+    CurrentSpeed = FMath::Clamp(CurrentSpeed, MinDiveSpeed, MaxAllowedDiveSpeed);
 
     if (FMath::Abs(RollFactor) > 0.1f)
     {
@@ -142,7 +145,7 @@ void UDiveMode::TickMode(float DeltaTime)
     if (bHasWind)
     {
         const float AlignmentStrength = bPlayerProvidingSteer
-            ? PendingWindAlignmentStrength * 0.15f
+            ? PendingWindAlignmentStrength * 0.08f
             : PendingWindAlignmentStrength;
 
         if (AlignmentStrength > 0.f)
@@ -161,26 +164,60 @@ void UDiveMode::TickMode(float DeltaTime)
     FVector Velocity = Move->Velocity;
     if (bHasWind)
     {
-        const FVector CurrentForward = FVector::VectorPlaneProject(
-            Velocity.IsNearlyZero() ? NewRot.Vector() * CurrentSpeed : Velocity,
-            FVector::UpVector);
+        const FVector CurrentDirection = Velocity.IsNearlyZero()
+            ? NewRot.Vector().GetSafeNormal()
+            : Velocity.GetSafeNormal();
+        const float HorizontalSteeringStrength = FMath::Clamp(FMath::Abs(HorizontalInput), 0.f, 1.f);
+        const float VerticalSteeringStrength = FMath::Clamp(FMath::Abs(VerticalInput), 0.f, 1.f);
 
-        const FVector CurrentLateralToStream = FVector::VectorPlaneProject(CurrentForward, PendingWindDirection);
-        const float SteeringCarry = bPlayerProvidingSteer ? 0.95f : 0.75f;
-        const FVector CarriedLateralVelocity = CurrentLateralToStream * SteeringCarry;
+        FRotator CurrentDirRot = CurrentDirection.Rotation();
+        const FRotator TargetDirRot = NewRot;
 
-        FVector DesiredVelocity = (PendingWindDirection * CurrentSpeed) + CarriedLateralVelocity;
+        const float YawBlend = FMath::Lerp(0.32f, 0.62f, HorizontalSteeringStrength);
+        const float PitchBlend = FMath::Lerp(0.18f, 0.38f, VerticalSteeringStrength);
+
+        FRotator BlendedDirRot = CurrentDirRot;
+        BlendedDirRot.Yaw = FMath::Lerp(CurrentDirRot.Yaw, TargetDirRot.Yaw, YawBlend);
+        BlendedDirRot.Pitch = FMath::Lerp(CurrentDirRot.Pitch, TargetDirRot.Pitch, PitchBlend);
+
+        const FVector PlayerDesiredDirection = BlendedDirRot.Vector().GetSafeNormal();
+        const FVector StreamVelocity = PendingWindDirection * CurrentSpeed;
+        const FVector PlayerVelocity = PlayerDesiredDirection * CurrentSpeed;
+
+        const float GuidanceBlend = bPlayerProvidingSteer
+            ? FMath::Clamp(PendingWindAlignmentStrength * 0.18f, 0.f, 0.45f)
+            : FMath::Clamp(PendingWindAlignmentStrength * 0.7f, 0.f, 0.92f);
+
+        FVector DesiredVelocity = FMath::Lerp(PlayerVelocity, StreamVelocity, GuidanceBlend);
         DesiredVelocity += PendingWindCenteringAccel * DeltaTime;
 
-        const float MinForwardSpeed = CurrentSpeed * 0.9f;
+        if (DesiredVelocity.IsNearlyZero())
+        {
+            DesiredVelocity = StreamVelocity;
+        }
+
+        const float MinForwardSpeed = CurrentSpeed * (bPlayerProvidingSteer ? 0.72f : 0.9f);
         const float ForwardAlongStream = FVector::DotProduct(DesiredVelocity, PendingWindDirection);
         if (ForwardAlongStream < MinForwardSpeed)
         {
             DesiredVelocity += PendingWindDirection * (MinForwardSpeed - ForwardAlongStream);
         }
 
-        const float MaxAllowedSpeed = CurrentSpeed * (bPlayerProvidingSteer ? 1.1f : 1.02f);
+        const float TargetWindSpeed = FMath::Max(CurrentSpeed, PendingWindTargetSpeed);
+        const float SmoothedSpeed = FMath::FInterpTo(CurrentSpeed, TargetWindSpeed, DeltaTime, bPlayerProvidingSteer ? 2.5f : 4.5f);
+        CurrentSpeed = FMath::Max(CurrentSpeed, SmoothedSpeed);
+
+        const float MaxAllowedSpeed = CurrentSpeed * (bPlayerProvidingSteer ? 1.06f : 1.02f);
+        DesiredVelocity = FMath::Lerp(StreamVelocity, DesiredVelocity, bPlayerProvidingSteer ? 0.72f : 0.9f);
         Velocity = DesiredVelocity.GetClampedToMaxSize(MaxAllowedSpeed);
+        if (!Velocity.IsNearlyZero())
+        {
+            const float MaintainedSpeed = FMath::Clamp(
+                FMath::Max(TargetWindSpeed * (bPlayerProvidingSteer ? 0.94f : 0.99f), Velocity.Size()),
+                0.f,
+                MaxAllowedSpeed);
+            Velocity = Velocity.GetSafeNormal() * MaintainedSpeed;
+        }
 
         DIVE_SCREEN(10, FColor::Cyan,
             TEXT("[Wind] Speed %.0f | Align %.2f | VZ %.0f"),
