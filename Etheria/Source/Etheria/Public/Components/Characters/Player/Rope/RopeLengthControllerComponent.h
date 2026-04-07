@@ -12,17 +12,18 @@
 #include "RopeLengthControllerComponent.generated.h"
 
 #if UE_BUILD_SHIPPING
-	#define CLIMB_LOG(Category, Verbosity, Format, ...)
-	#define CLIMB_SCREEN_MSG(Key, Color, Format, ...)
+	#define ROPE_LENGHT_LOG(Category, Verbosity, Format, ...)
+	#define ROPE_LENGHT_SCREEN_MSG(Key, Color, Format, ...)
 #else
-	#define CLIMB_LOG(Category, Verbosity, Format, ...) \
+	#define ROPE_LENGHT_LOG(Category, Verbosity, Format, ...) \
 	if (bLengthControllerDebugMode) UE_LOG(Category, Verbosity, Format, ##__VA_ARGS__)
-	#define CLIMB_SCREEN_MSG(Key, Color, Format, ...) \
+	#define ROPE_LENGHT_SCREEN_MSG(Key, Color, Format, ...) \
 	if (bLengthControllerDebugMode && GEngine) GEngine->AddOnScreenDebugMessage(Key, 0.1f, Color, FString::Printf(Format, ##__VA_ARGS__))
 #endif
 
 class APlayerCharacter;
 class URopeSwingComponent;
+class URopePullComponent;
 class URopeAttachComponent;
 class URopeConstraintComponent;
 
@@ -39,10 +40,10 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	/** Called by input system to set climb input */
-	void SetClimbInput(float Value);
+	void SetRopeLengthInput(float Value);
 
 protected:
-	void ProcessClimbing(float DeltaTime);
+	void ProcessRopeLength(float DeltaTime);
 
 private:
 	/** References */
@@ -57,13 +58,16 @@ private:
 	
 	UPROPERTY()
 	URopeSwingComponent* SwingComp = nullptr;
+	
+	UPROPERTY()
+	URopePullComponent* PullComp = nullptr;
 
 	/** Input */
-	float ClimbInput = 0.f;
+	float RopeLengthInput = 0.f;
 
 	/** Climb Settings */
-	UPROPERTY(EditAnywhere, Category="Rope|Climb")
-	float ClimbSpeed = 300.f;
+	UPROPERTY(EditAnywhere, Category="Rope|LengthController|Climb")
+	float RopeAdjustSpeed = 300.f;
 
 	/** Debug */
 	UPROPERTY(EditAnywhere, Category="Rope|LengthController|Debug")

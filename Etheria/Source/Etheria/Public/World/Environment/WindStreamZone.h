@@ -1,9 +1,8 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
  * Class: WindStreamZone - Header
-*/
+ */
 
 #pragma once
 
@@ -11,56 +10,97 @@
 #include "GameFramework/Actor.h"
 #include "WindStreamZone.generated.h"
 
-class UBoxComponent;
+class USplineComponent;
+class USplineMeshComponent;
+class UCapsuleComponent;
+class UStaticMesh;
+class UMaterialInterface;
 class APlayerCharacter;
+class UDiveMode;
 
 UCLASS()
 class ETHERIA_API AWindStreamZone : public AActor
 {
-	GENERATED_BODY()
-	
-public:	
-	AWindStreamZone();
+    GENERATED_BODY()
+
+public:
+    AWindStreamZone();
+    virtual void OnConstruction(const FTransform& Transform) override;
 
 protected:
-	virtual void BeginPlay() override;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Wind Stream|Components")
-	UBoxComponent* TriggerZone;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="WindStream|Components")
+    USplineComponent* Spline;
 
-	// === DEBUG ===
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug")
-	FColor DebugColor = FColor(0, 200, 255, 100);
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="500", ClampMax="12000"))
+    float StreamSpeed = 6000.f;
 
-	// === BOOST SETTINGS ===
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind Stream|Settings", meta=(ClampMin="0.0"))
-	float BoostForce = 2000.f;
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="50", ClampMax="2000"))
+    float StreamRadius = 300.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind Stream|Settings", meta=(ClampMin="0.0"))
-	float ApplyInterval = 0.02f;
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float DirectionInfluence = 0.9f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind Stream|Settings")
-	FVector StreamDirection = FVector(1,0,0);
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float CrossingAssistStrength = 0.12f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind Stream|Settings")
-	bool bAffectOnlyDive = true;
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="25.0"))
+    float CenteringStrength = 8.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind Stream|Settings")
-	bool bOneTimeUse = false;
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="0.95"))
+    float FreeMovementRadiusRatio = 0.55f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="2", ClampMax="32"))
+    int32 NumCollisionCapsules = 8;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual")
+    UStaticMesh* StreamMesh;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual")
+    UMaterialInterface* StreamMaterial;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="2", ClampMax="64"))
+    int32 NumVisualSegments = 12;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float TubeOpacity = 0.35f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.0", ClampMax="5.0"))
+    float UVScrollSpeed = 1.2f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Debug")
+    bool bWindDebugMode = false;
 
 private:
-	// Timer et joueurs actifs
-	UPROPERTY()
-	TMap<APlayerCharacter*, FTimerHandle> ActivePlayers;
+    UPROPERTY()
+    TSet<APlayerCharacter*> PlayersInStream;
 
-	UFUNCTION()
-	void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    UPROPERTY()
+    TArray<USplineMeshComponent*> SplineMeshes;
 
-	UFUNCTION()
-	void OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    UPROPERTY()
+    TArray<UCapsuleComponent*> CollisionCapsules;
 
-	void ApplyStreamMovement(APlayerCharacter* Player);
+    float UVOffset = 0.f;
+
+    void RebuildVisualTube();
+    void RebuildCollisionCapsules();
+
+    float GetClosestSplineDistance(const FVector& WorldPosition) const;
+    float GetRadialFalloff(const FVector& WorldPosition, float SplineDistance) const;
+    FVector GetPreferredStreamDirection(APlayerCharacter* Player, float SplineDistance) const;
+    bool IsPlayerInDiveMode(APlayerCharacter* Player) const;
+    UDiveMode* GetPlayerDiveMode(APlayerCharacter* Player) const;
+    void ApplyWindEffect(APlayerCharacter* Player, float DeltaTime, float Falloff);
+
+    UFUNCTION()
+    void OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnCapsuleEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 };
-

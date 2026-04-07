@@ -21,6 +21,9 @@ public:
 
 	UPROPERTY(EditAnywhere, Category="Interaction")
 	float InteractDistance = 50.0f;
+	
+	UPROPERTY(EditAnywhere, Category="Interaction")
+	bool bDebugMode = false;
 
 	UPROPERTY(EditAnywhere, Category="Interaction")
 	UMaterialInterface* OverlayMaterial;
