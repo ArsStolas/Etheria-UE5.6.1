@@ -80,6 +80,9 @@ void URopeSwingComponent::StartSwing()
 
     PrimaryComponentTick.SetTickFunctionEnable(true);
     
+    bIsSwinging = true;
+    OnSwingStarted.Broadcast();
+    
     SWING_LOG(LogTemp, Warning, TEXT("SWING START: Length = %f | Initial Vel = %f | Player Pos = %s"), 
         RopeLength, SwingVelocity.Size(), *OwnerCharacter->GetActorLocation().ToString());
 }
@@ -112,6 +115,9 @@ void URopeSwingComponent::StopSwing()
             ConstraintComponent->ActivateConstraint(Point, RopeLength);
         }
     }
+    
+    bIsSwinging = false;
+    OnSwingStopped.Broadcast();
     
     SWING_LOG(LogTemp, Warning, TEXT("SWING STOP: Final Vel = %f | Player Pos = %s"), 
         SwingVelocity.Size(), *OwnerCharacter->GetActorLocation().ToString());
@@ -346,6 +352,39 @@ void URopeSwingComponent::SetBaseRopeLength(float NewBaseLength)
         EffectiveRopeLength,
         BaseRopeLength
     );
+}
+
+bool URopeSwingComponent::TryJumpOffRope(FVector& OutLaunchVelocity)
+{
+    if (!bIsSwinging)
+        return false;
+
+    const float CurrentSpeed = SwingVelocity.Size();
+
+    // Not enough speed → do not detach
+    if (CurrentSpeed < MinSpeedToDetach)
+    {
+        SWING_LOG(LogTemp, Warning, TEXT("Jump blocked: not enough swing speed (%.0f)"), CurrentSpeed);
+        return false;
+    }
+
+    // Compute tangential direction (natural swing exit direction)
+    FVector LaunchDir = SwingVelocity.GetSafeNormal();
+
+    // Compute boost based on current velocity
+    FVector BoostVelocity = SwingVelocity * JumpBoostMultiplier;
+
+    // Add slight upward lift for gameplay feel
+    BoostVelocity += FVector::UpVector * JumpUpwardBoost;
+
+    OutLaunchVelocity = BoostVelocity;
+
+    // Stop swing system
+    StopSwing();
+
+    SWING_LOG(LogTemp, Warning, TEXT("Jump off rope! Speed=%.0f"), CurrentSpeed);
+
+    return true;
 }
 
 #pragma endregion

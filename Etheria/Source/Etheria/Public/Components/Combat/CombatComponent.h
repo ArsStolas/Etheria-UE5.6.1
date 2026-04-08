@@ -36,6 +36,10 @@ class ETHERIA_API UCombatComponent : public UActorComponent
 public:
     UCombatComponent();
 
+	bool bComboAdvanceRequested = false;
+	UFUNCTION(BlueprintCallable, Category="Combat|Combo")
+	void RequestComboAdvanceAI();
+	
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnWeaponDissolveRequest);
 	
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -299,7 +303,6 @@ private:
     FName ActiveComboId = NAME_None;
     int32 ActiveComboStep = -1;
     bool bComboWindowOpen = false;
-    bool bComboAdvanceRequested = false;
     float ComboResetTime = 0.f;
     UPROPERTY(VisibleAnywhere, Category="Combat|Runtime") TMap<FName, float> ComboCooldownUntil;
 

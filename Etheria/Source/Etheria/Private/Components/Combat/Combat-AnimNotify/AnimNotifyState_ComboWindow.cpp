@@ -1,29 +1,49 @@
 /**
- * Etheria's End Project, 2025
+* Etheria's End Project, 2025
  * Created by:  0nnen
- * Last Updated by: 0nnen
+ * Last Updated by: ArsStolas
  * Class: "AnimNotifyState_ComboWindow" - Source
  */
+
 #include "Components/Combat/Combat-AnimNotify/AnimNotifyState_ComboWindow.h"
 #include "Components/Combat/CombatComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
+#include "Characters/AI/BaseAI.h"
+#include "Math/UnrealMathUtility.h"
 
-void UAnimNotifyState_ComboWindow::NotifyBegin(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float TotalDuration, const FAnimNotifyEventReference& EventReference)
+void UAnimNotifyState_ComboWindow::NotifyBegin(
+    USkeletalMeshComponent* MeshComp,
+    UAnimSequenceBase* Animation,
+    float TotalDuration,
+    const FAnimNotifyEventReference& EventReference)
 {
     if (!MeshComp) return;
+
     if (AActor* Owner = MeshComp->GetOwner())
     {
         if (UCombatComponent* Combat = Owner->FindComponentByClass<UCombatComponent>())
         {
             Combat->BeginComboWindow(ComboId);
+
+            if (Owner->IsA(ABaseAI::StaticClass()))
+            {
+                if (FMath::FRand() <= AIComboContinueChance)
+                {
+                    Combat->RequestComboAdvanceAI();
+                }
+            }
         }
     }
 }
 
-void UAnimNotifyState_ComboWindow::NotifyEnd(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference)
+void UAnimNotifyState_ComboWindow::NotifyEnd(
+    USkeletalMeshComponent* MeshComp,
+    UAnimSequenceBase* Animation,
+    const FAnimNotifyEventReference& EventReference)
 {
     if (!MeshComp) return;
+
     if (AActor* Owner = MeshComp->GetOwner())
     {
         if (UCombatComponent* Combat = Owner->FindComponentByClass<UCombatComponent>())
@@ -31,4 +51,14 @@ void UAnimNotifyState_ComboWindow::NotifyEnd(USkeletalMeshComponent* MeshComp, U
             Combat->EndComboWindow(ComboId);
         }
     }
+}
+
+void UAnimNotifyState_ComboWindow::NotifyTick(
+    USkeletalMeshComponent* MeshComp,
+    UAnimSequenceBase* Animation,
+    float FrameDeltaTime,
+    const FAnimNotifyEventReference& EventReference)
+{
+    // Optionnel : logique par frame pendant la fenêtre de combo (ex. vérifier input).
+    // Pour l'instant on ne fait rien ; Begin/End suffisent pour ouvrir/fermer la fenêtre.
 }

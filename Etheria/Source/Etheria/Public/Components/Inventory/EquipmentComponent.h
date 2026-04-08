@@ -54,6 +54,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Equipment|Visual", meta=(EditCondition="bAutoApplyWeaponVisuals"))
 	bool bHideHandsWhenEmpty = true;
 
+	/**
+	 * Pour les IA / boss sans inventaire : si défini, cette arme est appliquée au CombatComponent
+	 * et aux visuels (au lieu de lire l'équipement depuis l'inventaire).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Equipment|AI")
+	TObjectPtr<UWeaponData> OverrideWeaponDataForAI = nullptr;
+
+	UFUNCTION(BlueprintCallable, Category="Equipment")
+	void SetOverrideWeaponDataForAI(UWeaponData* InWeaponData);
+
 	UFUNCTION(BlueprintCallable, Category="Equipment")
 	void RefreshFromActiveSlot(); // Call when active slot changes or its content changes.
 

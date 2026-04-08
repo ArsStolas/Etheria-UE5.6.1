@@ -43,7 +43,8 @@ public:
     void SnapToClosestPoint();
     void OnMoveCompleted();
     void RequestReturnToSpline();
-    void SetChasing(bool bInChasing) { bIsChasing = bInChasing; }
+    /** Met à jour l'état chase et restaure la vitesse de marche par défaut quand on se lance en poursuite. */
+    void SetChasing(bool bInChasing);
 
     UPROPERTY(EditAnywhere, Category="Spline")
     float DefaultWaitTimeAtPoint = 0.5f;
@@ -86,6 +87,13 @@ private:
     int32 NextPointIndex          = 0;
     bool  bReturningToSpline      = false;
     bool  bIsChasing              = false;
+
+    /** Vitesse de marche par défaut du CharacterMovement, restaurée en chase/return. */
+    float CachedDefaultMaxWalkSpeed = 300.f;
+    /** Sens de suivi spline (BackAndForth). */
+    bool  bFollowSplineForward    = true;
+    /** Direction pour NextPointIndex (BackAndForth). */
+    int32 FollowSplineDirection   = 1;
 
     float GetWaitTimeForPointIndex(int32 PointIndex) const;
     float GetWaitTimeForCurrentPoint() const;
