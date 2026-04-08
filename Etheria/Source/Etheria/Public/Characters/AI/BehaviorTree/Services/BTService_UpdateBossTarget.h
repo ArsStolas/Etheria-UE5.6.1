@@ -9,7 +9,6 @@
 #include "BehaviorTree/BTService.h"
 #include "BTService_UpdateBossTarget.generated.h"
 
-/** Met à jour la clé TargetActor du Blackboard avec le joueur (index 0). Interval défini dans le constructeur (0.25s). */
 UCLASS()
 class ETHERIA_API UBTService_UpdateBossTarget : public UBTService
 {
