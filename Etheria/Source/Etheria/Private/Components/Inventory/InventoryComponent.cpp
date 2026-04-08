@@ -194,7 +194,7 @@ bool UInventoryComponent::DropSelected(bool bDropAll, int32 Amount)
 		slots[selectedIndex].stack.quantity -= toDrop;
 		if (slots[selectedIndex].stack.quantity <= 0) slots[selectedIndex].Clear();
 		BroadcastSlot(selectedIndex);
-		OnItemRemoved.Broadcast(dropStack.def, dropStack.quantity);
+		OnItemRemoved.Broadcast(dropStack.def, selectedIndex);
 		ClampSelectedToNonEmpty();
 		return true;
 	}
@@ -235,6 +235,9 @@ bool UInventoryComponent::UseSelected()
 void UInventoryComponent::SelectNext()
 {
 	if (slots.Num() == 0) return;
+	if (GEngine) {
+		GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.0f, FColor::Cyan, TEXT("SELECT NEXT CALLED ONCE!"));
+	}
 	int32 start = selectedIndex;
 	for (int32 i=0;i<slots.Num();++i)
 	{
@@ -247,6 +250,9 @@ void UInventoryComponent::SelectNext()
 void UInventoryComponent::SelectPrevious()
 {
 	if (slots.Num() == 0) return;
+	if (GEngine) {
+		GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.0f, FColor::Cyan, TEXT("SELECT PREVIOUS CALLED ONCE!"));
+	}
 	int32 start = selectedIndex;
 	for (int32 i=0;i<slots.Num();++i)
 	{
@@ -270,7 +276,7 @@ void UInventoryComponent::ClampSelectedToNonEmpty()
 		}
 	}
 	selectedIndex = 0;
-	OnSelectedIndexChanged.Broadcast(selectedIndex);
+	//OnSelectedIndexChanged.Broadcast(selectedIndex);
 }
 
 void UInventoryComponent::BroadcastSlot(int32 Slot)
