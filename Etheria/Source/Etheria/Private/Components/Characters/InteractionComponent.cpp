@@ -39,7 +39,6 @@ void UInteractionComponent::BeginPlay()
 	}
 }
 
-
 // Called every frame
 void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
@@ -67,9 +66,17 @@ bool UInteractionComponent::LineTrace(FHitResult& HitResult)
 		TraceParams
 	);
 
+	if (bDebugMode)
+	{
+		FColor LineColor = bHit ? FColor::Green : FColor::Red;
+		DrawDebugLine(GetWorld(), CameraLocation, bHit ? HitResult.ImpactPoint : End, LineColor, false, 0.0f, 0, 1.5f);
+
+		if (bHit)
+			DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, 5.0f, 8, FColor::Yellow, false, 0.0f);
+	}
+
 	return bHit;
 }
-
 
 void UInteractionComponent::CheckInteraction()
 {
