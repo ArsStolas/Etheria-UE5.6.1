@@ -19,6 +19,28 @@
         if (bDiveDebugMode && GEngine) GEngine->AddOnScreenDebugMessage(Key, 0.1f, Color, FString::Printf(Format, ##__VA_ARGS__))
 #endif
 
+void UDiveMode::ConfigureDiveTuning(
+    float InMaxDiveSpeed,
+    float InMinDiveSpeed,
+    float InDiveAcceleration,
+    float InDiveDeceleration,
+    float InDiveEntrySpeedBonus,
+    float InMaxPitch,
+    float InMaxRoll,
+    float InTurnRateDive,
+    float InLiftFactor)
+{
+    MaxDiveSpeed = InMaxDiveSpeed;
+    MinDiveSpeed = InMinDiveSpeed;
+    DiveAcceleration = InDiveAcceleration;
+    DiveDeceleration = InDiveDeceleration;
+    DiveEntrySpeedBonus = InDiveEntrySpeedBonus;
+    MaxPitch = InMaxPitch;
+    MaxRoll = InMaxRoll;
+    TurnRateDive = InTurnRateDive;
+    LiftFactor = InLiftFactor;
+}
+
 void UDiveMode::Enter()
 {
     if (!Owner || !Move) return;
@@ -31,7 +53,7 @@ void UDiveMode::Enter()
     Move->AirControl = 1.f;
     Move->BrakingDecelerationFalling = 0.f;
 
-    CurrentSpeed = MinDiveSpeed;
+    CurrentSpeed = FMath::Clamp(MinDiveSpeed + DiveEntrySpeedBonus, MinDiveSpeed, MaxDiveSpeed);
     bWindStreamActive = false;
     PendingWindTargetSpeed = 0.f;
     PendingWindAlignmentStrength = 0.f;
@@ -116,6 +138,12 @@ void UDiveMode::TickMode(float DeltaTime)
     }
 
     const bool bHasWind = bWindStreamActive && PendingWindTargetSpeed > 0.f && !PendingWindDirection.IsNearlyZero();
+    if (!bHasWind)
+    {
+        const float TurnDrag = FMath::Abs(RollFactor) * DiveDeceleration * 0.3f * DeltaTime;
+        const float ClimbDrag = FMath::Max(PitchFactor, 0.f) * DiveDeceleration * 0.65f * DeltaTime;
+        CurrentSpeed -= (TurnDrag + ClimbDrag);
+    }
     if (bHasWind)
     {
         CurrentSpeed = FMath::Max(CurrentSpeed, PendingWindTargetSpeed);
@@ -238,12 +266,13 @@ void UDiveMode::TickMode(float DeltaTime)
         float LiftAccelZ = 0.f;
         if (PitchFactor > 0.f && LiftCoeff > 0.f)
         {
-            LiftAccelZ = LiftCoeff * FMath::Clamp(PitchFactor, 0.f, 1.f) * (CurrentSpeed * 0.5f);
+            LiftAccelZ = LiftCoeff * FMath::Clamp(PitchFactor, 0.f, 1.f) * (CurrentSpeed * 0.38f);
         }
 
         const float DivePushZ = FMath::Abs(FMath::Min(PitchFactor, 0.f)) * FMath::Lerp(350.f, 1100.f, FMath::Clamp(CurrentSpeed / MaxDiveSpeed, 0.f, 1.f));
         const float BaseSinkSpeed = ComputeBaseSinkSpeed();
-        const float VerticalTargetSpeed = -BaseSinkSpeed - DivePushZ + LiftAccelZ;
+        const float LowSpeedSinkPenalty = FMath::Lerp(380.f, 0.f, FMath::Clamp(CurrentSpeed / MaxDiveSpeed, 0.f, 1.f));
+        const float VerticalTargetSpeed = -BaseSinkSpeed - DivePushZ - LowSpeedSinkPenalty + LiftAccelZ;
         const float VerticalInterp = (VerticalTargetSpeed < Velocity.Z) ? 2.8f : 1.6f;
         Velocity.Z = FMath::FInterpTo(Velocity.Z, VerticalTargetSpeed, DeltaTime, VerticalInterp);
         Velocity.Z = FMath::Clamp(Velocity.Z, -2400.f, 900.f);

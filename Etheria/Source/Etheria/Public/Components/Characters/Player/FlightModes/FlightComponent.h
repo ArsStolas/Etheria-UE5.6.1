@@ -61,6 +61,51 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Flight")
 	FDiveEvent OnDiveStop;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Glide", meta=(ClampMin="500", ClampMax="2000"))
+	float GlideSpeed = 1200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Glide", meta=(ClampMin="100", ClampMax="1000"))
+	float GlideDescendRate = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Glide", meta=(ClampMin="0.5", ClampMax="10.0"))
+	float GlideInterpSpeed = 2.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Glide", meta=(ClampMin="0.5", ClampMax="10.0"))
+	float GlideDescentInterpSpeed = 3.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Glide", meta=(ClampMin="100", ClampMax="1000"))
+	float GlideMinimumHeight = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="500", ClampMax="5000"))
+	float DiveMaxSpeed = 2600.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="100", ClampMax="1000"))
+	float DiveMinSpeed = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="500", ClampMax="2000"))
+	float DiveAcceleration = 1400.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="200", ClampMax="1500"))
+	float DiveDeceleration = 600.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="0", ClampMax="1500"))
+	float DiveEntrySpeedBonus = 250.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="100", ClampMax="1000"))
+	float DiveMinimumHeight = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="15", ClampMax="90"))
+	float DiveMaxPitch = 60.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="10", ClampMax="90"))
+	float DiveMaxRoll = 30.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="30", ClampMax="180"))
+	float DiveTurnRate = 90.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="0.1", ClampMax="2.0"))
+	float DiveLiftFactor = 0.6f;
+
 private:
 	EFlightMode CurrentMode = EFlightMode::None;
 

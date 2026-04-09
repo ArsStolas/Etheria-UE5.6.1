@@ -9,6 +9,20 @@
 #include "Characters/Players/PlayerCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
+void UGlideMode::ConfigureGlideTuning(
+	float InGlideSpeed,
+	float InDescendRate,
+	float InGlideInterp,
+	float InDescentInterp,
+	float InMinimumHeight)
+{
+	GlideSpeed = InGlideSpeed;
+	DescendRate = InDescendRate;
+	GlideInterp = InGlideInterp;
+	DescentInterp = InDescentInterp;
+	MinimumHeight = InMinimumHeight;
+}
+
 void UGlideMode::Enter()
 {
 	if (!Owner || !Move) return;
