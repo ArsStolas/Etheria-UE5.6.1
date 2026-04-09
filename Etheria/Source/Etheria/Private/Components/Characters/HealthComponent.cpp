@@ -21,22 +21,23 @@ UHealthComponent::UHealthComponent()
 void UHealthComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
 	Health = MaxHealth;
 
 	if (AActor* Owner = GetOwner())
 	{
+		OwnerActor = Owner;
+		Owner->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
+
 		OwnerCharacter = Cast<ABaseCharacter>(Owner);
 		if (OwnerCharacter.IsValid())
 		{
-			OwnerCharacter->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
 			OwnerStateComponent = OwnerCharacter->GetStateComponent();
 		}
 	}
 
-	// Cache the mesh we will use for the hit overlay (optional but avoids resolving every hit).
 	CachedDamageOverlayMesh = ResolveDamageOverlayMesh();
 }
+
 void UHealthComponent::ResetHealth()
 {
 	Health = MaxHealth;
@@ -52,6 +53,8 @@ void UHealthComponent::ResetHealth()
 */
 void UHealthComponent::TakeDamage(float DamageAmount)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[HealthComponent] TakeDamage — Amount: %f | IsDead: %s"), 
+		DamageAmount, IsDead() ? TEXT("true") : TEXT("false"));
 	if (DamageAmount <= 0.f || IsDead()) return;
 
 	TriggerDamageOverlay();
@@ -59,15 +62,15 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
-	if (!OwnerStateComponent.IsValid())
-		return;
-
 	if (IsDead())
 	{
-		OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
-		OnDeath.Broadcast();
+		if (OwnerStateComponent.IsValid())
+			OwnerStateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
+
+		if (!OwnerCharacter.IsValid() && OwnerActor.IsValid())
+			OwnerActor->Destroy();
 	}
-	else
+	else if (OwnerStateComponent.IsValid())
 	{
 		SetTemporaryLifeState(EtheriaTags::State_Life_TakingDamage, DamageStateDuration);
 	}
@@ -238,5 +241,6 @@ bool UHealthComponent::IsDead() const
 void UHealthComponent::HandleTakeAnyDamage(AActor* DamagedActor, const float Damage, const UDamageType* DamageType,
 	AController* InstigatedBy, AActor* DamageCauser)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[HealthComponent] HandleTakeAnyDamage called — Damage: %f"), Damage);
 	TakeDamage(Damage);
 }

@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: 0nnen
+ * Last Updated by: Zhailendra
  * Class: PlayerCharacter - Source
  */
 
@@ -21,7 +21,7 @@
 #include "Components/Characters/Player/Rope/RopeDetectionComponent.h"
 #include "Components/Characters/Player/Rope/RopeLengthControllerComponent.h"
 #include "Components/Characters/Player/Rope/RopeLockComponent.h"
-#include "Components/Characters/Player/Rope/RopeSwingComponent.h"
+#include "Components/Characters/Player/Rope/Swinging/RopeSwingComponent.h"
 #include "Components/Inventory/InventoryComponent.h"
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTarget/LockTargetComponent.h"
@@ -32,6 +32,7 @@
 #include "World/Rope/RopeAttachPoint.h"
 #include "Components/Characters/Player/Movements/Swim/SwimComponent.h"
 #include "Components/Characters/Player/Rope/URopeCameraComponent.h"
+#include "Components/Characters/Player/Rope/Pulling/RopePullComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -82,6 +83,7 @@ APlayerCharacter::APlayerCharacter()
     RopeSwingComponent = CreateDefaultSubobject<URopeSwingComponent>(TEXT("BPC_RopeSwingComponent"));
     RopeLengthControllerComponent = CreateDefaultSubobject<URopeLengthControllerComponent>(TEXT("BPC_RopeLengthController"));
     RopeCameraComponent = CreateDefaultSubobject<URopeCameraComponent>(TEXT("BPC_RopeCameraComponent"));
+    RopePullComponent = CreateDefaultSubobject<URopePullComponent>(TEXT("BPC_RopePullComponent"));
 
     // --- SWIM COMPONENTS ---
     SwimComponent = CreateDefaultSubobject<USwimComponent>(TEXT("BPC_Swim"));
@@ -127,7 +129,6 @@ void APlayerCharacter::BeginPlay()
     if (HealthComponent)
     {
         BIND_IF(bDebugLifeStateLogs, HealthComponent->OnHealthChanged, LogHealthChanged);
-        BIND_IF(bDebugLifeStateLogs, HealthComponent->OnDeath, LogDeath);
     }
 
     // --- Glider Delegates ---
@@ -281,10 +282,10 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
             EIC->BindAction(AttachRopeAction, ETriggerEvent::Started, this, &APlayerCharacter::OnRopeAttachPressed);
         }
         
-        if (ClimbRopeAction)
+        if (RopeLengthAction)
         {
-            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Triggered, this, &APlayerCharacter::ClimbRopeInput);
-            EIC->BindAction(ClimbRopeAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopClimbRopeInput);
+            EIC->BindAction(RopeLengthAction, ETriggerEvent::Triggered, this, &APlayerCharacter::RopeLengthInput);
+            EIC->BindAction(RopeLengthAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopRopeLengthInput);
         }
     #pragma endregion
         
@@ -1039,45 +1040,54 @@ void APlayerCharacter::CheckRopeAttachMode()
 
     switch (LockedPoint->AttachType)
     {
-    case ERopeAttachType::Swing:
-        {
-            RopeSwingComponent->StopSwing();
+        case ERopeAttachType::Swing:
+            {
+                RopeSwingComponent->StopSwing();
+                break;
+            }
+        case ERopeAttachType::Pull:
+            GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Point Pull, pas de swing"));
             break;
-        }
-    case ERopeAttachType::Pull:
-        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Point Pull, pas de swing"));
-        break;
-    default:
-        GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("AttachType non géré"));
-        break;
+        default:
+            GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("AttachType non géré"));
+            break;
     }
 }
 
-void APlayerCharacter::ClimbRopeInput(const FInputActionValue& Value)
+void APlayerCharacter::RopeLengthInput(const FInputActionValue& Value)
 {
-    float AxisVal = Value.Get<float>();
-    
-    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
-    {
+    const float AxisVal = Value.Get<float>();
+
+    if (!RopeAttachComponent || !RopeAttachComponent->IsAttached())
         return;
-    }
-    
+
+    ARopeAttachPoint* AttachPoint = RopeAttachComponent->GetAttachedPoint();
+    if (!AttachPoint)
+        return;
+
     if (RopeLengthControllerComponent)
-        RopeLengthControllerComponent->SetClimbInput(AxisVal);
-    
-    if (StateComponent)
-        StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Climbing);
+        RopeLengthControllerComponent->SetRopeLengthInput(AxisVal);
+
+    switch (AttachPoint->GetAttachType())
+    {
+        case ERopeAttachType::Swing:
+            if (StateComponent)
+                StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Climbing);
+            break;
+
+        case ERopeAttachType::Pull:
+            if (StateComponent)
+                StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Pulling);
+            break;
+
+        default: break;
+    }
 }
 
-void APlayerCharacter::StopClimbRopeInput(const FInputActionValue& Value)
+void APlayerCharacter::StopRopeLengthInput(const FInputActionValue& Value)
 {
-    if (RopeAttachComponent && !RopeAttachComponent->IsAttached())
-    {
-        return;
-    }
-    
     if (RopeLengthControllerComponent)
-        RopeLengthControllerComponent->SetClimbInput(0.f);
+        RopeLengthControllerComponent->SetRopeLengthInput(0.f);
 }
 
 #pragma endregion
@@ -1130,46 +1140,37 @@ void APlayerCharacter::LogHealthChanged(float NewHealth, float MaxHealth)
     UE_LOG(LogTemp, Warning, TEXT("[%s] Health changed: %f / %f"), *GetName(), NewHealth, MaxHealth);
 }
 
-void APlayerCharacter::LogDeath()
-{
-    UE_LOG(LogTemp, Warning, TEXT("[%s] Player DIED!"), *GetName());
-    if (StateComponent)
-    {
-        StateComponent->SetLifeState(EtheriaTags::State_Life_Dead);
-    }
-}
-
 #pragma endregion
 
 #pragma region "COMMANDS EXEC"
 
 void APlayerCharacter::DamageSelf(float Amount)
 {
-    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    if (HealthComponent)
     {
-        HC->TakeDamage(FMath::Max(0.f, Amount));
+        HealthComponent->TakeDamage(FMath::Max(0.f, Amount));
     }
 }
 
 void APlayerCharacter::HealSelf(float Amount)
 {
-    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    if (HealthComponent)
     {
-        HC->Heal(FMath::Max(0.f, Amount));
+        HealthComponent->Heal(FMath::Max(0.f, Amount));
     }
 }
 
 void APlayerCharacter::SetHPPercent(float Percent)
 {
-    if (UHealthComponent* HC = FindComponentByClass<UHealthComponent>())
+    if (HealthComponent)
     {
         const float P = FMath::Clamp(Percent, 0.f, 1.f);
-        const float Target = HC->GetMaxHealth() * P;
-        const float Current = HC->GetHealth();
+        const float Target = HealthComponent->GetMaxHealth() * P;
+        const float Current = HealthComponent->GetHealth();
         const float Delta = Target - Current;
 
-        if (Delta > 0.f) HC->Heal(Delta);
-        else HC->TakeDamage(-Delta);
+        if (Delta > 0.f) HealthComponent->Heal(Delta);
+        else HealthComponent->TakeDamage(-Delta);
     }
 }
 

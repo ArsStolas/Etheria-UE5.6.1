@@ -51,7 +51,7 @@ public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     /** Get the currently detected rope attachment point */
-    UFUNCTION(BlueprintCallable, Category="Rope")
+    UFUNCTION(BlueprintCallable, Category="Rope|Detection")
     ARopeAttachPoint* GetCurrentDetectedPoint() const { return CurrentPoint.Get(); }
 
     /** Broadcast when detected point changes */
@@ -63,26 +63,26 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     // === Detection Parameters ===
-    UPROPERTY(EditAnywhere, Category="Detection", meta=(ClampMin="500", ClampMax="5000"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection", meta=(ClampMin="500", ClampMax="5000"))
     float MaxDetectionDistance = 1500.f;
 
-    UPROPERTY(EditAnywhere, Category="Detection", meta=(ClampMin="10", ClampMax="60"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection", meta=(ClampMin="10", ClampMax="60"))
     float DetectionHalfAngle = 20.f;
 
-    UPROPERTY(EditAnywhere, Category="Detection", meta=(ClampMin="0.05", ClampMax="0.5"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection", meta=(ClampMin="0.05", ClampMax="0.5"))
     float DetectionInterval = 0.08f;
 
     // === Validation Parameters ===
-    UPROPERTY(EditAnywhere, Category="Detection|Validation", meta=(ClampMin="0.0", ClampMax="1.0"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection|Validation", meta=(ClampMin="0.0", ClampMax="1.0"))
     float MinCameraDot = 0.75f;
 
-    UPROPERTY(EditAnywhere, Category="Detection|Validation", meta=(ClampMin="-500", ClampMax="500"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection|Validation", meta=(ClampMin="-500", ClampMax="500"))
     float MinHeightAbovePlayer = 0.f;
     
-    UPROPERTY(EditAnywhere, Category="Detection|Validation", meta=(ClampMin="0", ClampMax="1"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection|Validation", meta=(ClampMin="0", ClampMax="1"))
     float ScoringDistanceWeight = 0.3f;
     
-    UPROPERTY(EditAnywhere, Category="Detection|Validation", meta=(ClampMin="0", ClampMax="1"))
+    UPROPERTY(EditAnywhere, Category="Rope|Detection|Validation", meta=(ClampMin="0", ClampMax="1"))
     float ScoringDirectionWeight = 0.7f;
 
     // === Debug Parameters ===

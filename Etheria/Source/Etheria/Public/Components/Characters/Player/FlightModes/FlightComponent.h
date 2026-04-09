@@ -45,6 +45,9 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	
+	FORCEINLINE UGlideMode* GetGlideMode() const { return GlideMode; }
+	FORCEINLINE UDiveMode* GetDiveMode() const { return DiveMode; }
 
 	UPROPERTY(BlueprintAssignable, Category="Flight")
 	FGlideEvent OnGlideStart;
