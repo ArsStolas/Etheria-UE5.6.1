@@ -38,10 +38,6 @@ void UDiveMode::Enter()
     PendingWindDirection = FVector::ZeroVector;
     PendingWindCenteringAccel = FVector::ZeroVector;
 
-    if (Owner->GetGliderVisual())
-    {
-        Owner->GetGliderVisual()->SetVisibility(false);
-    }
 }
 
 void UDiveMode::Exit()
@@ -52,11 +48,6 @@ void UDiveMode::Exit()
     Owner->SetActorRotation(FRotator(0.f, Rotation.Yaw, 0.f));
 
     RestoreMovementSettings();
-
-    if (Owner->GetGliderVisual())
-    {
-        Owner->GetGliderVisual()->SetVisibility(false);
-    }
 
     CurrentSpeed = MinDiveSpeed;
     bWindStreamActive = false;
