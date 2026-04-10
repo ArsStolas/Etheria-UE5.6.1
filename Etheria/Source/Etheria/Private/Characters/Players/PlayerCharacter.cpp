@@ -57,8 +57,6 @@ APlayerCharacter::APlayerCharacter()
 
     // --- GLIDER COMPONENT ---
     FlightComponent = CreateDefaultSubobject<UFlightComponent>(TEXT("FlightComponent"));
-    GliderVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GliderVisual"));
-    GliderVisual->SetupAttachment(RootComponent);
 
     // --- INVENTORY COMPONENT ---
     InventoryComponent  = CreateDefaultSubobject<UInventoryComponent>(TEXT("BPC_Inventory"));

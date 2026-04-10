@@ -27,6 +27,24 @@ void UFlightComponent::BeginPlay()
     GlideMode = NewObject<UGlideMode>(this);
     DiveMode  = NewObject<UDiveMode>(this);
 
+    GlideMode->ConfigureGlideTuning(
+        GlideSpeed,
+        GlideDescendRate,
+        GlideInterpSpeed,
+        GlideDescentInterpSpeed,
+        GlideMinimumHeight);
+
+    DiveMode->ConfigureDiveTuning(
+        DiveMaxSpeed,
+        DiveMinSpeed,
+        DiveAcceleration,
+        DiveDeceleration,
+        DiveEntrySpeedBonus,
+        DiveMaxPitch,
+        DiveMaxRoll,
+        DiveTurnRate,
+        DiveLiftFactor);
+
     GlideMode->Initialize(Owner);
     DiveMode->Initialize(Owner);
 }
@@ -75,6 +93,18 @@ void UFlightComponent::StartGlide()
 void UFlightComponent::StartDive()
 {
     if (!Owner || !Owner->GetCharacterMovement()->IsFalling())
+        return;
+
+    FHitResult Hit;
+    const FVector TraceStart = Owner->GetActorLocation();
+    const FVector TraceEnd = TraceStart - Owner->GetActorUpVector() * DiveMinimumHeight;
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(Owner);
+
+    const bool bTooCloseToGround = Owner->GetWorld()->LineTraceSingleByChannel(
+        Hit, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
+    if (bTooCloseToGround)
         return;
 
     // Exit Glide, Enter Dive

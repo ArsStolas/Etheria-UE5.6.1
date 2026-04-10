@@ -403,10 +403,13 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTim
     }
 
     const float StreamAlignment = FMath::Abs(FVector::DotProduct(ReferenceDirection, StreamDirection));
-    const float AlignmentAssist = FMath::GetMappedRangeValueClamped(
-        FVector2D(0.15f, 0.8f),
-        FVector2D(CrossingAssistStrength, 1.f),
-        StreamAlignment);
+    const bool bFullyUsingStream = StreamAlignment >= 0.55f;
+    const float AlignmentAssist = bFullyUsingStream
+        ? FMath::GetMappedRangeValueClamped(
+            FVector2D(0.55f, 0.9f),
+            FVector2D(0.35f, 1.f),
+            StreamAlignment)
+        : CrossingAssistStrength;
 
     const float EdgeCenteringStrength = CenteringStrength
         * EdgeAlpha
@@ -420,14 +423,19 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTim
         * Falloff
         * (bIdleInStream ? 0.75f : 0.f);
 
-    const float SoftCenteringStrength = EdgeCenteringStrength + IdleCenteringStrength;
+    const float AlignmentCenteringScale = bFullyUsingStream ? FMath::Square(AlignmentAssist) : 0.f;
+    const float SoftCenteringStrength = (EdgeCenteringStrength + IdleCenteringStrength) * AlignmentCenteringScale;
     const FVector CenteringAccel = DistanceToCore > KINDA_SMALL_NUMBER
         ? CenterOffset * SoftCenteringStrength
         : FVector::ZeroVector;
 
-    const float EffectiveInfluence = DirectionInfluence * Falloff * AlignmentAssist;
+    const float EffectiveInfluence = bFullyUsingStream
+        ? DirectionInfluence * Falloff * FMath::Square(AlignmentAssist)
+        : 0.f;
     const float CurrentDiveSpeed = DiveMode->GetCurrentSpeed();
-    const float TargetSpeed = FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeed), AlignmentAssist);
+    const float TargetSpeed = bFullyUsingStream
+        ? FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeed), AlignmentAssist)
+        : FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeed * 0.35f), CrossingAssistStrength);
 
     DiveMode->ApplyWindBoost(TargetSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
 

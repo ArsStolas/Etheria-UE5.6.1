@@ -20,6 +20,12 @@ public:
 	virtual void Enter() override;
 	virtual void Exit() override;
 	virtual void TickMode(float DeltaTime) override;
+	void ConfigureGlideTuning(
+		float InGlideSpeed,
+		float InDescendRate,
+		float InGlideInterp,
+		float InDescentInterp,
+		float InMinimumHeight);
 
 	bool CanStartGliding() const;
 

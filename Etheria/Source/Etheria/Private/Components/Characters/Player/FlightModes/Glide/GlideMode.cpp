@@ -9,6 +9,20 @@
 #include "Characters/Players/PlayerCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
+void UGlideMode::ConfigureGlideTuning(
+	float InGlideSpeed,
+	float InDescendRate,
+	float InGlideInterp,
+	float InDescentInterp,
+	float InMinimumHeight)
+{
+	GlideSpeed = InGlideSpeed;
+	DescendRate = InDescendRate;
+	GlideInterp = InGlideInterp;
+	DescentInterp = InDescentInterp;
+	MinimumHeight = InMinimumHeight;
+}
+
 void UGlideMode::Enter()
 {
 	if (!Owner || !Move) return;
@@ -24,8 +38,6 @@ void UGlideMode::Enter()
 	Move->bUseControllerDesiredRotation = true;
 	Move->RotationRate = FRotator(0.f, 250.f, 0.f);
 
-	if (Owner->GetGliderVisual())
-		Owner->GetGliderVisual()->SetVisibility(true);
 }
 
 void UGlideMode::Exit()
@@ -34,8 +46,6 @@ void UGlideMode::Exit()
 
 	RestoreMovementSettings();
 
-	if (Owner->GetGliderVisual())
-		Owner->GetGliderVisual()->SetVisibility(false);
 }
 
 bool UGlideMode::CanStartGliding() const

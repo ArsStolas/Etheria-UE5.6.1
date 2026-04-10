@@ -44,7 +44,7 @@ protected:
     float DirectionInfluence = 0.9f;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float CrossingAssistStrength = 0.12f;
+    float CrossingAssistStrength = 0.02f;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Settings", meta=(ClampMin="0.0", ClampMax="25.0"))
     float CenteringStrength = 8.f;
