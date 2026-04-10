@@ -19,67 +19,71 @@ class UNavigationPath;
 UCLASS()
 class ETHERIA_API AAIController_Base : public AAIController
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	AAIController_Base();
+    AAIController_Base();
 
-	/** Demande un déplacement vers une position (pathfinding + AddMovementInput, accélération respectée). Utilisé par patrol et wander. */
-	UFUNCTION(BlueprintCallable, Category="AI")
-	void RequestMoveToLocation(const FVector& Destination);
+    /** Demande un déplacement vers une position (pathfinding + AddMovementInput, accélération respectée). Utilisé par patrol et wander. */
+    UFUNCTION(BlueprintCallable, Category="AI")
+    void RequestMoveToLocation(const FVector& Destination);
 
-	/** Annule le déplacement en cours vers une location (pas la chase). */
-	UFUNCTION(BlueprintCallable, Category="AI")
-	void AbortMoveToLocation();
+    /** Annule le déplacement en cours vers une location (pas la chase). */
+    UFUNCTION(BlueprintCallable, Category="AI")
+    void AbortMoveToLocation();
 
-	/** Cible actuelle (perception), nullptr si aucune. */
-	UFUNCTION(BlueprintPure, Category="AI")
-	AActor* GetTargetActor() const { return TargetActor; }
+    /** Cible actuelle (perception), nullptr si aucune. */
+    UFUNCTION(BlueprintPure, Category="AI")
+    AActor* GetTargetActor() const { return TargetActor; }
 
-	/** True si un RequestMoveToLocation est en cours. */
-	UFUNCTION(BlueprintPure, Category="AI")
-	bool HasMoveToLocationInProgress() const { return bHasMoveToLocationDestination; }
-
-protected:
-	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaTime) override;
-	virtual void OnPossess(APawn* InPawn) override;
-	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
-
-	UFUNCTION()
-	virtual void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
-
-	void UpdateChasePath();
-	void UpdateMoveToLocationPath();
-	/** Déplace le pawn avec AddMovementInput vers le prochain point du chemin (accélération respectée). Retourne true si le déplacement "Move To Location" est terminé. */
-	bool TickMovement(float DeltaTime);
-	/** Appelé quand un RequestMoveToLocation a atteint sa destination (notifie le patrol). */
-	void NotifyMoveToLocationCompleted();
+    /** True si un RequestMoveToLocation est en cours. */
+    UFUNCTION(BlueprintPure, Category="AI")
+    bool HasMoveToLocationInProgress() const { return bHasMoveToLocationDestination; }
 
 protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
-	UAIPerceptionComponent* PerceptionComp;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
 
-	UPROPERTY()
-	UAISenseConfig_Sight* SightConfig;
+    UFUNCTION()
+    virtual void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-	UPROPERTY()
-	AActor* TargetActor = nullptr;
+    void UpdateChasePath();
+    void UpdateMoveToLocationPath();
+    /** Déplace le pawn avec AddMovementInput vers le prochain point du chemin (accélération respectée). Retourne true si le déplacement "Move To Location" est terminé. */
+    bool TickMovement(float DeltaTime);
+    /** Appelé quand un RequestMoveToLocation a atteint sa destination (notifie le patrol / wander). */
+    void NotifyMoveToLocationCompleted();
 
-	/** --- Move To Location (patrol points, return spline, wander) --- */
-	UPROPERTY()
-	FVector MoveToLocationDestination = FVector::ZeroVector;
-	bool bHasMoveToLocationDestination = false;
+    /** Retourne true si cet Actor est une cible valable pour la chase (filtre AIType). */
+    bool CanUseAsChaseTarget(AActor* Actor) const;
 
-	/** Points du chemin courant (chase ou move-to-location). */
-	UPROPERTY()
-	TArray<FVector> PathPoints;
-	int32 PathPointIndex = 0;
-	UPROPERTY(EditAnywhere, Category="AI|Movement", meta=(ClampMin="0.1", ClampMax="2.0"))
-	float PathUpdateInterval = 0.35f;
-	float PathUpdateTimer = 0.f;
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI")
+    UAIPerceptionComponent* PerceptionComp;
 
-	/** Rayon d'acceptation pour considérer qu'un point est atteint. */
-	UPROPERTY(EditAnywhere, Category="AI|Movement", meta=(ClampMin="10", ClampMax="200"))
-	float MoveAcceptRadius = 80.f;
+    UPROPERTY()
+    UAISenseConfig_Sight* SightConfig;
+
+    UPROPERTY()
+    AActor* TargetActor = nullptr;
+
+    /** --- Move To Location (patrol points, return spline, wander) --- */
+    UPROPERTY()
+    FVector MoveToLocationDestination = FVector::ZeroVector;
+    bool bHasMoveToLocationDestination = false;
+
+    /** Points du chemin courant (chase ou move-to-location). */
+    UPROPERTY()
+    TArray<FVector> PathPoints;
+    int32 PathPointIndex = 0;
+
+    UPROPERTY(EditAnywhere, Category="AI|Movement", meta=(ClampMin="0.1", ClampMax="2.0"))
+    float PathUpdateInterval = 0.35f;
+    float PathUpdateTimer = 0.f;
+
+    /** Rayon d'acceptation pour considérer qu'un point est atteint. */
+    UPROPERTY(EditAnywhere, Category="AI|Movement", meta=(ClampMin="10", ClampMax="200"))
+    float MoveAcceptRadius = 80.f;
 };

@@ -16,13 +16,14 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "Characters/Players/PlayerCharacter.h"
 
 AAIController_Base::AAIController_Base()
 {
     PrimaryActorTick.bCanEverTick = true;
 
     PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
-    SightConfig   = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig    = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 
     SightConfig->SightRadius = 1500.f;
     SightConfig->LoseSightRadius = 1800.f;
@@ -50,6 +51,7 @@ void AAIController_Base::Tick(float DeltaTime)
     if (!AI || !AI->StateComp) return;
 
     const bool bChasing = (TargetActor != nullptr);
+
     if (bChasing)
     {
         AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Chase);
@@ -165,6 +167,7 @@ bool AAIController_Base::TickMovement(float DeltaTime)
     const FVector MyLoc = Char->GetActorLocation();
     const float AcceptRadius = MoveAcceptRadius;
 
+    // Chase target
     if (TargetActor)
     {
         if (PathPoints.Num() == 0)
@@ -188,6 +191,7 @@ bool AAIController_Base::TickMovement(float DeltaTime)
                 ++PathPointIndex;
                 TargetPoint = PathPoints[PathPointIndex];
             }
+
             const FVector ToPoint = TargetPoint - MyLoc;
             const float DistToPoint = ToPoint.Size2D();
             if (DistToPoint > 2.f)
@@ -199,6 +203,7 @@ bool AAIController_Base::TickMovement(float DeltaTime)
         return false;
     }
 
+    // MoveToLocation (patrol / wander)
     if (bHasMoveToLocationDestination)
     {
         if (PathPoints.Num() == 0)
@@ -226,6 +231,7 @@ bool AAIController_Base::TickMovement(float DeltaTime)
                 ++PathPointIndex;
                 TargetPoint = PathPoints[PathPointIndex];
             }
+
             const FVector ToPoint = TargetPoint - MyLoc;
             const float DistToPoint = ToPoint.Size2D();
             if (DistToPoint > 2.f)
@@ -243,6 +249,7 @@ bool AAIController_Base::TickMovement(float DeltaTime)
             }
         }
     }
+
     return false;
 }
 
@@ -284,6 +291,38 @@ void AAIController_Base::OnMoveCompleted(FAIRequestID RequestID, const FPathFoll
     }
 }
 
+bool AAIController_Base::CanUseAsChaseTarget(AActor* Actor) const
+{
+    if (!Actor) return false;
+
+    ABaseAI* SelfAI = Cast<ABaseAI>(GetPawn());
+    if (!SelfAI) return false;
+
+    // Le joueur est toujours une cible valide pour une IA hostile.
+    if (APlayerCharacter* Player = Cast<APlayerCharacter>(Actor))
+    {
+        return true;
+    }
+
+    if (ABaseAI* OtherAI = Cast<ABaseAI>(Actor))
+    {
+        // Cas: Self Hostile → ne chase jamais une autre Hostile.
+        if (SelfAI->AIType == EAIType::Hostile)
+        {
+            // On veut seulement Neutral ou Friendly.
+            return OtherAI->AIType == EAIType::Neutral
+                || OtherAI->AIType == EAIType::Friendly;
+        }
+
+        // Ici tu peux définir le comportement des AI Friendly / Neutral si besoin.
+        // Exemple: un Friendly ne chase personne par défaut.
+        // return false;
+    }
+
+    // Par défaut, on ne chase pas ce qu'on ne connaît pas.
+    return false;
+}
+
 void AAIController_Base::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
     if (!Actor) return;
@@ -291,19 +330,27 @@ void AAIController_Base::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
     ABaseAI* AI = Cast<ABaseAI>(GetPawn());
     if (!AI || !AI->StateComp) return;
 
-    UAISplinePatrolComponent* Patrol = AI->FindComponentByClass<UAISplinePatrolComponent>();
-    UAIWanderComponent* WanderComp = AI->FindComponentByClass<UAIWanderComponent>();
+    UAISplinePatrolComponent* Patrol   = AI->FindComponentByClass<UAISplinePatrolComponent>();
+    UAIWanderComponent*       WanderComp = AI->FindComponentByClass<UAIWanderComponent>();
+
+    const bool bSensed = Stimulus.WasSuccessfullySensed();
+
+    // Si on vient de percevoir quelque chose mais que ce n'est pas une cible valide, on ignore.
+    if (bSensed && !CanUseAsChaseTarget(Actor))
+    {
+        return;
+    }
 
     if (Patrol)
     {
-        if (Stimulus.WasSuccessfullySensed())
+        if (bSensed)
         {
             TargetActor = Actor;
             AbortMoveToLocation();
             AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Chase);
             Patrol->SetChasing(true);
         }
-        else
+        else if (Actor == TargetActor)
         {
             TargetActor = nullptr;
             PathPoints.Empty();
@@ -317,13 +364,13 @@ void AAIController_Base::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
     }
     else if (WanderComp)
     {
-        if (Stimulus.WasSuccessfullySensed())
+        if (bSensed)
         {
             TargetActor = Actor;
             AbortMoveToLocation();
             AI->StateComp->SetMovementState(EtheriaTags::State_Movement_Chase);
         }
-        else
+        else if (Actor == TargetActor)
         {
             TargetActor = nullptr;
             PathPoints.Empty();
