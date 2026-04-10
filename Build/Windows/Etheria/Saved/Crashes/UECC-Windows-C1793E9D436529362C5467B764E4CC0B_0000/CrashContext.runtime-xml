@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FGenericCrashContext>
+<RuntimeProperties>
+<CrashVersion>3</CrashVersion>
+<ExecutionGuid>98141A5E4A82BC19FE19CF890C8190CC</ExecutionGuid>
+<CrashGUID>UECC-Windows-C1793E9D436529362C5467B764E4CC0B_0000</CrashGUID>
+<IsEnsure>true</IsEnsure>
+<IsStall>false</IsStall>
+<IsAssert>false</IsAssert>
+<CrashType>Ensure</CrashType>
+<ErrorMessage>Ensure condition failed: false  [File:D:\build\++UE5\Sync\Engine\Source\Runtime\GameplayTags\Private\GameplayTagsManager.cpp] [Line: 2213] 
+Requested Gameplay Tag AI.Neutral was not found, tags must be loaded from config or registered as a native tag
+Stack: 
+0x00007ff7713a6202 Etheria.exe!`TSparseArray&lt;TSetElement&lt;TTuple&lt;FString,FGameplayTagSearchPathInfo&gt; &gt;,TSparseArrayAllocator&lt;TSizedDefaultAllocator&lt;32&gt;,FDefaultBitArrayAllocator&gt; &gt;::TRangedForIterator::operator!=&apos;::`2&apos;::&lt;lambda_1&gt;::operator()() []
+0x00007ff769eb7158 Etheria.exe!UGameplayTagsManager::RequestGameplayTag() []
+0x00007ff769eb69f0 Etheria.exe!FGameplayTag::RequestGameplayTag() []
+0x00007ff76cf43176 Etheria.exe!ABaseAI::SetupTeamTags() [A:\Apps\_UnrealEngine\Projects\Etheria-UE5.6.1\Etheria\Source\Etheria\Private\Characters\AI\BaseAI.cpp:79]
+0x00007ff76cf37419 Etheria.exe!ABaseAI::BeginPlay() [A:\Apps\_UnrealEngine\Projects\Etheria-UE5.6.1\Etheria\Source\Etheria\Private\Characters\AI\BaseAI.cpp:60]
+0x00007ff76a8e5d4b Etheria.exe!AActor::DispatchBeginPlay() []
+0x00007ff76c349a61 Etheria.exe!AWorldSettings::NotifyBeginPlay() []
+0x00007ff76b2ee151 Etheria.exe!AGameStateBase::HandleBeginPlay() []
+0x00007ff76c214c9d Etheria.exe!UWorld::BeginPlay() []
+0x00007ff76c3c57ae Etheria.exe!UEngine::LoadMap() []
+0x00007ff76c37bd8d Etheria.exe!UEngine::Browse() []
+0x00007ff76b282436 Etheria.exe!UGameInstance::StartGameInstance() []
+0x00007ff76b281e68 Etheria.exe!UGameEngine::Start() []
+0x00007ff76c642114 Etheria.exe!FEngineLoop::Init() []
+0x00007ff76c65a5ff Etheria.exe!GuardedMain() []
+0x00007ff76c65a7aa Etheria.exe!GuardedMainWrapper() []
+0x00007ff76c65d5d8 Etheria.exe!LaunchWindowsStartup() []
+0x00007ff76c66abd4 Etheria.exe!WinMain() []
+0x00007ff77105d0ea Etheria.exe!__scrt_common_main_seh() [D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:288]
+0x00007ffc28bbe8d7 KERNEL32.DLL!UnknownFunction []
+0x00007ffc298ec3fc ntdll.dll!UnknownFunction []
+</ErrorMessage>
+<CrashReporterMessage></CrashReporterMessage>
+<CrashReporterMessage>Attended</CrashReporterMessage>
+<ProcessId>13816</ProcessId>
+<SecondsSinceStart>0</SecondsSinceStart>
+<IsInternalBuild>false</IsInternalBuild>
+<IsPerforceBuild>false</IsPerforceBuild>
+<IsWithDebugInfo>false</IsWithDebugInfo>
+<IsSourceDistribution>false</IsSourceDistribution>
+<GameName>UE-Etheria</GameName>
+<ExecutableName>Etheria</ExecutableName>
+<BuildConfiguration>Development</BuildConfiguration>
+<GameSessionID></GameSessionID>
+<PlatformName>Windows</PlatformName>
+<PlatformFullName>Windows</PlatformFullName>
+<PlatformNameIni>Windows</PlatformNameIni>
+<EngineMode>Game</EngineMode>
+<EngineModeEx>Unset</EngineModeEx>
+<DeploymentName></DeploymentName>
+<EngineVersion>5.6.1-44394996+++UE5+Release-5.6</EngineVersion>
+<EngineCompatibleVersion>5.6.1-44394996+++UE5+Release-5.6</EngineCompatibleVersion>
+<CommandLine> Etheria</CommandLine>
+<LanguageLCID>9</LanguageLCID>
+<AppDefaultLocale>fr-FR</AppDefaultLocale>
+<BuildVersion>++UE5+Release-5.6-CL-44394996</BuildVersion>
+<Symbols>**UE5*Release-5.6-CL-44394996-Win64-Development</Symbols>
+<IsUERelease>false</IsUERelease>
+<IsRequestingExit>false</IsRequestingExit>
+<UserName></UserName>
+<BaseDir>A:/Apps/_UnrealEngine/Projects/Etheria-UE5.6.1/Build/Windows/Etheria/Binaries/Win64/</BaseDir>
+<RootDir>A:/Apps/_UnrealEngine/Projects/Etheria-UE5.6.1/Build/Windows/</RootDir>
+<MachineId>02529F884B05743E32F17992CD05B637</MachineId>
+<LoginId>02529f884b05743e32f17992cd05b637</LoginId>
+<EpicAccountId>03328cf5134b4db6a8754b9fbe5f4f53</EpicAccountId>
+<SourceContext></SourceContext>
+<UserDescription></UserDescription>
+<UserActivityHint></UserActivityHint>
+<CrashDumpMode>0</CrashDumpMode>
+<GameStateName></GameStateName>
+<Misc.NumberOfCores>14</Misc.NumberOfCores>
+<Misc.NumberOfCoresIncludingHyperthreads>20</Misc.NumberOfCoresIncludingHyperthreads>
+<Misc.Is64bitOperatingSystem>1</Misc.Is64bitOperatingSystem>
+<Misc.CPUVendor>GenuineIntel</Misc.CPUVendor>
+<Misc.CPUBrand>13th Gen Intel(R) Core(TM) i5-13600KF</Misc.CPUBrand>
+<Misc.PrimaryGPUBrand>NVIDIA GeForce RTX 4060 Ti</Misc.PrimaryGPUBrand>
+<Misc.OSVersionMajor>Windows 11 (25H2) [10.0.26200.8117]</Misc.OSVersionMajor>
+<Misc.OSVersionMinor></Misc.OSVersionMinor>
+<Misc.AnticheatProvider></Misc.AnticheatProvider>
+<MemoryStats.TotalPhysical>34191085568</MemoryStats.TotalPhysical>
+<MemoryStats.TotalVirtual>70698307584</MemoryStats.TotalVirtual>
+<MemoryStats.PageSize>4096</MemoryStats.PageSize>
+<MemoryStats.TotalPhysicalGB>32</MemoryStats.TotalPhysicalGB>
+<MemoryStats.AvailablePhysical>13598945280</MemoryStats.AvailablePhysical>
+<MemoryStats.AvailableVirtual>28785987584</MemoryStats.AvailableVirtual>
+<MemoryStats.UsedPhysical>2393882624</MemoryStats.UsedPhysical>
+<MemoryStats.PeakUsedPhysical>2395148288</MemoryStats.PeakUsedPhysical>
+<MemoryStats.UsedVirtual>3259219968</MemoryStats.UsedVirtual>
+<MemoryStats.PeakUsedVirtual>3264393216</MemoryStats.PeakUsedVirtual>
+<MemoryStats.bIsOOM>0</MemoryStats.bIsOOM>
+<MemoryStats.OOMAllocationSize>0</MemoryStats.OOMAllocationSize>
+<MemoryStats.OOMAllocationAlignment>0</MemoryStats.OOMAllocationAlignment>
+<NumMinidumpFramesToIgnore>8</NumMinidumpFramesToIgnore>
+<CallStack></CallStack>
+<PCallStack>
+
+Etheria   0x00007ff762b80000 + e826202         
+Etheria   0x00007ff762b80000 + 7337158         
+Etheria   0x00007ff762b80000 + 73369f0         
+Etheria   0x00007ff762b80000 + a3c3176         
+Etheria   0x00007ff762b80000 + a3b7419         
+Etheria   0x00007ff762b80000 + 7d65d4b         
+Etheria   0x00007ff762b80000 + 97c9a61         
+Etheria   0x00007ff762b80000 + 876e151         
+Etheria   0x00007ff762b80000 + 9694c9d         
+Etheria   0x00007ff762b80000 + 98457ae         
+Etheria   0x00007ff762b80000 + 97fbd8d         
+Etheria   0x00007ff762b80000 + 8702436         
+Etheria   0x00007ff762b80000 + 8701e68         
+Etheria   0x00007ff762b80000 + 9ac2114         
+Etheria   0x00007ff762b80000 + 9ada5ff         
+Etheria   0x00007ff762b80000 + 9ada7aa         
+Etheria   0x00007ff762b80000 + 9add5d8         
+Etheria   0x00007ff762b80000 + 9aeabd4         
+Etheria   0x00007ff762b80000 + e4dd0ea         
+KERNEL32  0x00007ffc28b90000 + 2e8d7           
+</PCallStack>
+<PCallStackHash>3ED5B96F697D58F1A96D6785F1141F766D09B899</PCallStackHash>
+</RuntimeProperties>
+<PlatformProperties>
+<PlatformIsRunningWindows>1</PlatformIsRunningWindows>
+<PlatformIsRunningWine>false</PlatformIsRunningWine>
+<PlatformSupportsWindows11>true</PlatformSupportsWindows11>
+<IsRunningOnBattery>false</IsRunningOnBattery>
+<IsUsingBatterySaver>false</IsUsingBatterySaver>
+<PlatformCallbackResult>0</PlatformCallbackResult>
+<CrashTrigger>0</CrashTrigger>
+</PlatformProperties>
+<EngineData>
+<MatchingDPStatus>WindowsNo errors</MatchingDPStatus>
+<RHI.IntegratedGPU>false</RHI.IntegratedGPU>
+<RHI.DriverDenylisted>false</RHI.DriverDenylisted>
+<RHI.D3DDebug>false</RHI.D3DDebug>
+<RHI.DRED>false</RHI.DRED>
+<RHI.DREDMarkersOnly>false</RHI.DREDMarkersOnly>
+<RHI.DREDContext>false</RHI.DREDContext>
+<RHI.Aftermath>true</RHI.Aftermath>
+<RHI.RHIName>D3D12</RHI.RHIName>
+<RHI.AdapterName>NVIDIA GeForce RTX 4060 Ti</RHI.AdapterName>
+<RHI.UserDriverVersion>591.86</RHI.UserDriverVersion>
+<RHI.InternalDriverVersion>32.0.15.9186</RHI.InternalDriverVersion>
+<RHI.DriverDate>1-20-2026</RHI.DriverDate>
+<RHI.FeatureLevel>SM6</RHI.FeatureLevel>
+<RHI.GPUVendor>NVIDIA</RHI.GPUVendor>
+<RHI.DeviceId>2803</RHI.DeviceId>
+<DeviceProfile.Name>Windows</DeviceProfile.Name>
+</EngineData>
+<GameData>
+</GameData>
+</FGenericCrashContext>

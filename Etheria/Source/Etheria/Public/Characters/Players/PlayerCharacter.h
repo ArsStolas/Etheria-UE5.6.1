@@ -32,7 +32,7 @@ class UInventoryComponent;
 //class UInteractionComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
-class UQuestComponent;
+//class UQuestComponent;
 class USwimComponent;
 
 // ============================================================
@@ -129,8 +129,8 @@ protected:
     ULockVisualComponent* LockVisualComponent;
 
     // --- QUEST TARGET ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
-    UQuestComponent* QuestComponent;
+    //UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
+    //UQuestComponent* QuestComponent;
 
     // --- ROPE ---
     
