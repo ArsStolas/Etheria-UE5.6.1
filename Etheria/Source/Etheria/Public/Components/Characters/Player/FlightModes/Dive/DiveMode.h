@@ -19,6 +19,16 @@ public:
     virtual void Enter() override;
     virtual void Exit() override;
     virtual void TickMode(float DeltaTime) override;
+    void ConfigureDiveTuning(
+        float InMaxDiveSpeed,
+        float InMinDiveSpeed,
+        float InDiveAcceleration,
+        float InDiveDeceleration,
+        float InDiveEntrySpeedBonus,
+        float InMaxPitch,
+        float InMaxRoll,
+        float InTurnRateDive,
+        float InLiftFactor);
 
     // Called by WindStreamZone once per frame while the player is inside the stream.
     // TargetSpeed: desired speed enforced by the tunnel.
@@ -41,7 +51,10 @@ protected:
     float DiveAcceleration = 1400.f;
 
     UPROPERTY(EditAnywhere, Category="Dive|Speed", meta=(ClampMin="200", ClampMax="1500"))
-    float DiveDeceleration = 800.f;
+    float DiveDeceleration = 600.f;
+
+    UPROPERTY(EditAnywhere, Category="Dive|Speed", meta=(ClampMin="0", ClampMax="1500"))
+    float DiveEntrySpeedBonus = 250.f;
 
     float CurrentSpeed = 400.f;
 

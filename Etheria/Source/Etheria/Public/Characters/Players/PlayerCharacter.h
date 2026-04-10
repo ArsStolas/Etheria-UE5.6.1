@@ -75,7 +75,6 @@ class ETHERIA_API APlayerCharacter : public ABaseCharacter
 public:
     APlayerCharacter();
 
-    FORCEINLINE UStaticMeshComponent* GetGliderVisual() const { return GliderVisual; }
     FORCEINLINE float GetHorizontalInput() const { return Horizontal.GetAxisValue(); }
     FORCEINLINE float GetVerticalInput() const   { return Vertical.GetAxisValue(); }
     FORCEINLINE UFlightComponent* GetFlightComponent() const { return FlightComponent; }
@@ -114,9 +113,6 @@ protected:
     // --- FLIGHT MODE ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode")
     UFlightComponent* FlightComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode|Glider|Visual")
-    UStaticMeshComponent* GliderVisual;
 
     // --- INVENTORY ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Inventory", meta=(AllowPrivateAccess="true"))
