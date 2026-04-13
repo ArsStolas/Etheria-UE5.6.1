@@ -1,32 +1,103 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Class: BaseAICharacter - Source
+ * Last Updated by: Mato
+ * Class: "BaseAICharacter - Source"
+ * Notes: Pack movement, respawn, dormancy, detection decal, player-only detection.
  */
 
 #include "Characters/AI/BaseAICharacter.h"
 
 #include "Characters/AI/Movements/AIMovementComponent.h"
 #include "Characters/AI/Animations/AIAnimationComponent.h"
+#include "Characters/AI/Combat/AICombatComponent.h"
 #include "Characters/AI/Controller/BaseAIController.h"
+#include "Components/SplineComponent.h"
+#include "Components/DecalComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "EngineUtils.h"
 
 ABaseAICharacter::ABaseAICharacter()
 {
+	PrimaryActorTick.bCanEverTick = true;
+
 	AIMovementComponent = CreateDefaultSubobject<UAIMovementComponent>(TEXT("AIMovementComponent"));
 	AIAnimationComponent = CreateDefaultSubobject<UAIAnimationComponent>(TEXT("AIAnimationComponent"));
+	AICombatComponent = CreateDefaultSubobject<UAICombatComponent>(TEXT("AICombatComponent"));
 
-	// Garantir que le controller est assigné et auto-possédé
+	PatrolSpline = CreateDefaultSubobject<USplineComponent>(TEXT("PatrolSpline"));
+	PatrolSpline->SetupAttachment(RootComponent);
+	PatrolSpline->SetClosedLoop(false);
+	PatrolSpline->bDrawDebug = false;
+
+	// Detection decals
+	ProximityDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("ProximityDecal"));
+	ProximityDecal->SetupAttachment(RootComponent);
+	ProximityDecal->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f));
+	ProximityDecal->SetVisibility(false);
+
+	SightDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("SightDecal"));
+	SightDecal->SetupAttachment(RootComponent);
+	SightDecal->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f));
+	SightDecal->SetVisibility(false);
+
 	AIControllerClass = ABaseAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+
+	// Dont rotate mesh with controller
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
+
+	if (UCharacterMovementComponent* MC = GetCharacterMovement())
+	{
+		MC->bOrientRotationToMovement = true;
+		MC->RotationRate = FRotator(0.f, 400.f, 0.f);
+	}
 }
 
 void ABaseAICharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	SpawnLocation = GetActorLocation();
+	SpawnRotation = GetActorRotation();
+
+	if (AIMovementComponent && PatrolSpline)
+	{
+		AIMovementComponent->SetPatrolSpline(PatrolSpline);
+	}
+
+	// Setup detection decals
+	if (bShowDetectionDecal)
+	{
+		SetDetectionDecalVisible(true);
+	}
 }
 
-/* ─────────────────── State ─────────────────── */
+void ABaseAICharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Dormancy check (throttled)
+	DormancyTimer -= DeltaTime;
+	if (DormancyTimer <= 0.f)
+	{
+		DormancyTimer = DormancyCheckInterval;
+		UpdateDormancy();
+	}
+
+	if (bIsDormant) return;
+
+	// Pack follow
+	if (PackID != NAME_None && !IsPackLeader() && CurrentState == EAIState::Patrolling)
+	{
+		UpdatePackFollow(DeltaTime);
+	}
+}
+
+/* ═══════════ State ═══════════ */
 
 void ABaseAICharacter::SetAIState(EAIState NewState)
 {
@@ -35,15 +106,21 @@ void ABaseAICharacter::SetAIState(EAIState NewState)
 	const EAIState OldState = CurrentState;
 	CurrentState = NewState;
 	OnAIStateChanged.Broadcast(OldState, NewState);
+
+	if (AICombatComponent)
+	{
+		if (NewState == EAIState::Attacking || NewState == EAIState::Chasing)
+			AICombatComponent->EnterCombat();
+		else if (OldState == EAIState::Attacking || OldState == EAIState::Chasing)
+			if (NewState != EAIState::Attacking && NewState != EAIState::Chasing)
+				AICombatComponent->ExitCombat();
+	}
 }
 
 void ABaseAICharacter::SetTarget(AActor* NewTarget)
 {
 	CurrentTarget = NewTarget;
-	if (NewTarget)
-	{
-		OnTargetAcquired.Broadcast(NewTarget);
-	}
+	if (NewTarget) OnTargetAcquired.Broadcast(NewTarget);
 }
 
 void ABaseAICharacter::ClearTarget()
@@ -52,26 +129,70 @@ void ABaseAICharacter::ClearTarget()
 	OnTargetLost.Broadcast();
 }
 
-/* ─────────────────── Perception / Damage ─────────────────── */
+void ABaseAICharacter::SetAwarenessLevel(EAIAwarenessLevel NewLevel)
+{
+	if (AwarenessLevel == NewLevel) return;
+	const EAIAwarenessLevel Old = AwarenessLevel;
+	AwarenessLevel = NewLevel;
+	OnAwarenessChanged.Broadcast(Old, NewLevel);
+}
+
+/* ═══════════ Perception ═══════════ */
 
 void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 {
-	if (!PerceivedActor) return;
-	if (CurrentState == EAIState::Dead) return;
+	if (!PerceivedActor || CurrentState == EAIState::Dead || bIsDormant) return;
+
+	// Filter: only detect players or specific tags
+	if (bOnlyDetectPlayers)
+	{
+		APawn* P = Cast<APawn>(PerceivedActor);
+		if (!P || !P->IsPlayerControlled()) return;
+	}
 
 	switch (HostilityType)
 	{
 	case EAIHostilityType::Passive:
-		// Passive NPCs never engage
+		if (bCanFlee && CurrentState != EAIState::Fleeing)
+		{
+			// Check flee tags
+			bool bShouldFlee = FleeFromTags.Num() == 0; // flee from anyone if no tags
+			for (const FName& Tag : FleeFromTags)
+				if (PerceivedActor->ActorHasTag(Tag)) { bShouldFlee = true; break; }
+
+			if (bShouldFlee)
+			{
+				SetAwarenessLevel(EAIAwarenessLevel::Alert);
+				SetTarget(PerceivedActor);
+				SetAIState(EAIState::Fleeing);
+				if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(PerceivedActor); }
+				if (PackID != NAME_None) AlertPack(PerceivedActor);
+			}
+		}
 		break;
 
 	case EAIHostilityType::Neutral:
-		// Neutral only engages if already provoked (handled in OnReceiveDamage)
+		if (bCanFlee && CurrentState != EAIState::Fleeing && CurrentState != EAIState::Chasing)
+		{
+			bool bShouldFlee = FleeFromTags.Num() == 0;
+			for (const FName& Tag : FleeFromTags)
+				if (PerceivedActor->ActorHasTag(Tag)) { bShouldFlee = true; break; }
+
+			if (bShouldFlee)
+			{
+				SetAwarenessLevel(EAIAwarenessLevel::Alert);
+				SetTarget(PerceivedActor);
+				SetAIState(EAIState::Fleeing);
+				if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(PerceivedActor); }
+				if (PackID != NAME_None) AlertPack(PerceivedActor);
+			}
+		}
 		break;
 
 	case EAIHostilityType::Aggressive:
 		if (CurrentState != EAIState::Chasing && CurrentState != EAIState::Attacking)
 		{
+			SetAwarenessLevel(EAIAwarenessLevel::InCombat);
 			SetTarget(PerceivedActor);
 			SetAIState(EAIState::Chasing);
 			if (AIMovementComponent)
@@ -80,6 +201,7 @@ void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 				AIMovementComponent->SetDesiredSpeed(AIMovementComponent->ChaseSpeed);
 				AIMovementComponent->MoveToLocation(PerceivedActor->GetActorLocation());
 			}
+			if (PackID != NAME_None) AlertPack(PerceivedActor);
 		}
 		break;
 	}
@@ -87,13 +209,20 @@ void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 
 void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmount)
 {
-	if (CurrentState == EAIState::Dead) return;
+	if (CurrentState == EAIState::Dead || bIsDormant) return;
 
 	OnAIDamaged.Broadcast(DamageInstigator);
 
-	// Neutral becomes aggressive when attacked
+	if (AICombatComponent)
+	{
+		AICombatComponent->CurrentHitCount++;
+		if (AICombatComponent->CurrentHitCount >= AICombatComponent->StaggerThreshold)
+			AICombatComponent->ApplyStagger(1.f);
+	}
+
 	if (HostilityType == EAIHostilityType::Neutral && DamageInstigator)
 	{
+		SetAwarenessLevel(EAIAwarenessLevel::InCombat);
 		SetTarget(DamageInstigator);
 		SetAIState(EAIState::Chasing);
 		if (AIMovementComponent)
@@ -102,11 +231,245 @@ void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmo
 			AIMovementComponent->SetDesiredSpeed(AIMovementComponent->ChaseSpeed);
 			AIMovementComponent->MoveToLocation(DamageInstigator->GetActorLocation());
 		}
+		if (PackID != NAME_None) AlertPack(DamageInstigator);
 	}
 
-	// Play hit reaction
-	if (AIAnimationComponent)
+	if (HostilityType == EAIHostilityType::Passive && bCanFlee && DamageInstigator)
 	{
-		AIAnimationComponent->PlayHitReaction();
+		SetTarget(DamageInstigator);
+		SetAIState(EAIState::Fleeing);
+		if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(DamageInstigator); }
+	}
+
+	if (AIAnimationComponent) AIAnimationComponent->PlayHitReaction();
+}
+
+/* ═══════════ Pack ═══════════ */
+
+void ABaseAICharacter::AlertPack(AActor* Threat)
+{
+	if (PackID == NAME_None || !Threat) return;
+
+	for (ABaseAICharacter* Other : GetPackMembers())
+	{
+		Other->OnPackAlert(this, Threat);
+	}
+}
+
+void ABaseAICharacter::OnPackAlert(ABaseAICharacter* Alerter, AActor* Threat)
+{
+	if (!Threat || CurrentState == EAIState::Dead || bIsDormant) return;
+	if (CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking || CurrentState == EAIState::Fleeing) return;
+
+	OnPackAlerted.Broadcast(Alerter, Threat);
+	OnPerceiveTarget(Threat);
+}
+
+TArray<ABaseAICharacter*> ABaseAICharacter::GetPackMembers() const
+{
+	TArray<ABaseAICharacter*> Members;
+	if (PackID == NAME_None) return Members;
+
+	const FVector MyLoc = GetActorLocation();
+	for (TActorIterator<ABaseAICharacter> It(GetWorld()); It; ++It)
+	{
+		ABaseAICharacter* Other = *It;
+		if (Other == this || Other->GetPackID() != PackID || Other->IsDead()) continue;
+		if (FVector::Dist(MyLoc, Other->GetActorLocation()) <= PackAlertRadius)
+			Members.Add(Other);
+	}
+	return Members;
+}
+
+ABaseAICharacter* ABaseAICharacter::GetPackLeader() const
+{
+	if (PackID == NAME_None) return nullptr;
+
+	ABaseAICharacter* Leader = nullptr;
+	for (TActorIterator<ABaseAICharacter> It(GetWorld()); It; ++It)
+	{
+		ABaseAICharacter* Other = *It;
+		if (Other->GetPackID() != PackID || Other->IsDead()) continue;
+		if (!Leader || Other->GetUniqueID() < Leader->GetUniqueID())
+			Leader = Other;
+	}
+	return Leader;
+}
+
+bool ABaseAICharacter::IsPackLeader() const
+{
+	return GetPackLeader() == this;
+}
+
+void ABaseAICharacter::UpdatePackFollow(float DeltaTime)
+{
+	ABaseAICharacter* Leader = GetPackLeader();
+	if (!Leader || Leader == this) return;
+
+	const float DistToLeader = FVector::Dist(GetActorLocation(), Leader->GetActorLocation());
+
+	// Too far from leader — move towards
+	if (DistToLeader > PackFollowDistance + PackSpreadRadius)
+	{
+		if (AIMovementComponent)
+		{
+			const FVector DirToLeader = (Leader->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+			const FVector Offset = FMath::VRand() * FMath::FRandRange(0.f, PackSpreadRadius);
+			// Offset.GetSafeNormal2D();
+			const FVector Target = Leader->GetActorLocation() - DirToLeader * PackFollowDistance + FVector(Offset.X, Offset.Y, 0.f);
+
+			AIMovementComponent->SetDesiredSpeed(AIMovementComponent->PatrolSpeed * 1.2f);
+			AIMovementComponent->MoveToLocation(Target);
+		}
+	}
+}
+
+/* ═══════════ Leash ═══════════ */
+
+void ABaseAICharacter::TeleportToSpawn()
+{
+	ClearTarget();
+	if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->StopMovement(); }
+	if (AICombatComponent) { AICombatComponent->InterruptAttack(); AICombatComponent->ExitCombat(); }
+
+	SetActorHiddenInGame(true);
+	SetActorLocation(SpawnLocation);
+	SetActorRotation(SpawnRotation);
+	SetActorHiddenInGame(false);
+
+	SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+
+	CurrentState = EAIState::Idle; // Force reset
+	if (AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
+	{
+		SetAIState(EAIState::Patrolling);
+		AIMovementComponent->StartPatrol();
+	}
+	else
+	{
+		SetAIState(EAIState::Idle);
+	}
+}
+
+/* ═══════════ Respawn ═══════════ */
+
+void ABaseAICharacter::Die()
+{
+	if (CurrentState == EAIState::Dead) return;
+
+	CurrentState = EAIState::Dead; // bypass SetAIState guard
+	OnAIStateChanged.Broadcast(EAIState::Attacking, EAIState::Dead);
+
+	ClearTarget();
+	if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->StopMovement(); }
+	if (AICombatComponent) AICombatComponent->ExitCombat();
+	if (AIAnimationComponent) AIAnimationComponent->PlayDeath();
+
+	if (GetCharacterMovement()) GetCharacterMovement()->DisableMovement();
+	if (GetCapsuleComponent()) GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	OnAIDied.Broadcast();
+
+	// Setup respawn timer if OnTimer
+	if (RespawnCondition == EAIRespawnCondition::OnTimer)
+	{
+		GetWorld()->GetTimerManager().SetTimer(RespawnTimerHandle, this,
+			&ABaseAICharacter::HandleRespawnTimer, RespawnTimerDuration, false);
+	}
+}
+
+void ABaseAICharacter::Respawn()
+{
+	GetWorld()->GetTimerManager().ClearTimer(RespawnTimerHandle);
+
+	SetActorHiddenInGame(false);
+	SetActorLocation(SpawnLocation);
+	SetActorRotation(SpawnRotation);
+
+	if (GetCharacterMovement()) GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+	if (GetCapsuleComponent()) GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+	SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+	CurrentState = EAIState::Idle;
+
+	// TODO: Reset health via your HealthComponent
+
+	if (AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
+	{
+		SetAIState(EAIState::Patrolling);
+		AIMovementComponent->StartPatrol();
+	}
+
+	OnAIRespawned.Broadcast();
+}
+
+void ABaseAICharacter::NotifyPlayerSaved()
+{
+	if (CurrentState != EAIState::Dead) return;
+	if (RespawnCondition == EAIRespawnCondition::OnSave || RespawnCondition == EAIRespawnCondition::OnSaveOrDay)
+		Respawn();
+}
+
+void ABaseAICharacter::NotifyDayCycleComplete()
+{
+	if (CurrentState != EAIState::Dead) return;
+	if (RespawnCondition == EAIRespawnCondition::OnDayCycle || RespawnCondition == EAIRespawnCondition::OnSaveOrDay)
+		Respawn();
+}
+
+void ABaseAICharacter::HandleRespawnTimer()
+{
+	if (CurrentState == EAIState::Dead) Respawn();
+}
+
+/* ═══════════ Optimization ═══════════ */
+
+void ABaseAICharacter::SetDormant(bool bNewDormant)
+{
+	if (bIsDormant == bNewDormant) return;
+	bIsDormant = bNewDormant;
+
+	SetActorHiddenInGame(bNewDormant);
+	SetActorTickEnabled(!bNewDormant);
+
+	if (AIMovementComponent) AIMovementComponent->SetComponentTickEnabled(!bNewDormant);
+	if (AIAnimationComponent) AIAnimationComponent->SetComponentTickEnabled(!bNewDormant);
+	if (AICombatComponent) AICombatComponent->SetComponentTickEnabled(!bNewDormant);
+
+	if (GetCharacterMovement())
+		GetCharacterMovement()->SetComponentTickEnabled(!bNewDormant);
+
+	OnAIDormancyChanged.Broadcast();
+}
+
+void ABaseAICharacter::UpdateDormancy()
+{
+	if (CurrentState == EAIState::Dead) return;
+
+	const APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC || !PC->GetPawn()) return;
+
+	const float Dist = FVector::Dist(GetActorLocation(), PC->GetPawn()->GetActorLocation());
+
+	if (!bIsDormant && Dist > DormantDistance)
+		SetDormant(true);
+	else if (bIsDormant && Dist < DormantDistance * 0.8f) // hysteresis
+		SetDormant(false);
+}
+
+/* ═══════════ Detection Decal ═══════════ */
+
+void ABaseAICharacter::SetDetectionDecalVisible(bool bVisible)
+{
+	if (ProximityDecal && ProximityDecalMaterial)
+	{
+		ProximityDecal->SetDecalMaterial(ProximityDecalMaterial);
+		ProximityDecal->SetVisibility(bVisible);
+	}
+
+	if (SightDecal && SightDecalMaterial)
+	{
+		SightDecal->SetDecalMaterial(SightDecalMaterial);
+		SightDecal->SetVisibility(bVisible);
 	}
 }

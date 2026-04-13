@@ -1,8 +1,10 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Class: AIAnimationComponent - Header
- * Manages animation montage slots for AI characters.
+ * Last Updated by: Mato
+ * Class: "AIAnimationComponent - Header"
+ * Notes: All animations via UAnimMontage played with PlayAnimation() on the mesh.
+ *        No ABP. Notifies/VFX in montages work. Set mesh to "Use Animation Asset".
  */
 
 #pragma once
@@ -14,8 +16,15 @@
 class UAnimMontage;
 class ABaseAICharacter;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAIMontageStartedDelegate, UAnimMontage*, Montage);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAIMontageEndedDelegate, UAnimMontage*, Montage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAIAnimStarted, UAnimMontage*, Montage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAIAnimEnded, UAnimMontage*, Montage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLocomotionStateChanged);
+
+UENUM(BlueprintType)
+enum class EAILocomotionState : uint8
+{
+	Idle, WalkForward, WalkBackward, RunForward, RunBackward, Falling, Landing
+};
 
 UCLASS(ClassGroup=(AI), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API UAIAnimationComponent : public UActorComponent
@@ -24,92 +33,63 @@ class ETHERIA_API UAIAnimationComponent : public UActorComponent
 
 public:
 	UAIAnimationComponent();
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	/* ── Play API ── */
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") void SetLocomotionState(EAILocomotionState NewState);
+	UFUNCTION(BlueprintPure, Category="AI|Animation") EAILocomotionState GetLocomotionState() const { return CurrentLocomotionState; }
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") void PauseLocomotion() { bLocomotionPaused = true; }
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") void ResumeLocomotion() { bLocomotionPaused = false; }
 
-	/** Play a random idle montage from the pool. Returns the picked montage. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayRandomIdle();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomIdle();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayIdleByIndex(int32 Index);
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomAttack();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayAttackByIndex(int32 Index);
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayInteraction();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayHitReaction();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomHitReaction();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayDeath();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomDeath();
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayActionMontage(UAnimMontage* Montage, float PlayRate = 1.f);
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") void StopCurrentAction();
+	UFUNCTION(BlueprintPure, Category="AI|Animation") bool IsPlayingAction() const { return bIsPlayingAction; }
 
-	/** Play a specific idle montage by index. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayIdleByIndex(int32 Index);
+	UPROPERTY(BlueprintAssignable) FOnAIAnimStarted OnAIAnimStarted;
+	UPROPERTY(BlueprintAssignable) FOnAIAnimEnded OnAIAnimEnded;
+	UPROPERTY(BlueprintAssignable) FOnLocomotionStateChanged OnLocomotionStateChanged;
 
-	/** Play the walk/run montage (blended by speed in ABP is recommended, but this is a fallback). */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayMovement();
+	/* ── Locomotion ── */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> IdleBaseMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> WalkForwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> WalkBackwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> RunForwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> RunBackwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> FallingMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> LandingMontage;
 
-	/** Play a random attack montage. Returns it for chaining. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayRandomAttack();
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0")) float IdleSpeedThreshold = 5.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0")) float RunSpeedThreshold = 300.f;
 
-	/** Play attack montage by index. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayAttackByIndex(int32 Index);
-
-	/** Play interaction montage (talk, quest give, etc.). */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayInteraction();
-
-	/** Play hit reaction. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayHitReaction();
-
-	/** Play death montage. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	UAnimMontage* PlayDeath();
-
-	/** Stop any currently playing montage on this character. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Animation")
-	void StopCurrentMontage(float BlendOut = 0.25f);
-
-	UFUNCTION(BlueprintPure, Category = "AI|Animation")
-	bool IsPlayingMontage() const;
-
-	/* ── Dispatchers ── */
-
-	UPROPERTY(BlueprintAssignable, Category = "AI|Animation")
-	FOnAIMontageStartedDelegate OnAIMontageStarted;
-
-	UPROPERTY(BlueprintAssignable, Category = "AI|Animation")
-	FOnAIMontageEndedDelegate OnAIMontageEnded;
-
-	/* ── Montage Pools (set in editor or per-child BP) ── */
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Animation|Idle")
-	TArray<TObjectPtr<UAnimMontage>> IdleMontages;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Animation|Movement")
-	TObjectPtr<UAnimMontage> MovementMontage;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Animation|Attack")
-	TArray<TObjectPtr<UAnimMontage>> AttackMontages;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Animation|Interaction")
-	TObjectPtr<UAnimMontage> InteractionMontage;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Animation|HitReaction")
-	TObjectPtr<UAnimMontage> HitReactionMontage;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Animation|Death")
-	TObjectPtr<UAnimMontage> DeathMontage;
-
-	/** Playback rate for idle montages (useful for variety). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Animation", meta = (ClampMin = "0.5", ClampMax = "2.0"))
-	float IdlePlayRate = 1.f;
+	/* ── Action pools ── */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Idle") TArray<TObjectPtr<UAnimMontage>> IdleVariations;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Attack") TArray<TObjectPtr<UAnimMontage>> AttackMontages;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|HitReaction") TArray<TObjectPtr<UAnimMontage>> HitReactionMontages;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Death") TArray<TObjectPtr<UAnimMontage>> DeathMontages;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Interaction") TObjectPtr<UAnimMontage> InteractionMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation", meta=(ClampMin="0.5", ClampMax="2.0")) float IdlePlayRate = 1.f;
 
 protected:
 	virtual void BeginPlay() override;
 
 private:
-	UAnimMontage* PlayMontageInternal(UAnimMontage* Montage, float PlayRate = 1.f);
+	void UpdateLocomotion();
+	void PlayOnMesh(UAnimMontage* Montage, bool bLoop, float PlayRate = 1.f);
 
-	UFUNCTION()
-	void HandleMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	UPROPERTY() TObjectPtr<ABaseAICharacter> OwnerCharacter;
+	UPROPERTY() TObjectPtr<UAnimMontage> CurrentLocomotionMontage;
+	UPROPERTY() TObjectPtr<UAnimMontage> CurrentActionMontage;
 
-	UPROPERTY()
-	TObjectPtr<ABaseAICharacter> OwnerCharacter;
-
-	UPROPERTY()
-	TObjectPtr<UAnimMontage> CurrentMontage;
+	EAILocomotionState CurrentLocomotionState = EAILocomotionState::Idle;
+	bool bLocomotionPaused = false;
+	bool bIsPlayingAction = false;
+	float ActionTimer = 0.f;
 };
