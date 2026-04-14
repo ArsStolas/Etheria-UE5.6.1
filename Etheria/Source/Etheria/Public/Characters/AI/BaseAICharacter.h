@@ -3,8 +3,7 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "BaseAICharacter - Header"
- * Notes: No dissolve. Hide/teleport when too far. Pack system. Respawn. LOD optimization.
- *        Detection decal. Player-only / tag-based detection.
+ * Notes: Pack, respawn, dormancy, detection decal, hit reactions, flee/fight-back.
  */
 
 #pragma once
@@ -21,8 +20,6 @@ class ABaseAIController;
 class USplineComponent;
 class UDecalComponent;
 class UMaterialInterface;
-
-/* ── Dispatchers ── */
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAIStateChanged, EAIState, OldState, EAIState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTargetAcquired, AActor*, Target);
@@ -43,14 +40,12 @@ public:
 	ABaseAICharacter();
 
 	/* ═══════════ Component Getters ═══════════ */
-
 	UFUNCTION(BlueprintPure, Category="AI") UAIMovementComponent* GetAIMovement() const { return AIMovementComponent; }
 	UFUNCTION(BlueprintPure, Category="AI") UAIAnimationComponent* GetAIAnimation() const { return AIAnimationComponent; }
 	UFUNCTION(BlueprintPure, Category="AI") UAICombatComponent* GetAICombat() const { return AICombatComponent; }
 	UFUNCTION(BlueprintPure, Category="AI") USplineComponent* GetPatrolSpline() const { return PatrolSpline; }
 
 	/* ═══════════ State Getters ═══════════ */
-
 	UFUNCTION(BlueprintPure, Category="AI") EAIHostilityType GetHostilityType() const { return HostilityType; }
 	UFUNCTION(BlueprintPure, Category="AI") EAIRank GetRank() const { return Rank; }
 	UFUNCTION(BlueprintPure, Category="AI") EAIState GetCurrentAIState() const { return CurrentState; }
@@ -63,11 +58,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") FName GetPackID() const { return PackID; }
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDead() const { return CurrentState == EAIState::Dead; }
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDormant() const { return bIsDormant; }
-	UFUNCTION(BlueprintPure, Category="AI") const TArray<FName>& GetFleeFromTags() const { return FleeFromTags; }
 	UFUNCTION(BlueprintPure, Category="AI") bool OnlyDetectsPlayers() const { return bOnlyDetectPlayers; }
 
 	/* ═══════════ Setters ═══════════ */
-
 	UFUNCTION(BlueprintCallable, Category="AI") void SetAIState(EAIState NewState);
 	UFUNCTION(BlueprintCallable, Category="AI") void SetTarget(AActor* NewTarget);
 	UFUNCTION(BlueprintCallable, Category="AI") void ClearTarget();
@@ -75,50 +68,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI") void SetHostilityType(EAIHostilityType NewType) { HostilityType = NewType; }
 
 	/* ═══════════ Perception / Damage ═══════════ */
-
 	UFUNCTION(BlueprintCallable, Category="AI") void OnPerceiveTarget(AActor* PerceivedActor);
 	UFUNCTION(BlueprintCallable, Category="AI") void OnReceiveDamage(AActor* DamageInstigator, float DamageAmount);
 
 	/* ═══════════ Pack ═══════════ */
-
 	UFUNCTION(BlueprintCallable, Category="AI|Pack") void AlertPack(AActor* Threat);
 	UFUNCTION(BlueprintCallable, Category="AI|Pack") void OnPackAlert(ABaseAICharacter* Alerter, AActor* Threat);
-
-	/** Get all alive pack members (excluding self). */
 	UFUNCTION(BlueprintCallable, Category="AI|Pack") TArray<ABaseAICharacter*> GetPackMembers() const;
-
-	/** Get the pack leader (first alive member, deterministic). */
 	UFUNCTION(BlueprintPure, Category="AI|Pack") ABaseAICharacter* GetPackLeader() const;
-
-	/** Am I the pack leader? */
 	UFUNCTION(BlueprintPure, Category="AI|Pack") bool IsPackLeader() const;
 
-	/* ═══════════ Leash / Teleport ═══════════ */
-
-	/** Called when AI is too far from spawn. Hides, teleports, shows. */
+	/* ═══════════ Leash / Respawn ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void TeleportToSpawn();
-
-	/* ═══════════ Respawn ═══════════ */
-
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void Die();
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void Respawn();
-
-	/** Call from your save system when the player saves. */
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void NotifyPlayerSaved();
-	/** Call from your day/night system when a full day passes. */
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void NotifyDayCycleComplete();
 
 	/* ═══════════ Optimization ═══════════ */
-
-	/** Called by the controller to put AI to sleep/wake based on player distance. */
 	UFUNCTION(BlueprintCallable, Category="AI|Optimization") void SetDormant(bool bDormant);
 
 	/* ═══════════ Detection Decal ═══════════ */
-
 	UFUNCTION(BlueprintCallable, Category="AI|Debug") void SetDetectionDecalVisible(bool bVisible);
 
 	/* ═══════════ Dispatchers ═══════════ */
-
 	UPROPERTY(BlueprintAssignable, Category="AI") FOnAIStateChanged OnAIStateChanged;
 	UPROPERTY(BlueprintAssignable, Category="AI") FOnTargetAcquired OnTargetAcquired;
 	UPROPERTY(BlueprintAssignable, Category="AI") FOnTargetLost OnTargetLost;
@@ -135,114 +108,148 @@ protected:
 
 	/* ── Identity ── */
 
+	/** Determines how this AI reacts to the player: Passive (no combat), Neutral (fights back), Aggressive (attacks on sight). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Identity")
 	EAIHostilityType HostilityType = EAIHostilityType::Passive;
 
+	/** Enemy rank. Only visible when Aggressive. Affects phase/combat behavior. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Identity", meta=(EditCondition="HostilityType==EAIHostilityType::Aggressive"))
 	EAIRank Rank = EAIRank::Basic;
 
 	/* ── Behavior ── */
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior")
+	/** If true, this AI can flee from threats (Passive/Neutral). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
+		meta=(ToolTip="Enable flee behavior. When threatened, the AI will run away instead of fighting."))
 	bool bCanFlee = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0"))
+	/** If true, a fleeing Neutral AI will stop fleeing and fight back when it takes damage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
+		meta=(ToolTip="When a Neutral AI is fleeing and gets hit, it turns around and fights the attacker.", EditCondition="bCanFlee"))
+	bool bFightBackWhenAttacked = true;
+
+	/** Maximum distance from spawn point. AI teleports back if it exceeds this while chasing or fleeing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0",
+		ToolTip="How far this AI can go from its spawn before it teleports back."))
 	float LeashRange = 2000.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior")
+	/** If true, the player can interact with this AI (talk, quest, trade). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
+		meta=(ToolTip="Enable interaction. When true, the player can talk to this AI."))
 	bool bIsInteractable = false;
 
-	/* ── Detection filter ── */
+	/* ── Detection ── */
 
-	/** Tags that trigger flee (for Passive/Neutral with bCanFlee). If empty, flees from players. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection")
+	/** Tags that trigger flee. If empty, the AI flees from any detected actor (that passes the player filter). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection",
+		meta=(ToolTip="Specific actor tags that make this AI flee. Leave empty to flee from any valid target."))
 	TArray<FName> FleeFromTags;
 
-	/** If true, only detect actors with the "Player" tag (or custom tag). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection")
+	/** If true, this AI only detects player-controlled pawns. Ignores other AI and NPCs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection",
+		meta=(ToolTip="Only react to player-controlled characters. Other AI are ignored."))
 	bool bOnlyDetectPlayers = true;
+
+	/* ── Rotation ── */
+
+	/** How fast the AI rotates toward its movement direction (degrees/sec). Lower = smoother turns for humanoids. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement",
+		meta=(ClampMin="50", ClampMax="1000", ToolTip="Rotation speed when moving. Lower values give smoother turns."))
+	float MovementRotationRate = 400.f;
 
 	/* ── Pack ── */
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack")
+	/** Pack identifier. AI with the same PackID form a group and share alerts. Leave empty for solo AI. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack",
+		meta=(ToolTip="Set the same PackID on multiple AI to make them a pack. They will alert and follow each other."))
 	FName PackID = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(ClampMin="0"))
+	/** Radius within which pack alerts are transmitted. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(ClampMin="0",
+		ToolTip="How far a pack alert travels. Only AI within this distance will be notified."))
 	float PackAlertRadius = 3000.f;
 
-	/** Distance pack members try to stay from their leader. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(ClampMin="50"))
+	/** Pack members try to stay this far from the leader when patrolling. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(ClampMin="50",
+		ToolTip="Ideal distance from the pack leader during patrol."))
 	float PackFollowDistance = 400.f;
 
-	/** How close pack members clump around the leader. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(ClampMin="50"))
+	/** Random spread around the leader to avoid stacking. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(ClampMin="50",
+		ToolTip="Random offset applied so pack members don't overlap."))
 	float PackSpreadRadius = 300.f;
 
 	/* ── Respawn ── */
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Respawn")
+	/** When and how this AI respawns after death. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Respawn",
+		meta=(ToolTip="Choose the condition under which this AI will respawn after being killed."))
 	EAIRespawnCondition RespawnCondition = EAIRespawnCondition::OnSaveOrDay;
 
-	/** Timer duration if RespawnCondition is OnTimer (seconds). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Respawn", meta=(EditCondition="RespawnCondition==EAIRespawnCondition::OnTimer", ClampMin="1"))
+	/** Respawn timer (seconds). Only used when RespawnCondition = OnTimer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Respawn",
+		meta=(EditCondition="RespawnCondition==EAIRespawnCondition::OnTimer", ClampMin="1",
+		ToolTip="Time in seconds before this AI respawns (only for Timer mode)."))
 	float RespawnTimerDuration = 300.f;
 
 	/* ── Optimization ── */
 
-	/** Distance from the player at which AI goes dormant (stops ticking, hidden). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="1000"))
+	/** Distance from the player at which this AI goes dormant (hidden, stops ticking). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="1000",
+		ToolTip="AI further than this from the player will be put to sleep to save performance."))
 	float DormantDistance = 8000.f;
 
-	/** How often (seconds) to check dormancy distance. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="0.5"))
+	/** How often the dormancy distance is checked (seconds). Higher = less CPU but slower reaction. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="0.5",
+		ToolTip="Interval between dormancy checks. Lower = more responsive but slightly more expensive."))
 	float DormancyCheckInterval = 2.f;
 
 	/* ── Detection Decal ── */
 
-	/** Enable showing detection radius as a decal projected on the ground. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection|Decal")
+	/** Show a decal on the ground representing the detection radii. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection|Decal",
+		meta=(ToolTip="Project detection radius visuals onto the ground and walls."))
 	bool bShowDetectionDecal = false;
 
-	/** Material for the proximity radius decal. Should be a circular decal material. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection|Decal", meta=(EditCondition="bShowDetectionDecal"))
+	/** Material for the proximity (360°) radius decal. Should be a circular decal material. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection|Decal", meta=(EditCondition="bShowDetectionDecal",
+		ToolTip="Decal material for the circular proximity detection area."))
 	TObjectPtr<UMaterialInterface> ProximityDecalMaterial;
 
-	/** Material for the sight cone decal. Should be a cone/fan shape decal material. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection|Decal", meta=(EditCondition="bShowDetectionDecal"))
+	/** Material for the sight cone decal. Should be a fan/cone shaped decal material. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection|Decal", meta=(EditCondition="bShowDetectionDecal",
+		ToolTip="Decal material for the directional sight cone area."))
 	TObjectPtr<UMaterialInterface> SightDecalMaterial;
 
 	/* ── Debug ── */
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Debug")
+	/** Show debug perception shapes (sight cone, hearing, proximity, leash, attack range). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Debug",
+		meta=(ToolTip="Draw debug lines and shapes showing all perception radii."))
 	bool bShowDebugPerception = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Debug")
+	/** Show debug info for pack behavior (alert radius sphere). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Debug",
+		meta=(ToolTip="Draw debug sphere showing the pack alert radius."))
 	bool bShowDebugPack = false;
 
 	/* ── Components ── */
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<UAIMovementComponent> AIMovementComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<UAIAnimationComponent> AIAnimationComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<UAICombatComponent> AICombatComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<USplineComponent> PatrolSpline;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<UDecalComponent> ProximityDecal;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<UDecalComponent> SightDecal;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIMovementComponent> AIMovementComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIAnimationComponent> AIAnimationComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAICombatComponent> AICombatComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<USplineComponent> PatrolSpline;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UDecalComponent> ProximityDecal;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UDecalComponent> SightDecal;
 
 private:
 	void UpdateDormancy();
 	void UpdatePackFollow(float DeltaTime);
 	void HandleRespawnTimer();
+
+	/** Called by HealthComponent via OnTakeAnyDamage — routes to OnReceiveDamage. */
+	UFUNCTION()
+	void HandleTakeAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
+		AController* InstigatedBy, AActor* DamageCauser);
 
 	UPROPERTY() EAIState CurrentState = EAIState::Idle;
 	UPROPERTY() EAIAwarenessLevel AwarenessLevel = EAIAwarenessLevel::Unaware;

@@ -3,7 +3,9 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "BaseAIController - Source"
- * Notes: Yaw-only rotation fix. Teleport on leash. Player-only proximity.
+ * Notes: Improved flee with re-evaluation and direction variety.
+ *        Idle variations complete before patrol resumes.
+ *        Yaw-only rotation toward target.
  */
 
 #include "Characters/AI/Controller/BaseAIController.h"
@@ -28,8 +30,8 @@ ABaseAIController::ABaseAIController()
 
 void ABaseAIController::SetupPerception()
 {
-	UAIPerceptionComponent* PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComponent"));
-	SetPerceptionComponent(*PerceptionComp);
+	UAIPerceptionComponent* PC = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComponent"));
+	SetPerceptionComponent(*PC);
 
 	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 	SightConfig->SightRadius = SightRadius;
@@ -40,7 +42,7 @@ void ABaseAIController::SetupPerception()
 	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
 	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
 	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	PerceptionComp->ConfigureSense(*SightConfig);
+	PC->ConfigureSense(*SightConfig);
 
 	HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
 	HearingConfig->HearingRange = HearingRange;
@@ -48,10 +50,10 @@ void ABaseAIController::SetupPerception()
 	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
 	HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
 	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	PerceptionComp->ConfigureSense(*HearingConfig);
+	PC->ConfigureSense(*HearingConfig);
 
-	PerceptionComp->SetDominantSense(UAISense_Sight::StaticClass());
-	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &ABaseAIController::OnPerceptionUpdated);
+	PC->SetDominantSense(UAISense_Sight::StaticClass());
+	PC->OnTargetPerceptionUpdated.AddDynamic(this, &ABaseAIController::OnPerceptionUpdated);
 }
 
 void ABaseAIController::OnPossess(APawn* InPawn)
@@ -62,13 +64,13 @@ void ABaseAIController::OnPossess(APawn* InPawn)
 
 	SpawnOrigin = AICharacter->GetActorLocation();
 
-	if (UAIPerceptionComponent* PerceptionComp = GetPerceptionComponent())
+	if (UAIPerceptionComponent* PerComp = GetPerceptionComponent())
 	{
 		SightConfig->SightRadius = SightRadius;
 		SightConfig->LoseSightRadius = LoseSightRadius;
 		SightConfig->PeripheralVisionAngleDegrees = SightFOVDegrees;
 		HearingConfig->HearingRange = HearingRange;
-		PerceptionComp->RequestStimuliListenerUpdate();
+		PerComp->RequestStimuliListenerUpdate();
 	}
 
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
@@ -91,11 +93,7 @@ void ABaseAIController::Tick(float DeltaTime)
 	if (bUseProximityDetection)
 	{
 		ProximityTimer -= DeltaTime;
-		if (ProximityTimer <= 0.f)
-		{
-			ProximityTimer = ProximityCheckInterval;
-			CheckProximityDetection();
-		}
+		if (ProximityTimer <= 0.f) { ProximityTimer = ProximityCheckInterval; CheckProximityDetection(); }
 	}
 
 	switch (AICharacter->GetCurrentAIState())
@@ -115,23 +113,18 @@ void ABaseAIController::Tick(float DeltaTime)
 #endif
 }
 
-/* ═══════════ Yaw-only face target ═══════════ */
+/* ═══════════ Rotation ═══════════ */
 
 void ABaseAIController::FaceTargetYawOnly(AActor* Target, float DeltaTime)
 {
 	if (!Target || !AICharacter) return;
-
-	const FVector MyLoc = AICharacter->GetActorLocation();
-	const FVector TargetLoc = Target->GetActorLocation();
-	const FVector Dir = (TargetLoc - MyLoc).GetSafeNormal2D(); // 2D = no pitch
-
+	const FVector Dir = (Target->GetActorLocation() - AICharacter->GetActorLocation()).GetSafeNormal2D();
 	if (Dir.IsNearlyZero()) return;
 
-	const FRotator TargetRot = FRotator(0.f, Dir.Rotation().Yaw, 0.f); // Pitch=0, Roll=0
+	const FRotator TargetRot = FRotator(0.f, Dir.Rotation().Yaw, 0.f);
 	const FRotator Current = AICharacter->GetActorRotation();
-	const FRotator SmoothRot = FMath::RInterpTo(Current, TargetRot, DeltaTime, FaceTargetRotationSpeed);
-
-	AICharacter->SetActorRotation(FRotator(0.f, SmoothRot.Yaw, 0.f)); // Extra safety: force pitch/roll=0
+	const FRotator Smooth = FMath::RInterpTo(Current, TargetRot, DeltaTime, FaceTargetRotationSpeed);
+	AICharacter->SetActorRotation(FRotator(0.f, Smooth.Yaw, 0.f));
 }
 
 /* ═══════════ Perception ═══════════ */
@@ -144,23 +137,17 @@ void ABaseAIController::OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 	{
 		AICharacter->OnPerceiveTarget(Actor);
 	}
-	else
+	else if (AICharacter->GetCurrentTarget() == Actor)
 	{
-		if (AICharacter->GetCurrentTarget() == Actor)
+		const EAIState Cur = AICharacter->GetCurrentAIState();
+		AICharacter->ClearTarget();
+		if (Cur == EAIState::Chasing || Cur == EAIState::Attacking)
 		{
-			const EAIState Cur = AICharacter->GetCurrentAIState();
-			AICharacter->ClearTarget();
-
-			if (Cur == EAIState::Chasing || Cur == EAIState::Attacking)
-			{
-				AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert);
-				AICharacter->SetAIState(EAIState::Returning);
-			}
-			else if (Cur == EAIState::Fleeing)
-			{
-				AICharacter->SetAIState(EAIState::Returning);
-			}
+			AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert);
+			AICharacter->SetAIState(EAIState::Returning);
 		}
+		else if (Cur == EAIState::Fleeing)
+			AICharacter->SetAIState(EAIState::Returning);
 	}
 }
 
@@ -179,20 +166,14 @@ void ABaseAIController::CheckProximityDetection()
 
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
-		AActor* HitActor = Overlap.GetActor();
-		if (!HitActor) continue;
-
-		// Skip other AI
-		if (Cast<ABaseAICharacter>(HitActor)) continue;
-
-		// Player filter
+		AActor* Hit = Overlap.GetActor();
+		if (!Hit || Cast<ABaseAICharacter>(Hit)) continue;
 		if (AICharacter->OnlyDetectsPlayers())
 		{
-			APawn* P = Cast<APawn>(HitActor);
+			APawn* P = Cast<APawn>(Hit);
 			if (!P || !P->IsPlayerControlled()) continue;
 		}
-
-		AICharacter->OnPerceiveTarget(HitActor);
+		AICharacter->OnPerceiveTarget(Hit);
 		break;
 	}
 }
@@ -202,15 +183,13 @@ void ABaseAIController::CheckProximityDetection()
 float ABaseAIController::GetEffectiveAttackRange() const
 {
 	if (UAICombatComponent* C = AICharacter->GetAICombat())
-		if (C->GetAttacks().Num() > 0)
-			return C->GetEffectiveAttackRange();
+		if (C->GetAttacks().Num() > 0) return C->GetEffectiveAttackRange();
 	return AttackRange;
 }
 
 bool ABaseAIController::CheckLeashAndTeleport()
 {
-	const float Dist = FVector::Dist(AICharacter->GetActorLocation(), SpawnOrigin);
-	if (Dist > AICharacter->GetLeashRange())
+	if (FVector::Dist(AICharacter->GetActorLocation(), SpawnOrigin) > AICharacter->GetLeashRange())
 	{
 		AICharacter->TeleportToSpawn();
 		return true;
@@ -222,12 +201,16 @@ bool ABaseAIController::CheckLeashAndTeleport()
 
 void ABaseAIController::HandleIdleState(float DeltaTime)
 {
+	// Don't trigger idle anims if one is already playing
+	UAIAnimationComponent* Anim = AICharacter->GetAIAnimation();
+	if (Anim && Anim->IsPlayingIdleVariation()) return;
+
 	IdleTimer += DeltaTime;
 	if (IdleTimer >= NextIdleAnimTime)
 	{
 		IdleTimer = 0.f;
 		NextIdleAnimTime = IdleAnimInterval + FMath::FRandRange(0.f, IdleAnimRandomDeviation);
-		if (UAIAnimationComponent* A = AICharacter->GetAIAnimation()) A->PlayRandomIdle();
+		if (Anim) Anim->PlayRandomIdle();
 	}
 
 	if (AICharacter->GetAwarenessLevel() > EAIAwarenessLevel::Unaware)
@@ -236,10 +219,17 @@ void ABaseAIController::HandleIdleState(float DeltaTime)
 
 void ABaseAIController::HandlePatrolState(float DeltaTime)
 {
+	UAIAnimationComponent* Anim = AICharacter->GetAIAnimation();
+
+	// Wait for idle variation to finish before resuming patrol movement
+	if (Anim && Anim->IsPlayingIdleVariation()) return;
+
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
 	{
-		if (MC->HasReachedDestination()) HandleIdleState(DeltaTime);
-		else IdleTimer = 0.f;
+		if (MC->HasReachedDestination())
+			HandleIdleState(DeltaTime);
+		else
+			IdleTimer = 0.f;
 	}
 }
 
@@ -250,9 +240,7 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 	if (CheckLeashAndTeleport()) return;
 
 	const float Dist = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
-	const float EffRange = GetEffectiveAttackRange();
-
-	if (Dist <= EffRange)
+	if (Dist <= GetEffectiveAttackRange())
 	{
 		AICharacter->SetAIState(EAIState::Attacking);
 		if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
@@ -272,21 +260,16 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 	if (!Target) { AICharacter->SetAIState(EAIState::Returning); return; }
 
 	const float Dist = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
-	const float EffRange = GetEffectiveAttackRange();
+	if (Dist > GetEffectiveAttackRange() * 1.3f) { AICharacter->SetAIState(EAIState::Chasing); return; }
 
-	if (Dist > EffRange * 1.3f) { AICharacter->SetAIState(EAIState::Chasing); return; }
-
-	// ──── YAW ONLY rotation ────
 	FaceTargetYawOnly(Target, DeltaTime);
 
-	// Combat component attacks
 	UAICombatComponent* Combat = AICharacter->GetAICombat();
 	if (Combat && Combat->GetAttacks().Num() > 0)
 	{
 		if (!Combat->IsAttacking() && !Combat->IsCharging() && !Combat->IsStaggered())
 			Combat->ExecuteRandomAttack(Dist);
 
-		// Strafe
 		if (bStrafeInCombat && !Combat->IsAttacking())
 		{
 			StrafeTimer -= DeltaTime;
@@ -295,11 +278,10 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 				StrafeTimer = StrafeDirectionChangeInterval + FMath::FRandRange(-0.5f, 0.5f);
 				StrafeDirection *= -1;
 			}
-			const FVector Right = AICharacter->GetActorRightVector() * StrafeDirection * 200.f;
 			if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
 			{
 				MC->SetDesiredSpeed(MC->PatrolSpeed * 0.8f);
-				MC->MoveToLocation(AICharacter->GetActorLocation() + Right);
+				MC->MoveToLocation(AICharacter->GetActorLocation() + AICharacter->GetActorRightVector() * StrafeDirection * 200.f);
 			}
 		}
 	}
@@ -320,15 +302,10 @@ void ABaseAIController::HandleReturnState(float DeltaTime)
 	{
 		MC->SetDesiredSpeed(MC->PatrolSpeed);
 		MC->MoveToLocation(SpawnOrigin);
-
 		if (FVector::Dist(AICharacter->GetActorLocation(), SpawnOrigin) < MC->AcceptanceRadius)
 		{
 			AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
-			if (MC->PatrolMode != EPatrolMode::Stationary)
-			{
-				AICharacter->SetAIState(EAIState::Patrolling);
-				MC->StartPatrol();
-			}
+			if (MC->PatrolMode != EPatrolMode::Stationary) { AICharacter->SetAIState(EAIState::Patrolling); MC->StartPatrol(); }
 			else AICharacter->SetAIState(EAIState::Idle);
 		}
 	}
@@ -338,25 +315,34 @@ void ABaseAIController::HandleFleeState(float DeltaTime)
 {
 	UAIMovementComponent* MC = AICharacter->GetAIMovement();
 	if (!MC) return;
-
 	if (CheckLeashAndTeleport()) return;
 
 	AActor* Target = AICharacter->GetCurrentTarget();
+
 	if (Target)
 	{
-		const float Dist = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
-		if (Dist >= FleeSafeDistance)
+		const float DistToThreat = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+
+		// Safe distance reached — return home
+		if (DistToThreat >= FleeSafeDistance)
 		{
 			AICharacter->ClearTarget();
 			AICharacter->SetAIState(EAIState::Returning);
 			return;
 		}
-	}
 
-	if (MC->HasReachedDestination())
+		// Re-evaluate flee direction periodically (avoids running into walls)
+		FleeReevalTimer -= DeltaTime;
+		if (FleeReevalTimer <= 0.f || MC->HasReachedDestination())
+		{
+			FleeReevalTimer = FleeReevalInterval;
+			MC->FleeFrom(Target);
+		}
+	}
+	else
 	{
-		if (Target) MC->FleeFrom(Target);
-		else AICharacter->SetAIState(EAIState::Returning);
+		// Threat gone
+		AICharacter->SetAIState(EAIState::Returning);
 	}
 }
 
@@ -376,48 +362,39 @@ void ABaseAIController::DrawDebugPerception() const
 {
 #if ENABLE_DRAW_DEBUG
 	if (!AICharacter) return;
-	const UWorld* World = GetWorld();
-	if (!World) return;
+	const UWorld* W = GetWorld();
+	if (!W) return;
 
 	const FVector Loc = AICharacter->GetActorLocation();
 	const FVector Fwd = AICharacter->GetActorForwardVector();
 
-	// Proximity (magenta)
 	if (bUseProximityDetection)
-		DrawDebugSphere(World, Loc, ProximityRadius, 20, FColor::Magenta, false, -1.f, 0, 1.5f);
+		DrawDebugSphere(W, Loc, ProximityRadius, 20, FColor::Magenta, false, -1.f, 0, 1.5f);
 
-	// Sight cone (green)
 	const float HalfFOV = FMath::DegreesToRadians(SightFOVDegrees);
 	for (int32 i = 0; i < 24; ++i)
 	{
 		const float A0 = -HalfFOV + (2.f * HalfFOV * i / 24);
 		const float A1 = -HalfFOV + (2.f * HalfFOV * (i + 1) / 24);
-		const FVector D0 = Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A0), FVector::UpVector);
-		const FVector D1 = Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A1), FVector::UpVector);
-		DrawDebugLine(World, Loc + D0 * SightRadius, Loc + D1 * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
+		DrawDebugLine(W,
+			Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A0), FVector::UpVector) * SightRadius,
+			Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A1), FVector::UpVector) * SightRadius,
+			FColor::Green, false, -1.f, 0, 1.5f);
 	}
-	DrawDebugLine(World, Loc, Loc + Fwd.RotateAngleAxis(-SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
-	DrawDebugLine(World, Loc, Loc + Fwd.RotateAngleAxis(SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
+	DrawDebugLine(W, Loc, Loc + Fwd.RotateAngleAxis(-SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
+	DrawDebugLine(W, Loc, Loc + Fwd.RotateAngleAxis(SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
 
-	// Hearing (yellow)
-	DrawDebugCircle(World, Loc, HearingRange, 32, FColor::Yellow, false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
+	DrawDebugCircle(W, Loc, HearingRange, 32, FColor::Yellow, false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
+	DrawDebugCircle(W, SpawnOrigin, AICharacter->GetLeashRange(), 32, FColor(150,150,150), false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
+	DrawDebugCircle(W, Loc, GetEffectiveAttackRange(), 16, FColor::Orange, false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
 
-	// Leash (gray)
-	DrawDebugCircle(World, SpawnOrigin, AICharacter->GetLeashRange(), 32, FColor(150,150,150), false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
-
-	// Attack range (orange)
-	DrawDebugCircle(World, Loc, GetEffectiveAttackRange(), 16, FColor::Orange, false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
-
-	// State label
 	const FString State = StaticEnum<EAIState>()->GetNameStringByValue(static_cast<int64>(AICharacter->GetCurrentAIState()));
-	const FString Aware = StaticEnum<EAIAwarenessLevel>()->GetNameStringByValue(static_cast<int64>(AICharacter->GetAwarenessLevel()));
-	DrawDebugString(World, Loc + FVector(0,0,100), FString::Printf(TEXT("%s | %s"), *State, *Aware), nullptr, FColor::White, -1.f, true);
+	DrawDebugString(W, Loc + FVector(0,0,100), State, nullptr, FColor::White, -1.f, true);
 
-	// Target
 	if (AActor* T = AICharacter->GetCurrentTarget())
 	{
-		DrawDebugLine(World, Loc, T->GetActorLocation(), FColor::Red, false, -1.f, 0, 3.f);
-		DrawDebugSphere(World, T->GetActorLocation(), 50.f, 8, FColor::Red, false, -1.f, 0, 2.f);
+		DrawDebugLine(W, Loc, T->GetActorLocation(), FColor::Red, false, -1.f, 0, 3.f);
+		DrawDebugSphere(W, T->GetActorLocation(), 50.f, 8, FColor::Red, false, -1.f, 0, 2.f);
 	}
 #endif
 }
