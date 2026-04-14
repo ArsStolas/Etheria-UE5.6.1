@@ -3,7 +3,9 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "AICombatComponent - Source"
- * Notes: Combat logic. Plays animations via AIAnimationComponent::PlayActionMontage.
+ * Notes: ExecuteAttack plays the montage and starts a hit window timer.
+ *        OnAttackHitWindow fires at HitWindowTime — bind this in BP to do damage/VFX/projectiles.
+ *        If bUseAutoHitWindow is false, call ManualTriggerHitWindow from an AnimNotify.
  */
 
 #include "Characters/AI/Combat/AICombatComponent.h"
@@ -11,12 +13,8 @@
 #include "Characters/AI/BaseAICharacter.h"
 #include "Characters/AI/Animations/AIAnimationComponent.h"
 #include "Animation/AnimMontage.h"
-#include "Engine/DamageEvents.h"
 
-UAICombatComponent::UAICombatComponent()
-{
-	PrimaryComponentTick.bCanEverTick = true;
-}
+UAICombatComponent::UAICombatComponent() { PrimaryComponentTick.bCanEverTick = true; }
 
 void UAICombatComponent::BeginPlay()
 {
@@ -27,7 +25,6 @@ void UAICombatComponent::BeginPlay()
 void UAICombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
 	TickCooldowns(DeltaTime);
 	TickCharge(DeltaTime);
 	TickStagger(DeltaTime);
@@ -57,10 +54,10 @@ float UAICombatComponent::GetEffectiveAttackRange() const
 	case EAICombatStyle::Ranged: return RangedRange;
 	case EAICombatStyle::Hybrid:
 	{
-		float MaxRange = MeleeRange;
+		float Max = MeleeRange;
 		for (const FAIAttackData& A : Attacks)
-			if (A.CurrentCooldown <= 0.f) MaxRange = FMath::Max(MaxRange, A.Range);
-		return MaxRange;
+			if (A.CurrentCooldown <= 0.f) Max = FMath::Max(Max, A.Range);
+		return Max;
 	}
 	}
 	return MeleeRange;
@@ -70,6 +67,27 @@ bool UAICombatComponent::GetCurrentPhaseData(FAICombatPhaseData& OutData) const
 {
 	for (const FAICombatPhaseData& P : Phases)
 		if (P.Phase == CurrentPhase) { OutData = P; return true; }
+	return false;
+}
+
+bool UAICombatComponent::GetAttackByIndex(int32 Index, FAIAttackData& OutAttack) const
+{
+	if (!Attacks.IsValidIndex(Index)) return false;
+	OutAttack = Attacks[Index];
+	return true;
+}
+
+bool UAICombatComponent::GetAttackByName(FName Name, FAIAttackData& OutAttack, int32& OutIndex) const
+{
+	for (int32 i = 0; i < Attacks.Num(); ++i)
+	{
+		if (Attacks[i].AttackName == Name)
+		{
+			OutAttack = Attacks[i];
+			OutIndex = i;
+			return true;
+		}
+	}
 	return false;
 }
 
@@ -99,7 +117,6 @@ int32 UAICombatComponent::SelectBestAttack(float DistanceToTarget)
 {
 	TArray<TPair<int32, float>> Candidates;
 	float TotalWeight = 0.f;
-
 	for (int32 i = 0; i < Attacks.Num(); ++i)
 	{
 		if (CanUseAttack(i, DistanceToTarget))
@@ -128,7 +145,7 @@ bool UAICombatComponent::ExecuteAttack(int32 AttackIndex)
 	FAIAttackData& Atk = Attacks[AttackIndex];
 	if (!Atk.AttackMontage) return false;
 
-	// Play via AIAnimationComponent
+	// Play montage via animation component
 	UAIAnimationComponent* AnimComp = OwnerCharacter->GetAIAnimation();
 	if (!AnimComp) return false;
 
@@ -136,26 +153,57 @@ bool UAICombatComponent::ExecuteAttack(int32 AttackIndex)
 	if (!Played) return false;
 
 	bIsAttacking = true;
+	bHitWindowFired = false;
 	CurrentAttackIndex = AttackIndex;
 	AttackAnimTimer = Atk.AttackMontage->GetPlayLength();
-	OnAIAttackStarted.Broadcast(Atk, AttackIndex);
+	HitWindowTimer = Atk.HitWindowTime;
+
+	// Broadcast start — BP can react (anticipation VFX, sound cues, etc.)
+	OnAIAttackStarted.Broadcast(Atk, AttackIndex, Atk.AttackMontage);
 	return true;
+}
+
+bool UAICombatComponent::ExecuteAttackByName(FName AttackName)
+{
+	for (int32 i = 0; i < Attacks.Num(); ++i)
+		if (Attacks[i].AttackName == AttackName)
+			return ExecuteAttack(i);
+	return false;
 }
 
 bool UAICombatComponent::ExecuteRandomAttack(float DistanceToTarget)
 {
+	// Try combo
 	if (Combos.Num() > 0 && FMath::FRand() < ComboChance && CurrentComboIndex < 0)
 		if (ExecuteRandomCombo()) return true;
 
+	// Try charged
 	if (FMath::FRand() < ChargeAttackChance)
-	{
 		for (int32 i = 0; i < Attacks.Num(); ++i)
 			if (Attacks[i].ChargeTime > 0.f && CanUseAttack(i, DistanceToTarget))
 				return StartChargeAttack(i);
-	}
 
+	// Normal
 	const int32 Idx = SelectBestAttack(DistanceToTarget);
 	return Idx >= 0 ? ExecuteAttack(Idx) : false;
+}
+
+/* ═══════════ Hit Window ═══════════ */
+
+void UAICombatComponent::ManualTriggerHitWindow()
+{
+	if (bIsAttacking && !bHitWindowFired) FireHitWindow();
+}
+
+void UAICombatComponent::FireHitWindow()
+{
+	if (!Attacks.IsValidIndex(CurrentAttackIndex) || !OwnerCharacter) return;
+
+	bHitWindowFired = true;
+	AActor* Target = OwnerCharacter->GetCurrentTarget();
+
+	// THIS IS THE KEY EVENT — Blueprint binds here to do damage, spawn VFX, projectiles, AoE, etc.
+	OnAIAttackHitWindow.Broadcast(Attacks[CurrentAttackIndex], CurrentAttackIndex, Target);
 }
 
 /* ═══════════ Charge ═══════════ */
@@ -179,12 +227,7 @@ void UAICombatComponent::ReleaseChargeAttack()
 	ExecuteAttack(CurrentAttackIndex);
 }
 
-void UAICombatComponent::CancelCharge()
-{
-	bIsCharging = false;
-	ChargeTimer = 0.f;
-	CurrentAttackIndex = -1;
-}
+void UAICombatComponent::CancelCharge() { bIsCharging = false; ChargeTimer = 0.f; CurrentAttackIndex = -1; }
 
 /* ═══════════ Combos ═══════════ */
 
@@ -211,9 +254,7 @@ void UAICombatComponent::ResetCombo()
 {
 	if (CurrentComboIndex >= 0 && Combos.IsValidIndex(CurrentComboIndex))
 		OnAIComboReset.Broadcast(Combos[CurrentComboIndex]);
-	CurrentComboIndex = -1;
-	CurrentComboStep = -1;
-	ComboWindowTimer = 0.f;
+	CurrentComboIndex = -1; CurrentComboStep = -1; ComboWindowTimer = 0.f;
 }
 
 bool UAICombatComponent::ExecuteRandomCombo()
@@ -233,6 +274,7 @@ void UAICombatComponent::InterruptAttack()
 	if (!bIsAttacking) return;
 	FAIAttackData Atk = Attacks.IsValidIndex(CurrentAttackIndex) ? Attacks[CurrentAttackIndex] : FAIAttackData();
 	bIsAttacking = false;
+	bHitWindowFired = false;
 	AttackAnimTimer = 0.f;
 
 	if (OwnerCharacter)
@@ -292,17 +334,6 @@ void UAICombatComponent::EvaluatePhaseFromHP(float HPPercent)
 	SetPhase(Best);
 }
 
-/* ═══════════ Damage ═══════════ */
-
-void UAICombatComponent::DealDamageToTarget(AActor* Target, float DamageAmount)
-{
-	if (!Target || !OwnerCharacter) return;
-	const float Final = DamageAmount * GetPhaseDamageMultiplier();
-	FDamageEvent Evt;
-	Target->TakeDamage(Final, Evt, OwnerCharacter->GetInstigatorController(), OwnerCharacter);
-	OnAIDamageDealt.Broadcast(Target, Final);
-}
-
 /* ═══════════ Private Ticks ═══════════ */
 
 void UAICombatComponent::TickCooldowns(float DeltaTime)
@@ -335,15 +366,24 @@ void UAICombatComponent::TickAttack(float DeltaTime)
 {
 	if (!bIsAttacking) return;
 
+	// Hit window timer (auto mode)
+	if (bUseAutoHitWindow && !bHitWindowFired && Attacks.IsValidIndex(CurrentAttackIndex))
+	{
+		HitWindowTimer -= DeltaTime;
+		if (HitWindowTimer <= 0.f)
+			FireHitWindow();
+	}
+
+	// Attack end timer
 	AttackAnimTimer -= DeltaTime;
 	if (AttackAnimTimer <= 0.f)
 	{
 		FAIAttackData& Atk = Attacks[CurrentAttackIndex];
 		bIsAttacking = false;
+		bHitWindowFired = false;
 		Atk.CurrentCooldown = Atk.Cooldown;
 		GlobalCooldownTimer = GlobalCooldown + FMath::FRandRange(0.f, AttackDelayRandomDeviation);
 		OnAIAttackEnded.Broadcast(Atk, false);
-
 		if (CurrentComboIndex >= 0) AdvanceCombo();
 		CurrentAttackIndex = -1;
 	}

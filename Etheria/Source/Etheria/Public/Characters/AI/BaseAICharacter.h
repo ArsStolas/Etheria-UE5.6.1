@@ -59,6 +59,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDead() const { return CurrentState == EAIState::Dead; }
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDormant() const { return bIsDormant; }
 	UFUNCTION(BlueprintPure, Category="AI") bool OnlyDetectsPlayers() const { return bOnlyDetectPlayers; }
+	UFUNCTION(BlueprintPure, Category="AI") bool ShouldShowDebugPatrol() const { return bShowDebugPatrol; }
 
 	/* ═══════════ Setters ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void SetAIState(EAIState NewState);
@@ -137,7 +138,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
 		meta=(ToolTip="Enable interaction. When true, the player can talk to this AI."))
 	bool bIsInteractable = false;
-
+	
+	/* ── Component Movements ── */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIMovementComponent> AIMovementComponent;
+	
 	/* ── Detection ── */
 
 	/** Tags that trigger flee. If empty, the AI flees from any detected actor (that passes the player filter). */
@@ -149,14 +153,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection",
 		meta=(ToolTip="Only react to player-controlled characters. Other AI are ignored."))
 	bool bOnlyDetectPlayers = true;
-
-	/* ── Rotation ── */
-
-	/** How fast the AI rotates toward its movement direction (degrees/sec). Lower = smoother turns for humanoids. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement",
-		meta=(ClampMin="50", ClampMax="1000", ToolTip="Rotation speed when moving. Lower values give smoother turns."))
-	float MovementRotationRate = 400.f;
-
+	
 	/* ── Pack ── */
 
 	/** Pack identifier. AI with the same PackID form a group and share alerts. Leave empty for solo AI. */
@@ -222,6 +219,9 @@ protected:
 	TObjectPtr<UMaterialInterface> SightDecalMaterial;
 
 	/* ── Debug ── */
+	
+	/** Show debug lines for patrol path/zone. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Debug") bool bShowDebugPatrol = false;
 
 	/** Show debug perception shapes (sight cone, hearing, proximity, leash, attack range). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Debug",
@@ -234,7 +234,6 @@ protected:
 	bool bShowDebugPack = false;
 
 	/* ── Components ── */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIMovementComponent> AIMovementComponent;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIAnimationComponent> AIAnimationComponent;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAICombatComponent> AICombatComponent;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<USplineComponent> PatrolSpline;

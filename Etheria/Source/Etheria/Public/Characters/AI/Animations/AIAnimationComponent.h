@@ -3,8 +3,10 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "AIAnimationComponent - Header"
- * Notes: Supports two modes: Direct Playback (no ABP) and Animation Blueprint.
- *        Handles locomotion, idle variations, action montages, crossfade transitions.
+ * Notes: Two modes:
+ *   DirectPlayback — PlayAnimation(Montage) on mesh. No ABP. For creatures.
+ *   AnimBlueprint  — Feeds GroundSpeed/Direction/Velocity to the ABP. Montage_Play for actions.
+ *                    The ABP handles locomotion blend spaces. For humanoids.
  */
 
 #pragma once
@@ -36,14 +38,10 @@ public:
 	UAIAnimationComponent();
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	/* ═══════════ Locomotion ═══════════ */
-
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") void SetLocomotionState(EAILocomotionState NewState);
 	UFUNCTION(BlueprintPure, Category="AI|Animation") EAILocomotionState GetLocomotionState() const { return CurrentLocomotionState; }
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") void PauseLocomotion() { bLocomotionPaused = true; }
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") void ResumeLocomotion() { bLocomotionPaused = false; }
-
-	/* ═══════════ Actions ═══════════ */
 
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomIdle();
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayIdleByIndex(int32 Index);
@@ -54,20 +52,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomHitReaction();
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayDeath();
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomDeath();
-
-	/** Play any montage as a one-shot action. Pauses locomotion, resumes when done. */
-	UFUNCTION(BlueprintCallable, Category="AI|Animation")
-	UAnimMontage* PlayActionMontage(UAnimMontage* Montage, float PlayRate = 1.f);
-
-	/** Stop current action and resume locomotion. */
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayActionMontage(UAnimMontage* Montage, float PlayRate = 1.f);
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") void StopCurrentAction();
-
 	UFUNCTION(BlueprintPure, Category="AI|Animation") bool IsPlayingAction() const { return bIsPlayingAction; }
-
-	/** Is the AI currently playing a non-interruptible idle variation? */
 	UFUNCTION(BlueprintPure, Category="AI|Animation") bool IsPlayingIdleVariation() const { return bIsPlayingIdleVariation; }
-
-	/* ═══════════ Dispatchers ═══════════ */
 
 	UPROPERTY(BlueprintAssignable) FOnAIAnimStarted OnAIAnimStarted;
 	UPROPERTY(BlueprintAssignable) FOnAIAnimEnded OnAIAnimEnded;
@@ -75,86 +63,66 @@ public:
 
 	/* ═══════════ Animation Mode ═══════════ */
 
-	/** How animations are played. Direct = no ABP needed (creatures). AnimBlueprint = uses ABP with Slot (humanoids). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Mode")
+	/** Direct = no ABP (creatures). AnimBlueprint = ABP handles locomotion, component feeds variables (humanoids). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Mode",
+		meta=(ToolTip="DirectPlayback: plays montages directly on mesh, no ABP needed.\nAnimBlueprint: uses your ABP for locomotion, feeds GroundSpeed/Direction/etc."))
 	EAIAnimationMode AnimationMode = EAIAnimationMode::DirectPlayback;
 
-	/* ═══════════ Locomotion Montages ═══════════ */
+	/* ── ABP Variable Names (must match your ABP variables) ── */
 
-	/** Base idle loop. Plays when the AI is standing still. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> IdleBaseMontage;
+	/** Name of the Velocity vector variable in your ABP. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|ABP Variables", meta=(EditCondition="AnimationMode==EAIAnimationMode::AnimBlueprint",
+		ToolTip="Name of the FVector variable in your AnimBP that receives the character velocity."))
+	FName ABP_VelocityName = TEXT("Velocity");
 
-	/** Walk forward animation (looping). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> WalkForwardMontage;
+	/** Name of the GroundSpeed float variable in your ABP. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|ABP Variables", meta=(EditCondition="AnimationMode==EAIAnimationMode::AnimBlueprint"))
+	FName ABP_GroundSpeedName = TEXT("GroundSpeed");
 
-	/** Walk backward animation (looping). Falls back to WalkForward if empty. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> WalkBackwardMontage;
+	/** Name of the FallSpeed float variable in your ABP. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|ABP Variables", meta=(EditCondition="AnimationMode==EAIAnimationMode::AnimBlueprint"))
+	FName ABP_FallSpeedName = TEXT("FallSpeed");
 
-	/** Run forward animation (looping). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> RunForwardMontage;
+	/** Name of the Direction float variable in your ABP. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|ABP Variables", meta=(EditCondition="AnimationMode==EAIAnimationMode::AnimBlueprint"))
+	FName ABP_DirectionName = TEXT("Direction");
 
-	/** Run backward animation (looping). Falls back to RunForward if empty. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> RunBackwardMontage;
+	/* ═══════════ Locomotion Montages (DirectPlayback mode only) ═══════════ */
 
-	/** Falling/in-air animation. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> FallingMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> IdleBaseMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> WalkForwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> WalkBackwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> RunForwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> RunBackwardMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> FallingMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> LandingMontage;
 
-	/** Landing animation (one-shot after falling). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion") TObjectPtr<UAnimMontage> LandingMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0", EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) float IdleSpeedThreshold = 5.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0", EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) float RunSpeedThreshold = 300.f;
 
-	/* ═══════════ Thresholds ═══════════ */
+	/* ═══════════ Action Pools (both modes) ═══════════ */
 
-	/** Speed below this value = Idle state. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0"))
-	float IdleSpeedThreshold = 5.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Idle", meta=(ToolTip="Special idle animations. Play to completion before resuming patrol.")) TArray<TObjectPtr<UAnimMontage>> IdleVariations;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Attack") TArray<TObjectPtr<UAnimMontage>> AttackMontages;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|HitReaction") TArray<TObjectPtr<UAnimMontage>> HitReactionMontages;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Death") TArray<TObjectPtr<UAnimMontage>> DeathMontages;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Interaction") TObjectPtr<UAnimMontage> InteractionMontage;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation", meta=(ClampMin="0.5", ClampMax="2.0")) float IdlePlayRate = 1.f;
 
-	/** Speed above this value = Running (below = Walking). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0"))
-	float RunSpeedThreshold = 300.f;
-
-	/* ═══════════ Transition ═══════════ */
-
-	/** Blend time when switching between locomotion animations. Higher = smoother but slower transitions. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Transition", meta=(ClampMin="0", ClampMax="1.0"))
-	float LocomotionBlendTime = 0.25f;
-
-	/** Blend time when starting/ending action montages. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Transition", meta=(ClampMin="0", ClampMax="1.0"))
-	float ActionBlendTime = 0.2f;
-
-	/* ═══════════ Action Pools ═══════════ */
-
-	/** Special idle animations (looking around, scratching, yawning). Plays to completion before moving. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Idle")
-	TArray<TObjectPtr<UAnimMontage>> IdleVariations;
-
-	/** Attack animation montages. Picked randomly or by index. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Attack")
-	TArray<TObjectPtr<UAnimMontage>> AttackMontages;
-
-	/** Hit reaction montages. One is picked randomly when the AI takes damage. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|HitReaction")
-	TArray<TObjectPtr<UAnimMontage>> HitReactionMontages;
-
-	/** Death animation montages. One is picked randomly. Never resumes locomotion. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Death")
-	TArray<TObjectPtr<UAnimMontage>> DeathMontages;
-
-	/** Montage for NPC interaction (talking, quest giving). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Interaction")
-	TObjectPtr<UAnimMontage> InteractionMontage;
-
-	/** Playback rate for idle variation montages. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation", meta=(ClampMin="0.5", ClampMax="2.0"))
-	float IdlePlayRate = 1.f;
+	/** Blend time when transitioning between animations. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Transition", meta=(ClampMin="0", ClampMax="1.0")) float ActionBlendTime = 0.2f;
 
 protected:
 	virtual void BeginPlay() override;
 
 private:
-	void UpdateLocomotion();
+	void UpdateLocomotionDirect();
+	void UpdateABPVariables();
 	void PlayOnMesh(UAnimMontage* Montage, bool bLoop, float PlayRate = 1.f);
-	void PlayViaMontageSystem(UAnimMontage* Montage, float PlayRate = 1.f);
+	UAnimMontage* PlayViaMontageSystem(UAnimMontage* Montage, float PlayRate = 1.f);
+
+	void SetABPFloat(UAnimInstance* Anim, FName Name, float Value);
+	void SetABPVector(UAnimInstance* Anim, FName Name, const FVector& Value);
 
 	UFUNCTION() void HandleMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 

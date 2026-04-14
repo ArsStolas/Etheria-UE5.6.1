@@ -1,7 +1,10 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Class: AIMovementComponent - Source
+ * Last Updated by: Mato
+ * Class: "AIMovementComponent - Source"
+ * Notes: Spline points cached to world space at StartPatrol (fixes drift).
+ *        FleeFrom uses perpendicular randomization to avoid getting stuck.
  */
 
 #include "Characters/AI/Movements/AIMovementComponent.h"
@@ -14,10 +17,7 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "DrawDebugHelpers.h"
 
-UAIMovementComponent::UAIMovementComponent()
-{
-	PrimaryComponentTick.bCanEverTick = true;
-}
+UAIMovementComponent::UAIMovementComponent() { PrimaryComponentTick.bCanEverTick = true; }
 
 void UAIMovementComponent::BeginPlay()
 {
@@ -30,10 +30,7 @@ void UAIMovementComponent::EnsureInitialized()
 	if (!OwnerCharacter)
 	{
 		OwnerCharacter = Cast<ABaseAICharacter>(GetOwner());
-		if (OwnerCharacter)
-		{
-			MovementComp = OwnerCharacter->GetCharacterMovement();
-		}
+		if (OwnerCharacter) MovementComp = OwnerCharacter->GetCharacterMovement();
 	}
 }
 
@@ -42,27 +39,32 @@ void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	ApplySmoothAcceleration(DeltaTime);
-
-	// Tick down grace timer
-	if (MoveGraceTimer > 0.f)
-	{
-		MoveGraceTimer -= DeltaTime;
-	}
-
-	if (bIsPatrolling)
-	{
-		HandlePatrolTick(DeltaTime);
-	}
+	if (MoveGraceTimer > 0.f) MoveGraceTimer -= DeltaTime;
+	if (bIsPatrolling) HandlePatrolTick(DeltaTime);
 
 #if ENABLE_DRAW_DEBUG
-	if (bShowDebugPatrol)
-	{
-		DrawDebugPatrol();
-	}
+	if (OwnerCharacter->ShouldShowDebugPatrol()) DrawDebugPatrol();
 #endif
 }
 
-/* ─────────────────── Public API ─────────────────── */
+/* ═══════════ Spline Cache ═══════════ */
+
+void UAIMovementComponent::CacheSplineWorldPositions()
+{
+	CachedSplineWorldPoints.Reset();
+	if (!PatrolSpline) return;
+
+	const int32 Num = PatrolSpline->GetNumberOfSplinePoints();
+	CachedSplineWorldPoints.Reserve(Num);
+
+	for (int32 i = 0; i < Num; ++i)
+	{
+		// Snapshot world position NOW — before the character moves
+		CachedSplineWorldPoints.Add(PatrolSpline->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World));
+	}
+}
+
+/* ═══════════ Public API ═══════════ */
 
 void UAIMovementComponent::StartPatrol()
 {
@@ -73,6 +75,10 @@ void UAIMovementComponent::StartPatrol()
 
 	PatrolOrigin = OwnerCharacter->GetActorLocation();
 
+	// Cache spline points in world space so they don't drift with the character
+	if (PatrolMode == EPatrolMode::Path)
+		CacheSplineWorldPositions();
+
 	bIsPatrolling = true;
 	bPatrolFinished = false;
 	bIsWaiting = false;
@@ -81,14 +87,8 @@ void UAIMovementComponent::StartPatrol()
 	PatrolDirection = 1;
 
 	CurrentDestination = GetNextPatrolPoint();
-
-	// Set speed IMMEDIATELY — the core fix
 	DesiredMaxSpeed = PatrolSpeed;
-	if (MovementComp)
-	{
-		MovementComp->MaxWalkSpeed = PatrolSpeed;
-	}
-
+	if (MovementComp) MovementComp->MaxWalkSpeed = PatrolSpeed;
 	MoveToLocation(CurrentDestination);
 }
 
@@ -108,36 +108,21 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 	CurrentDestination = Target;
 	OnMovementTargetUpdated.Broadcast(Target);
 
-	// Guarantee non-zero walk speed
 	if (MovementComp && MovementComp->MaxWalkSpeed < 1.f)
-	{
 		MovementComp->MaxWalkSpeed = FMath::Max(DesiredMaxSpeed, PatrolSpeed);
-	}
 
 	bool bSuccess = false;
-
 	if (AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
 	{
-		// bProjectDestinationToNavigation = TRUE — this was the critical fix
-		// Without this, any point slightly off the NavMesh causes silent failure
-		const EPathFollowingRequestResult::Type Result =
-			AIC->MoveToLocation(
-				Target,
-				AcceptanceRadius,
-				true,	// bStopOnOverlap
-				true,	// bUsePathfinding
-				true,	// bProjectDestinationToNavigation  ← FIX
-				true,	// bCanStrafe
-				TSubclassOf<UNavigationQueryFilter>(),
-				true	// bAllowPartialPath
-			);
+		const EPathFollowingRequestResult::Type Result = AIC->MoveToLocation(
+			Target, AcceptanceRadius, true, true, true, true,
+			TSubclassOf<UNavigationQueryFilter>(), true);
 
 		bSuccess = (Result == EPathFollowingRequestResult::RequestSuccessful
 				 || Result == EPathFollowingRequestResult::AlreadyAtGoal);
 
 		if (Result == EPathFollowingRequestResult::AlreadyAtGoal)
 		{
-			// We're already there — don't set move active
 			bMoveRequestActive = false;
 			MoveGraceTimer = 0.f;
 			return true;
@@ -150,12 +135,9 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("AIMovement: MoveToLocation FAILED for %s -> %s"),
-				*OwnerCharacter->GetName(), *Target.ToString());
 			bMoveRequestActive = false;
 		}
 	}
-
 	return bSuccess;
 }
 
@@ -163,15 +145,10 @@ void UAIMovementComponent::StopMovement()
 {
 	DesiredMaxSpeed = 0.f;
 	bMoveRequestActive = false;
-
 	EnsureInitialized();
 	if (OwnerCharacter)
-	{
 		if (AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
-		{
 			AIC->StopMovement();
-		}
-	}
 }
 
 void UAIMovementComponent::FleeFrom(AActor* Threat)
@@ -181,7 +158,11 @@ void UAIMovementComponent::FleeFrom(AActor* Threat)
 
 	const FVector MyLoc = OwnerCharacter->GetActorLocation();
 	const FVector ThreatLoc = Threat->GetActorLocation();
-	const FVector FleeDir = (MyLoc - ThreatLoc).GetSafeNormal();
+	const FVector AwayDir = (MyLoc - ThreatLoc).GetSafeNormal2D();
+
+	// Add perpendicular random offset (30-60°) to avoid running straight into walls
+	const float RandomAngle = FMath::FRandRange(-60.f, 60.f);
+	const FVector FleeDir = AwayDir.RotateAngleAxis(RandomAngle, FVector::UpVector);
 	const FVector FleeTarget = MyLoc + FleeDir * FleeDistance;
 
 	const UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
@@ -194,14 +175,19 @@ void UAIMovementComponent::FleeFrom(AActor* Threat)
 		{
 			FinalTarget = NavResult.Location;
 		}
+		else
+		{
+			// Projection failed — try pure opposite direction without random angle
+			const FVector FallbackTarget = MyLoc + AwayDir * FleeDistance * 0.5f;
+			if (NavSys->ProjectPointToNavigation(FallbackTarget, NavResult, FVector(500.f, 500.f, 250.f)))
+				FinalTarget = NavResult.Location;
+			else
+				FinalTarget = MyLoc + AwayDir * 200.f; // Desperate: just move a bit away
+		}
 	}
 
 	DesiredMaxSpeed = FleeSpeed;
-	if (MovementComp)
-	{
-		MovementComp->MaxWalkSpeed = FleeSpeed;
-	}
-
+	if (MovementComp) MovementComp->MaxWalkSpeed = FleeSpeed;
 	MoveToLocation(FinalTarget);
 }
 
@@ -210,17 +196,15 @@ FVector UAIMovementComponent::GetNextPatrolPoint()
 	EnsureInitialized();
 
 	if (PatrolMode == EPatrolMode::Zone)
-	{
 		return GetRandomPointInZone();
-	}
 
-	if (PatrolMode == EPatrolMode::Path && PatrolSpline)
+	if (PatrolMode == EPatrolMode::Path)
 	{
-		const int32 NumPoints = PatrolSpline->GetNumberOfSplinePoints();
-		if (NumPoints > 0)
+		// Use CACHED world positions — not live spline (which moves with the character)
+		if (CachedSplineWorldPoints.Num() > 0)
 		{
-			const int32 ClampedIndex = FMath::Clamp(CurrentPatrolIndex, 0, NumPoints - 1);
-			return PatrolSpline->GetLocationAtSplinePoint(ClampedIndex, ESplineCoordinateSpace::World);
+			const int32 Idx = FMath::Clamp(CurrentPatrolIndex, 0, CachedSplineWorldPoints.Num() - 1);
+			return CachedSplineWorldPoints[Idx];
 		}
 	}
 
@@ -229,10 +213,8 @@ FVector UAIMovementComponent::GetNextPatrolPoint()
 
 int32 UAIMovementComponent::GetNumPatrolPoints() const
 {
-	if (PatrolSpline)
-	{
-		return PatrolSpline->GetNumberOfSplinePoints();
-	}
+	if (PatrolMode == EPatrolMode::Path)
+		return CachedSplineWorldPoints.Num();
 	return 0;
 }
 
@@ -242,72 +224,43 @@ bool UAIMovementComponent::HasReachedDestination() const
 	return FVector::Dist(OwnerCharacter->GetActorLocation(), CurrentDestination) <= AcceptanceRadius;
 }
 
-void UAIMovementComponent::SetDesiredSpeed(float Speed)
-{
-	DesiredMaxSpeed = Speed;
-}
+void UAIMovementComponent::SetDesiredSpeed(float Speed) { DesiredMaxSpeed = Speed; }
 
-/* ─────────────────── Private — Patrol Logic ─────────────────── */
+/* ═══════════ Patrol Logic ═══════════ */
 
 void UAIMovementComponent::HandlePatrolTick(float DeltaTime)
 {
 	if (bPatrolFinished) return;
 
-	// Phase 1: Waiting at a patrol point
 	if (bIsWaiting)
 	{
 		WaitTimer -= DeltaTime;
-		if (WaitTimer <= 0.f)
-		{
-			ResumePatrolAfterWait();
-		}
+		if (WaitTimer <= 0.f) ResumePatrolAfterWait();
 		return;
 	}
 
-	// Phase 2: Moving to a destination — wait for grace timer to avoid instant re-detection
-	if (MoveGraceTimer > 0.f)
-	{
-		return;
-	}
+	if (MoveGraceTimer > 0.f) return;
 
-	// Phase 3: Check if the move has completed
 	bool bArrived = false;
-
 	if (bMoveRequestActive)
 	{
-		// Primary check: ask the AI controller if it's still moving
 		if (OwnerCharacter)
-		{
 			if (const AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
-			{
-				const EPathFollowingStatus::Type Status = AIC->GetMoveStatus();
-				bArrived = (Status != EPathFollowingStatus::Moving);
-			}
-		}
+				bArrived = (AIC->GetMoveStatus() != EPathFollowingStatus::Moving);
 	}
 	else
 	{
-		// MoveToLocation returned AlreadyAtGoal or failed — treat as arrived
 		bArrived = true;
 	}
 
-	// Fallback: distance check
-	if (!bArrived && HasReachedDestination())
-	{
-		bArrived = true;
-	}
-
-	if (bArrived)
-	{
-		BeginWaitAtPoint();
-	}
+	if (!bArrived && HasReachedDestination()) bArrived = true;
+	if (bArrived) BeginWaitAtPoint();
 }
 
 void UAIMovementComponent::BeginWaitAtPoint()
 {
 	bMoveRequestActive = false;
 	OnPatrolPointReached.Broadcast(CurrentPatrolIndex);
-
 	DesiredMaxSpeed = 0.f;
 	bIsWaiting = true;
 	WaitTimer = WaitTimeAtPoint + FMath::FRandRange(0.f, WaitTimeRandomDeviation);
@@ -317,64 +270,38 @@ void UAIMovementComponent::ResumePatrolAfterWait()
 {
 	bIsWaiting = false;
 	AdvancePatrolIndex();
-
 	if (bPatrolFinished) return;
 
 	CurrentDestination = GetNextPatrolPoint();
-
 	DesiredMaxSpeed = PatrolSpeed;
-	if (MovementComp)
-	{
-		MovementComp->MaxWalkSpeed = PatrolSpeed;
-	}
+	if (MovementComp) MovementComp->MaxWalkSpeed = PatrolSpeed;
 
 	if (!MoveToLocation(CurrentDestination))
-	{
-		// Move request failed — try next point next tick
-		UE_LOG(LogTemp, Warning, TEXT("AIMovement: Patrol move failed, advancing to next point."));
-		BeginWaitAtPoint();
-	}
+		BeginWaitAtPoint(); // Failed — try again next cycle
 }
 
 void UAIMovementComponent::AdvancePatrolIndex()
 {
-	if (PatrolMode == EPatrolMode::Zone)
-	{
-		return;
-	}
+	if (PatrolMode == EPatrolMode::Zone) return;
 
-	const int32 NumPoints = GetNumPatrolPoints();
-	if (NumPoints == 0) return;
+	const int32 Num = GetNumPatrolPoints();
+	if (Num == 0) return;
 
-	const int32 NextIndex = CurrentPatrolIndex + PatrolDirection;
+	const int32 Next = CurrentPatrolIndex + PatrolDirection;
 
 	switch (PatrolLoopMode)
 	{
 	case EPatrolLoopMode::Loop:
-		CurrentPatrolIndex = NextIndex % NumPoints;
-		if (CurrentPatrolIndex < 0) CurrentPatrolIndex += NumPoints;
+		CurrentPatrolIndex = Next % Num;
+		if (CurrentPatrolIndex < 0) CurrentPatrolIndex += Num;
 		break;
-
 	case EPatrolLoopMode::PingPong:
-		if (NextIndex >= NumPoints || NextIndex < 0)
-		{
-			PatrolDirection *= -1;
-			CurrentPatrolIndex += PatrolDirection;
-		}
-		else
-		{
-			CurrentPatrolIndex = NextIndex;
-		}
+		if (Next >= Num || Next < 0) { PatrolDirection *= -1; CurrentPatrolIndex += PatrolDirection; }
+		else CurrentPatrolIndex = Next;
 		break;
-
 	case EPatrolLoopMode::Once:
-		if (NextIndex >= NumPoints)
-		{
-			bPatrolFinished = true;
-			OnPatrolCompleted.Broadcast();
-			return;
-		}
-		CurrentPatrolIndex = NextIndex;
+		if (Next >= Num) { bPatrolFinished = true; OnPatrolCompleted.Broadcast(); return; }
+		CurrentPatrolIndex = Next;
 		break;
 	}
 }
@@ -382,88 +309,64 @@ void UAIMovementComponent::AdvancePatrolIndex()
 FVector UAIMovementComponent::GetRandomPointInZone() const
 {
 	if (!OwnerCharacter) return FVector::ZeroVector;
+	const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	if (!Nav) return OwnerCharacter->GetActorLocation();
 
-	const UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
-	if (!NavSys) return OwnerCharacter->GetActorLocation();
-
-	FNavLocation Result;
 	const FVector Center = PatrolOrigin.IsZero() ? OwnerCharacter->GetActorLocation() : PatrolOrigin;
-	if (NavSys->GetRandomReachablePointInRadius(Center, PatrolRadius, Result))
-	{
-		return Result.Location;
-	}
-
+	FNavLocation Res;
+	if (Nav->GetRandomReachablePointInRadius(Center, PatrolRadius, Res)) return Res.Location;
 	return OwnerCharacter->GetActorLocation();
 }
 
 void UAIMovementComponent::ApplySmoothAcceleration(float DeltaTime)
 {
 	if (!MovementComp) return;
-
-	const float Current = MovementComp->MaxWalkSpeed;
-	const float Interped = FMath::FInterpTo(Current, DesiredMaxSpeed, DeltaTime, AccelerationInterpSpeed);
-	MovementComp->MaxWalkSpeed = Interped;
+	MovementComp->MaxWalkSpeed = FMath::FInterpTo(MovementComp->MaxWalkSpeed, DesiredMaxSpeed, DeltaTime, AccelerationInterpSpeed);
 }
 
-/* ─────────────────── Debug ─────────────────── */
+/* ═══════════ Debug ═══════════ */
 
 void UAIMovementComponent::DrawDebugPatrol() const
 {
 #if ENABLE_DRAW_DEBUG
 	if (!OwnerCharacter) return;
-
-	const UWorld* World = GetWorld();
-	if (!World) return;
-
-	const FVector MyLoc = OwnerCharacter->GetActorLocation();
+	const UWorld* W = GetWorld();
+	if (!W) return;
+	const FVector Loc = OwnerCharacter->GetActorLocation();
 
 	if (PatrolMode == EPatrolMode::Zone)
 	{
-		const FVector Center = PatrolOrigin.IsZero() ? MyLoc : PatrolOrigin;
-		DrawDebugSphere(World, Center, PatrolRadius, 24, FColor::Cyan, false, -1.f, 0, 2.f);
-
+		const FVector Center = PatrolOrigin.IsZero() ? Loc : PatrolOrigin;
+		DrawDebugSphere(W, Center, PatrolRadius, 24, FColor::Cyan, false, -1.f, 0, 2.f);
 		if (bIsPatrolling && !bIsWaiting)
 		{
-			DrawDebugLine(World, MyLoc, CurrentDestination, FColor::Green, false, -1.f, 0, 2.f);
-			DrawDebugSphere(World, CurrentDestination, 30.f, 8, FColor::Green, false, -1.f, 0, 2.f);
+			DrawDebugLine(W, Loc, CurrentDestination, FColor::Green, false, -1.f, 0, 2.f);
+			DrawDebugSphere(W, CurrentDestination, 30.f, 8, FColor::Green, false, -1.f, 0, 2.f);
 		}
 	}
-	else if (PatrolMode == EPatrolMode::Path && PatrolSpline)
+	else if (PatrolMode == EPatrolMode::Path && CachedSplineWorldPoints.Num() > 0)
 	{
-		const int32 NumPoints = PatrolSpline->GetNumberOfSplinePoints();
-		const float SplineLen = PatrolSpline->GetSplineLength();
-		const int32 Segments = FMath::Max(static_cast<int32>(SplineLen / 20.f), NumPoints * 10);
-
-		for (int32 i = 0; i < Segments; ++i)
+		// Draw cached world points and lines between them
+		for (int32 i = 0; i < CachedSplineWorldPoints.Num(); ++i)
 		{
-			const float Alpha0 = static_cast<float>(i) / static_cast<float>(Segments);
-			const float Alpha1 = static_cast<float>(i + 1) / static_cast<float>(Segments);
-			const FVector P0 = PatrolSpline->GetLocationAtDistanceAlongSpline(Alpha0 * SplineLen, ESplineCoordinateSpace::World);
-			const FVector P1 = PatrolSpline->GetLocationAtDistanceAlongSpline(Alpha1 * SplineLen, ESplineCoordinateSpace::World);
-			DrawDebugLine(World, P0, P1, FColor::Orange, false, -1.f, 0, 3.f);
-		}
-
-		for (int32 i = 0; i < NumPoints; ++i)
-		{
-			const FVector Pt = PatrolSpline->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World);
+			const FVector& Pt = CachedSplineWorldPoints[i];
 			const FColor Col = (i == CurrentPatrolIndex) ? FColor::Yellow : FColor::Orange;
-			DrawDebugSphere(World, Pt, 35.f, 8, Col, false, -1.f, 0, 3.f);
-			DrawDebugString(World, Pt + FVector(0, 0, 60.f), FString::Printf(TEXT("[%d]"), i), nullptr, Col, -1.f, true);
+			DrawDebugSphere(W, Pt, 35.f, 8, Col, false, -1.f, 0, 3.f);
+			DrawDebugString(W, Pt + FVector(0, 0, 60.f), FString::Printf(TEXT("[%d]"), i), nullptr, Col, -1.f, true);
+
+			if (i + 1 < CachedSplineWorldPoints.Num())
+				DrawDebugLine(W, Pt, CachedSplineWorldPoints[i + 1], FColor::Orange, false, -1.f, 0, 2.f);
 		}
 
 		if (bIsPatrolling && !bIsWaiting)
-		{
-			DrawDebugLine(World, MyLoc, CurrentDestination, FColor::Green, false, -1.f, 0, 2.f);
-		}
+			DrawDebugLine(W, Loc, CurrentDestination, FColor::Green, false, -1.f, 0, 2.f);
 	}
 
-	// State text
-	FString StateStr;
-	if (bIsWaiting) StateStr = FString::Printf(TEXT("WAITING %.1f"), WaitTimer);
-	else if (bMoveRequestActive) StateStr = TEXT("MOVING");
-	else if (bIsPatrolling) StateStr = TEXT("PATROL (idle)");
-	else StateStr = TEXT("STOPPED");
-
-	DrawDebugString(World, MyLoc + FVector(0, 0, 120.f), StateStr, nullptr, FColor::White, -1.f, true);
+	FString S;
+	if (bIsWaiting) S = FString::Printf(TEXT("WAITING %.1f"), WaitTimer);
+	else if (bMoveRequestActive) S = TEXT("MOVING");
+	else if (bIsPatrolling) S = TEXT("PATROL");
+	else S = TEXT("STOPPED");
+	DrawDebugString(W, Loc + FVector(0, 0, 120.f), S, nullptr, FColor::White, -1.f, true);
 #endif
 }

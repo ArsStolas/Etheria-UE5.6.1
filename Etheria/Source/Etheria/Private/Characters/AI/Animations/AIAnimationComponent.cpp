@@ -3,10 +3,10 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "AIAnimationComponent - Source"
- * Notes: Two playback modes:
- *   DirectPlayback — SkeletalMesh::PlayAnimation(Montage). No ABP. Works for creatures.
- *   AnimBlueprint  — AnimInstance::Montage_Play(). Requires ABP with DefaultSlot. For humanoids.
- *   Idle variations play to completion. Actions pause locomotion with crossfade.
+ * Notes:
+ *   DirectPlayback — Mesh::PlayAnimation(Montage). Action timer tracks end.
+ *   AnimBlueprint  — Feeds GroundSpeed/Direction/Velocity/FallSpeed to ABP every tick.
+ *                    ABP locomotion untouched. Montage_Play for actions. Callback tracks end.
  */
 
 #include "Characters/AI/Animations/AIAnimationComponent.h"
@@ -15,6 +15,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "KismetAnimationLibrary.h"
 
 UAIAnimationComponent::UAIAnimationComponent() { PrimaryComponentTick.bCanEverTick = true; }
 
@@ -29,12 +30,13 @@ void UAIAnimationComponent::BeginPlay()
 
 	if (AnimationMode == EAIAnimationMode::DirectPlayback)
 	{
+		// Direct mode — force SingleNode, no ABP
 		Mesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 		if (IdleBaseMontage) { PlayOnMesh(IdleBaseMontage, true); CurrentLocomotionMontage = IdleBaseMontage; }
 	}
 	else
 	{
-		// ABP mode — bind montage end callback
+		// ABP mode — leave animation mode alone, bind montage end callback
 		if (UAnimInstance* Anim = Mesh->GetAnimInstance())
 		{
 			Anim->OnMontageEnded.AddDynamic(this, &UAIAnimationComponent::HandleMontageEnded);
@@ -47,37 +49,92 @@ void UAIAnimationComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// In DirectPlayback mode, we track action end via timer
-	if (AnimationMode == EAIAnimationMode::DirectPlayback && bIsPlayingAction)
+	if (AnimationMode == EAIAnimationMode::AnimBlueprint)
 	{
-		ActionTimer -= DeltaTime;
-		if (ActionTimer <= 0.f)
-		{
-			UAnimMontage* Finished = CurrentActionMontage;
-			bIsPlayingAction = false;
-			bLocomotionPaused = false;
-			bIsPlayingIdleVariation = false;
-			CurrentActionMontage = nullptr;
-			ActionTimer = 0.f;
-			OnAIAnimEnded.Broadcast(Finished);
-			CurrentLocomotionMontage = nullptr;
-			UpdateLocomotion();
-		}
-		return;
+		// Feed ABP variables every frame
+		UpdateABPVariables();
+
+		// ABP mode uses HandleMontageEnded callback — no timer tracking needed
+		// But we still need bIsPlayingAction state for external queries
 	}
-
-	// In ABP mode, the HandleMontageEnded callback handles action end
-
-	// Don't update locomotion if paused or playing an idle variation
-	if (!bLocomotionPaused && !bIsPlayingIdleVariation)
+	else // DirectPlayback
 	{
-		UpdateLocomotion();
+		if (bIsPlayingAction)
+		{
+			ActionTimer -= DeltaTime;
+			if (ActionTimer <= 0.f)
+			{
+				UAnimMontage* Finished = CurrentActionMontage;
+				bIsPlayingAction = false;
+				bLocomotionPaused = false;
+				bIsPlayingIdleVariation = false;
+				CurrentActionMontage = nullptr;
+				ActionTimer = 0.f;
+				OnAIAnimEnded.Broadcast(Finished);
+				CurrentLocomotionMontage = nullptr;
+				UpdateLocomotionDirect();
+			}
+			return;
+		}
+
+		if (!bLocomotionPaused && !bIsPlayingIdleVariation)
+			UpdateLocomotionDirect();
 	}
 }
 
-/* ═══════════ Locomotion ═══════════ */
+/* ═══════════ ABP Variable Feeding ═══════════ */
 
-void UAIAnimationComponent::UpdateLocomotion()
+void UAIAnimationComponent::UpdateABPVariables()
+{
+	if (!OwnerCharacter) return;
+	USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+	if (!Mesh) return;
+	UAnimInstance* Anim = Mesh->GetAnimInstance();
+	if (!Anim) return;
+
+	const UCharacterMovementComponent* MC = OwnerCharacter->GetCharacterMovement();
+	if (!MC) return;
+
+	const FVector Vel = MC->Velocity;
+
+	SetABPVector(Anim, ABP_VelocityName, Vel);
+	SetABPFloat(Anim, ABP_GroundSpeedName, Vel.Size2D());
+	SetABPFloat(Anim, ABP_FallSpeedName, Vel.Z);
+	SetABPFloat(Anim, ABP_DirectionName,
+		UKismetAnimationLibrary::CalculateDirection(Vel, OwnerCharacter->GetActorRotation()));
+}
+
+void UAIAnimationComponent::SetABPFloat(UAnimInstance* Anim, FName Name, float Value)
+{
+	if (Name == NAME_None) return;
+	if (FFloatProperty* Prop = FindFProperty<FFloatProperty>(Anim->GetClass(), Name))
+	{
+		Prop->SetPropertyValue_InContainer(Anim, Value);
+		return;
+	}
+	// UE5 might use double
+	if (FDoubleProperty* Prop = FindFProperty<FDoubleProperty>(Anim->GetClass(), Name))
+	{
+		Prop->SetPropertyValue_InContainer(Anim, static_cast<double>(Value));
+	}
+}
+
+void UAIAnimationComponent::SetABPVector(UAnimInstance* Anim, FName Name, const FVector& Value)
+{
+	if (Name == NAME_None) return;
+	if (FStructProperty* Prop = FindFProperty<FStructProperty>(Anim->GetClass(), Name))
+	{
+		if (Prop->Struct == TBaseStructure<FVector>::Get())
+		{
+			void* Ptr = Prop->ContainerPtrToValuePtr<void>(Anim);
+			*static_cast<FVector*>(Ptr) = Value;
+		}
+	}
+}
+
+/* ═══════════ Direct Mode Locomotion ═══════════ */
+
+void UAIAnimationComponent::UpdateLocomotionDirect()
 {
 	if (!OwnerCharacter) return;
 	const UCharacterMovementComponent* MC = OwnerCharacter->GetCharacterMovement();
@@ -98,6 +155,8 @@ void UAIAnimationComponent::UpdateLocomotion()
 
 void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
 {
+	if (AnimationMode == EAIAnimationMode::AnimBlueprint) return; // ABP handles locomotion
+
 	if (CurrentLocomotionState == NewState && CurrentLocomotionMontage) return;
 	CurrentLocomotionState = NewState;
 
@@ -113,19 +172,7 @@ void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
 	case EAILocomotionState::Landing:      T = LandingMontage; break;
 	}
 
-	if (T && T != CurrentLocomotionMontage)
-	{
-		if (AnimationMode == EAIAnimationMode::DirectPlayback)
-		{
-			PlayOnMesh(T, true);
-		}
-		else
-		{
-			PlayViaMontageSystem(T);
-		}
-		CurrentLocomotionMontage = T;
-	}
-
+	if (T && T != CurrentLocomotionMontage) { PlayOnMesh(T, true); CurrentLocomotionMontage = T; }
 	OnLocomotionStateChanged.Broadcast();
 }
 
@@ -134,20 +181,17 @@ void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
 UAnimMontage* UAIAnimationComponent::PlayRandomIdle()
 {
 	if (IdleVariations.Num() == 0) return nullptr;
-	UAnimMontage* M = IdleVariations[FMath::RandRange(0, IdleVariations.Num() - 1)];
-	if (!M) return nullptr;
-
-	UAnimMontage* Result = PlayActionMontage(M, IdlePlayRate);
-	if (Result) bIsPlayingIdleVariation = true;
-	return Result;
+	UAnimMontage* R = PlayActionMontage(IdleVariations[FMath::RandRange(0, IdleVariations.Num() - 1)], IdlePlayRate);
+	if (R) bIsPlayingIdleVariation = true;
+	return R;
 }
 
 UAnimMontage* UAIAnimationComponent::PlayIdleByIndex(int32 I)
 {
 	if (!IdleVariations.IsValidIndex(I)) return nullptr;
-	UAnimMontage* Result = PlayActionMontage(IdleVariations[I], IdlePlayRate);
-	if (Result) bIsPlayingIdleVariation = true;
-	return Result;
+	UAnimMontage* R = PlayActionMontage(IdleVariations[I], IdlePlayRate);
+	if (R) bIsPlayingIdleVariation = true;
+	return R;
 }
 
 UAnimMontage* UAIAnimationComponent::PlayRandomAttack()
@@ -169,8 +213,7 @@ UAnimMontage* UAIAnimationComponent::PlayHitReaction() { return PlayRandomHitRea
 UAnimMontage* UAIAnimationComponent::PlayRandomHitReaction()
 {
 	if (HitReactionMontages.Num() == 0) return nullptr;
-	// Hit reactions can interrupt idle variations and other actions
-	StopCurrentAction();
+	StopCurrentAction(); // Hit interrupts everything
 	return PlayActionMontage(HitReactionMontages[FMath::RandRange(0, HitReactionMontages.Num() - 1)]);
 }
 
@@ -183,18 +226,14 @@ UAnimMontage* UAIAnimationComponent::PlayRandomDeath()
 	if (!M) return nullptr;
 
 	if (AnimationMode == EAIAnimationMode::DirectPlayback)
-	{
 		PlayOnMesh(M, false);
-	}
 	else
-	{
 		PlayViaMontageSystem(M);
-	}
 
 	bIsPlayingAction = true;
 	bLocomotionPaused = true;
 	CurrentActionMontage = M;
-	ActionTimer = 999.f; // Death never auto-resumes
+	ActionTimer = 999.f;
 	OnAIAnimStarted.Broadcast(M);
 	return M;
 }
@@ -213,23 +252,11 @@ UAnimMontage* UAIAnimationComponent::PlayActionMontage(UAnimMontage* Montage, fl
 	}
 	else
 	{
-		// ABP mode — stop current locomotion montage, play action via Montage_Play
-		if (UAnimInstance* Anim = OwnerCharacter->GetMesh()->GetAnimInstance())
-		{
-			if (CurrentLocomotionMontage)
-			{
-				Anim->Montage_Stop(ActionBlendTime, CurrentLocomotionMontage);
-				CurrentLocomotionMontage = nullptr;
-			}
-
-			const float Duration = Anim->Montage_Play(Montage, PlayRate);
-			if (Duration <= 0.f) return nullptr;
-
-			bIsPlayingAction = true;
-			bLocomotionPaused = true;
-			CurrentActionMontage = Montage;
-			// In ABP mode, HandleMontageEnded handles the end — no timer needed
-		}
+		UAnimMontage* Played = PlayViaMontageSystem(Montage, PlayRate);
+		if (!Played) return nullptr;
+		bIsPlayingAction = true;
+		bLocomotionPaused = true;
+		CurrentActionMontage = Montage;
 	}
 
 	OnAIAnimStarted.Broadcast(Montage);
@@ -239,16 +266,12 @@ UAnimMontage* UAIAnimationComponent::PlayActionMontage(UAnimMontage* Montage, fl
 void UAIAnimationComponent::StopCurrentAction()
 {
 	if (!bIsPlayingAction) return;
-
 	UAnimMontage* Stopped = CurrentActionMontage;
 
 	if (AnimationMode == EAIAnimationMode::AnimBlueprint && OwnerCharacter)
 	{
 		if (UAnimInstance* Anim = OwnerCharacter->GetMesh()->GetAnimInstance())
-		{
-			if (CurrentActionMontage)
-				Anim->Montage_Stop(ActionBlendTime, CurrentActionMontage);
-		}
+			if (CurrentActionMontage) Anim->Montage_Stop(ActionBlendTime, CurrentActionMontage);
 	}
 
 	bIsPlayingAction = false;
@@ -258,11 +281,14 @@ void UAIAnimationComponent::StopCurrentAction()
 	ActionTimer = 0.f;
 	OnAIAnimEnded.Broadcast(Stopped);
 
-	CurrentLocomotionMontage = nullptr;
-	UpdateLocomotion();
+	if (AnimationMode == EAIAnimationMode::DirectPlayback)
+	{
+		CurrentLocomotionMontage = nullptr;
+		UpdateLocomotionDirect();
+	}
 }
 
-/* ═══════════ ABP Mode Callback ═══════════ */
+/* ═══════════ ABP Callback ═══════════ */
 
 void UAIAnimationComponent::HandleMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
@@ -276,9 +302,6 @@ void UAIAnimationComponent::HandleMontageEnded(UAnimMontage* Montage, bool bInte
 		bIsPlayingIdleVariation = false;
 		CurrentActionMontage = nullptr;
 		OnAIAnimEnded.Broadcast(Finished);
-
-		CurrentLocomotionMontage = nullptr;
-		UpdateLocomotion();
 	}
 }
 
@@ -294,11 +317,13 @@ void UAIAnimationComponent::PlayOnMesh(UAnimMontage* Montage, bool bLoop, float 
 	}
 }
 
-void UAIAnimationComponent::PlayViaMontageSystem(UAnimMontage* Montage, float PlayRate)
+UAnimMontage* UAIAnimationComponent::PlayViaMontageSystem(UAnimMontage* Montage, float PlayRate)
 {
-	if (!Montage || !OwnerCharacter) return;
+	if (!Montage || !OwnerCharacter) return nullptr;
 	if (UAnimInstance* Anim = OwnerCharacter->GetMesh()->GetAnimInstance())
 	{
-		Anim->Montage_Play(Montage, PlayRate, EMontagePlayReturnType::MontageLength, 0.f, true);
+		const float Dur = Anim->Montage_Play(Montage, PlayRate, EMontagePlayReturnType::MontageLength, 0.f, true);
+		return Dur > 0.f ? Montage : nullptr;
 	}
+	return nullptr;
 }

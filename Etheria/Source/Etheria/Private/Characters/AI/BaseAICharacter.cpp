@@ -67,7 +67,7 @@ void ABaseAICharacter::BeginPlay()
 	// Apply configured rotation rate
 	if (UCharacterMovementComponent* MC = GetCharacterMovement())
 	{
-		MC->RotationRate = FRotator(0.f, MovementRotationRate, 0.f);
+		MC->RotationRate = FRotator(0.f, AIMovementComponent->MovementRotationRate, 0.f);
 	}
 
 	if (AIMovementComponent && PatrolSpline)

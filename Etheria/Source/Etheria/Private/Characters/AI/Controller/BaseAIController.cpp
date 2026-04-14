@@ -3,9 +3,8 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "BaseAIController - Source"
- * Notes: Improved flee with re-evaluation and direction variety.
- *        Idle variations complete before patrol resumes.
- *        Yaw-only rotation toward target.
+ * Notes: HandleFleeState uses FleePanicRadius for urgent re-evaluation.
+ *        When threat is close, AI recalculates flee direction every tick.
  */
 
 #include "Characters/AI/Controller/BaseAIController.h"
@@ -19,7 +18,6 @@
 #include "Perception/AISenseConfig_Hearing.h"
 #include "GameFramework/Character.h"
 #include "Engine/OverlapResult.h"
-#include "NavigationSystem.h"
 #include "DrawDebugHelpers.h"
 
 ABaseAIController::ABaseAIController()
@@ -74,13 +72,7 @@ void ABaseAIController::OnPossess(APawn* InPawn)
 	}
 
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-	{
-		if (MC->PatrolMode != EPatrolMode::Stationary)
-		{
-			AICharacter->SetAIState(EAIState::Patrolling);
-			MC->StartPatrol();
-		}
-	}
+		if (MC->PatrolMode != EPatrolMode::Stationary) { AICharacter->SetAIState(EAIState::Patrolling); MC->StartPatrol(); }
 
 	NextIdleAnimTime = IdleAnimInterval + FMath::FRandRange(0.f, IdleAnimRandomDeviation);
 }
@@ -113,17 +105,13 @@ void ABaseAIController::Tick(float DeltaTime)
 #endif
 }
 
-/* ═══════════ Rotation ═══════════ */
-
 void ABaseAIController::FaceTargetYawOnly(AActor* Target, float DeltaTime)
 {
 	if (!Target || !AICharacter) return;
 	const FVector Dir = (Target->GetActorLocation() - AICharacter->GetActorLocation()).GetSafeNormal2D();
 	if (Dir.IsNearlyZero()) return;
-
-	const FRotator TargetRot = FRotator(0.f, Dir.Rotation().Yaw, 0.f);
-	const FRotator Current = AICharacter->GetActorRotation();
-	const FRotator Smooth = FMath::RInterpTo(Current, TargetRot, DeltaTime, FaceTargetRotationSpeed);
+	const FRotator Goal = FRotator(0.f, Dir.Rotation().Yaw, 0.f);
+	const FRotator Smooth = FMath::RInterpTo(AICharacter->GetActorRotation(), Goal, DeltaTime, FaceTargetRotationSpeed);
 	AICharacter->SetActorRotation(FRotator(0.f, Smooth.Yaw, 0.f));
 }
 
@@ -142,12 +130,8 @@ void ABaseAIController::OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 		const EAIState Cur = AICharacter->GetCurrentAIState();
 		AICharacter->ClearTarget();
 		if (Cur == EAIState::Chasing || Cur == EAIState::Attacking)
-		{
-			AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert);
-			AICharacter->SetAIState(EAIState::Returning);
-		}
-		else if (Cur == EAIState::Fleeing)
-			AICharacter->SetAIState(EAIState::Returning);
+		{ AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert); AICharacter->SetAIState(EAIState::Returning); }
+		else if (Cur == EAIState::Fleeing) AICharacter->SetAIState(EAIState::Returning);
 	}
 }
 
@@ -164,16 +148,24 @@ void ABaseAIController::CheckProximityDetection()
 	GetWorld()->OverlapMultiByObjectType(Overlaps, MyLoc, FQuat::Identity,
 		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn), Sphere, Params);
 
-	for (const FOverlapResult& Overlap : Overlaps)
+	for (const FOverlapResult& O : Overlaps)
 	{
-		AActor* Hit = Overlap.GetActor();
+		AActor* Hit = O.GetActor();
 		if (!Hit || Cast<ABaseAICharacter>(Hit)) continue;
 		if (AICharacter->OnlyDetectsPlayers())
+		{ APawn* P = Cast<APawn>(Hit); if (!P || !P->IsPlayerControlled()) continue; }
+
+		// If already fleeing, don't re-trigger OnPerceiveTarget (it would early-return anyway)
+		// Instead, ensure the target is set so HandleFleeState can use it
+		if (AICharacter->GetCurrentAIState() == EAIState::Fleeing)
 		{
-			APawn* P = Cast<APawn>(Hit);
-			if (!P || !P->IsPlayerControlled()) continue;
+			if (!AICharacter->GetCurrentTarget())
+				AICharacter->SetTarget(Hit);
 		}
-		AICharacter->OnPerceiveTarget(Hit);
+		else
+		{
+			AICharacter->OnPerceiveTarget(Hit);
+		}
 		break;
 	}
 }
@@ -190,10 +182,7 @@ float ABaseAIController::GetEffectiveAttackRange() const
 bool ABaseAIController::CheckLeashAndTeleport()
 {
 	if (FVector::Dist(AICharacter->GetActorLocation(), SpawnOrigin) > AICharacter->GetLeashRange())
-	{
-		AICharacter->TeleportToSpawn();
-		return true;
-	}
+	{ AICharacter->TeleportToSpawn(); return true; }
 	return false;
 }
 
@@ -201,7 +190,6 @@ bool ABaseAIController::CheckLeashAndTeleport()
 
 void ABaseAIController::HandleIdleState(float DeltaTime)
 {
-	// Don't trigger idle anims if one is already playing
 	UAIAnimationComponent* Anim = AICharacter->GetAIAnimation();
 	if (Anim && Anim->IsPlayingIdleVariation()) return;
 
@@ -220,16 +208,12 @@ void ABaseAIController::HandleIdleState(float DeltaTime)
 void ABaseAIController::HandlePatrolState(float DeltaTime)
 {
 	UAIAnimationComponent* Anim = AICharacter->GetAIAnimation();
-
-	// Wait for idle variation to finish before resuming patrol movement
 	if (Anim && Anim->IsPlayingIdleVariation()) return;
 
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
 	{
-		if (MC->HasReachedDestination())
-			HandleIdleState(DeltaTime);
-		else
-			IdleTimer = 0.f;
+		if (MC->HasReachedDestination()) HandleIdleState(DeltaTime);
+		else IdleTimer = 0.f;
 	}
 }
 
@@ -248,10 +232,7 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 	}
 
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-	{
-		MC->SetDesiredSpeed(MC->ChaseSpeed);
-		MC->MoveToLocation(Target->GetActorLocation());
-	}
+	{ MC->SetDesiredSpeed(MC->ChaseSpeed); MC->MoveToLocation(Target->GetActorLocation()); }
 }
 
 void ABaseAIController::HandleAttackState(float DeltaTime)
@@ -273,26 +254,16 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 		if (bStrafeInCombat && !Combat->IsAttacking())
 		{
 			StrafeTimer -= DeltaTime;
-			if (StrafeTimer <= 0.f)
-			{
-				StrafeTimer = StrafeDirectionChangeInterval + FMath::FRandRange(-0.5f, 0.5f);
-				StrafeDirection *= -1;
-			}
+			if (StrafeTimer <= 0.f) { StrafeTimer = StrafeDirectionChangeInterval + FMath::FRandRange(-0.5f, 0.5f); StrafeDirection *= -1; }
 			if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-			{
-				MC->SetDesiredSpeed(MC->PatrolSpeed * 0.8f);
-				MC->MoveToLocation(AICharacter->GetActorLocation() + AICharacter->GetActorRightVector() * StrafeDirection * 200.f);
-			}
+			{ MC->SetDesiredSpeed(MC->PatrolSpeed * 0.8f); MC->MoveToLocation(AICharacter->GetActorLocation() + AICharacter->GetActorRightVector() * StrafeDirection * 200.f); }
 		}
 	}
 	else
 	{
 		AttackTimer -= DeltaTime;
 		if (AttackTimer <= 0.f)
-		{
-			AttackTimer = AttackCooldown;
-			if (UAIAnimationComponent* A = AICharacter->GetAIAnimation()) A->PlayRandomAttack();
-		}
+		{ AttackTimer = AttackCooldown; if (UAIAnimationComponent* A = AICharacter->GetAIAnimation()) A->PlayRandomAttack(); }
 	}
 }
 
@@ -319,30 +290,36 @@ void ABaseAIController::HandleFleeState(float DeltaTime)
 
 	AActor* Target = AICharacter->GetCurrentTarget();
 
-	if (Target)
+	// No target — return home
+	if (!Target)
 	{
-		const float DistToThreat = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
-
-		// Safe distance reached — return home
-		if (DistToThreat >= FleeSafeDistance)
-		{
-			AICharacter->ClearTarget();
-			AICharacter->SetAIState(EAIState::Returning);
-			return;
-		}
-
-		// Re-evaluate flee direction periodically (avoids running into walls)
-		FleeReevalTimer -= DeltaTime;
-		if (FleeReevalTimer <= 0.f || MC->HasReachedDestination())
-		{
-			FleeReevalTimer = FleeReevalInterval;
-			MC->FleeFrom(Target);
-		}
-	}
-	else
-	{
-		// Threat gone
 		AICharacter->SetAIState(EAIState::Returning);
+		return;
+	}
+
+	const float DistToThreat = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+
+	// Safe distance — stop fleeing
+	if (DistToThreat >= FleeSafeDistance)
+	{
+		AICharacter->ClearTarget();
+		AICharacter->SetAIState(EAIState::Returning);
+		return;
+	}
+
+	// ── PANIC MODE: threat is very close — recalc flee EVERY tick ──
+	if (DistToThreat <= FleePanicRadius)
+	{
+		MC->FleeFrom(Target);
+		return;
+	}
+
+	// ── NORMAL MODE: recalc on timer or when destination reached ──
+	FleeReevalTimer -= DeltaTime;
+	if (FleeReevalTimer <= 0.f || MC->HasReachedDestination())
+	{
+		FleeReevalTimer = FleeReevalInterval;
+		MC->FleeFrom(Target);
 	}
 }
 
@@ -364,7 +341,6 @@ void ABaseAIController::DrawDebugPerception() const
 	if (!AICharacter) return;
 	const UWorld* W = GetWorld();
 	if (!W) return;
-
 	const FVector Loc = AICharacter->GetActorLocation();
 	const FVector Fwd = AICharacter->GetActorForwardVector();
 
@@ -376,10 +352,8 @@ void ABaseAIController::DrawDebugPerception() const
 	{
 		const float A0 = -HalfFOV + (2.f * HalfFOV * i / 24);
 		const float A1 = -HalfFOV + (2.f * HalfFOV * (i + 1) / 24);
-		DrawDebugLine(W,
-			Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A0), FVector::UpVector) * SightRadius,
-			Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A1), FVector::UpVector) * SightRadius,
-			FColor::Green, false, -1.f, 0, 1.5f);
+		DrawDebugLine(W, Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A0), FVector::UpVector) * SightRadius,
+			Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A1), FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
 	}
 	DrawDebugLine(W, Loc, Loc + Fwd.RotateAngleAxis(-SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
 	DrawDebugLine(W, Loc, Loc + Fwd.RotateAngleAxis(SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);

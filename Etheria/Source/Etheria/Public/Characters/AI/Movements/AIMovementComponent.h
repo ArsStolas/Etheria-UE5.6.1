@@ -1,8 +1,10 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Class: AIMovementComponent - Header
- * Handles patrol zones, patrol spline paths, flee, and smooth acceleration-based movement.
+ * Last Updated by: Mato
+ * Class: "AIMovementComponent - Header"
+ * Notes: Patrol zones, spline paths (world-cached), flee, smooth acceleration.
+ *        Spline points are snapshotted to world space at StartPatrol to prevent drift.
  */
 
 #pragma once
@@ -27,95 +29,81 @@ class ETHERIA_API UAIMovementComponent : public UActorComponent
 
 public:
 	UAIMovementComponent();
-
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	/* ── API ── */
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") void StartPatrol();
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") void StopPatrol();
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") bool MoveToLocation(const FVector& Target);
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") void StopMovement();
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") FVector GetNextPatrolPoint();
 
-	UFUNCTION(BlueprintCallable, Category = "AI|Movement")
-	void StartPatrol();
+	/** Flee away from a threat. Picks a nav-reachable point in the opposite direction with random offset. */
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") void FleeFrom(AActor* Threat);
 
-	UFUNCTION(BlueprintCallable, Category = "AI|Movement")
-	void StopPatrol();
-
-	/** Issue a move request. Returns true if the request was accepted. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Movement")
-	bool MoveToLocation(const FVector& Target);
-
-	UFUNCTION(BlueprintCallable, Category = "AI|Movement")
-	void StopMovement();
-
-	UFUNCTION(BlueprintCallable, Category = "AI|Movement")
-	FVector GetNextPatrolPoint();
-
-	/** Flee away from a threat actor. */
-	UFUNCTION(BlueprintCallable, Category = "AI|Movement")
-	void FleeFrom(AActor* Threat);
-
-	UFUNCTION(BlueprintPure, Category = "AI|Movement")
-	bool IsPatrolling() const { return bIsPatrolling; }
-
-	UFUNCTION(BlueprintPure, Category = "AI|Movement")
-	bool HasReachedDestination() const;
-
-	UFUNCTION(BlueprintCallable, Category = "AI|Movement")
-	void SetDesiredSpeed(float Speed);
+	UFUNCTION(BlueprintPure, Category="AI|Movement") bool IsPatrolling() const { return bIsPatrolling; }
+	UFUNCTION(BlueprintPure, Category="AI|Movement") bool HasReachedDestination() const;
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") void SetDesiredSpeed(float Speed);
 
 	void SetPatrolSpline(USplineComponent* Spline) { PatrolSpline = Spline; }
 
-	UFUNCTION(BlueprintPure, Category = "AI|Movement")
-	int32 GetNumPatrolPoints() const;
+	UFUNCTION(BlueprintPure, Category="AI|Movement") int32 GetNumPatrolPoints() const;
 
 	/* ── Dispatchers ── */
-
-	UPROPERTY(BlueprintAssignable, Category = "AI|Movement")
-	FOnPatrolPointReached OnPatrolPointReached;
-
-	UPROPERTY(BlueprintAssignable, Category = "AI|Movement")
-	FOnPatrolCompleted OnPatrolCompleted;
-
-	UPROPERTY(BlueprintAssignable, Category = "AI|Movement")
-	FOnMovementTargetUpdated OnMovementTargetUpdated;
+	UPROPERTY(BlueprintAssignable, Category="AI|Movement") FOnPatrolPointReached OnPatrolPointReached;
+	UPROPERTY(BlueprintAssignable, Category="AI|Movement") FOnPatrolCompleted OnPatrolCompleted;
+	UPROPERTY(BlueprintAssignable, Category="AI|Movement") FOnMovementTargetUpdated OnMovementTargetUpdated;
 
 	/* ── Config ── */
+	
+	/* ── Rotation ── */
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement")
-	EPatrolMode PatrolMode = EPatrolMode::Stationary;
+	/** How fast the AI rotates toward its movement direction (degrees/sec). Lower = smoother turns for humanoids. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement",
+		meta=(ClampMin="50", ClampMax="1000", ToolTip="Rotation speed when moving. Lower values give smoother turns."))
+	float MovementRotationRate = 400.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (EditCondition = "PatrolMode==EPatrolMode::Path"))
-	EPatrolLoopMode PatrolLoopMode = EPatrolLoopMode::Loop;
+	/** How this AI patrols: Stationary, Zone (random within radius), or Path (follows spline). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement") EPatrolMode PatrolMode = EPatrolMode::Stationary;
+	
+	/** How the path loops: Loop, PingPong, or Once. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(EditCondition="PatrolMode==EPatrolMode::Path")) EPatrolLoopMode PatrolLoopMode = EPatrolLoopMode::Loop;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement|Zone", meta = (EditCondition = "PatrolMode==EPatrolMode::Zone", ClampMin = "100"))
-	float PatrolRadius = 800.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (ClampMin = "0"))
+	/** How long to wait at each patrol point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="0", ToolTip="Seconds the AI waits at each patrol point."))
 	float WaitTimeAtPoint = 2.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (ClampMin = "0"))
+	/** Random extra wait on top of WaitTimeAtPoint. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="0"))
 	float WaitTimeRandomDeviation = 1.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement|Speed")
+	
+	/** Distance to consider 'arrived' at a patrol point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="10"))
+	float AcceptanceRadius = 100.f;
+	
+	/** Radius for Zone patrol mode. AI picks random NavMesh points within this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Zone", meta=(EditCondition="PatrolMode==EPatrolMode::Zone", ClampMin="100",
+		ToolTip="Random patrol radius. AI picks a reachable point within this distance."))
+	float PatrolRadius = 800.f;
+	
+	/** Walk speed during patrol. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ToolTip="Speed when patrolling."))
 	float PatrolSpeed = 200.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement|Speed")
+	/** Run speed during chase or return. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ToolTip="Speed when chasing a target."))
 	float ChaseSpeed = 500.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement|Speed")
+	/** Speed when fleeing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ToolTip="Speed when running away from a threat."))
 	float FleeSpeed = 450.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement|Flee", meta = (ClampMin = "200"))
-	float FleeDistance = 1500.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement|Speed", meta = (ClampMin = "0.1"))
+	/** Acceleration interpolation speed. Higher = snappier speed changes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ClampMin="0.1", ToolTip="How quickly MaxWalkSpeed interpolates to the desired value."))
 	float AccelerationInterpSpeed = 5.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (ClampMin = "10"))
-	float AcceptanceRadius = 100.f;
-
-	/* ── Debug ── */
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Debug")
-	bool bShowDebugPatrol = false;
+	
+	/** How far the AI tries to flee per flee request. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Flee", meta=(ClampMin="200", ToolTip="Distance to flee from the threat per move request."))
+	float FleeDistance = 1500.f;
 
 protected:
 	virtual void BeginPlay() override;
@@ -128,16 +116,15 @@ private:
 	FVector GetRandomPointInZone() const;
 	void ApplySmoothAcceleration(float DeltaTime);
 	void EnsureInitialized();
+	void CacheSplineWorldPositions();
 	void DrawDebugPatrol() const;
 
-	UPROPERTY()
-	TObjectPtr<ABaseAICharacter> OwnerCharacter;
+	UPROPERTY() TObjectPtr<ABaseAICharacter> OwnerCharacter;
+	UPROPERTY() TObjectPtr<UCharacterMovementComponent> MovementComp;
+	UPROPERTY() TObjectPtr<USplineComponent> PatrolSpline;
 
-	UPROPERTY()
-	TObjectPtr<UCharacterMovementComponent> MovementComp;
-
-	UPROPERTY()
-	TObjectPtr<USplineComponent> PatrolSpline;
+	/** Cached world-space positions of spline points. Snapshotted at StartPatrol. */
+	TArray<FVector> CachedSplineWorldPoints;
 
 	FVector CurrentDestination = FVector::ZeroVector;
 	FVector PatrolOrigin = FVector::ZeroVector;
@@ -149,8 +136,6 @@ private:
 	bool bIsWaiting = false;
 	bool bPatrolFinished = false;
 	bool bMoveRequestActive = false;
-
-	/** Cooldown after issuing MoveToLocation — prevents instant re-arrival detection. */
 	float MoveGraceTimer = 0.f;
 	static constexpr float MOVE_GRACE_DURATION = 0.3f;
 };

@@ -3,7 +3,7 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "BaseAIController - Header"
- * Notes: State machine, perception, improved flee, idle variation respect.
+ * Notes: State machine, perception, robust flee, idle variation respect.
  */
 
 #pragma once
@@ -42,83 +42,32 @@ protected:
 	bool CheckLeashAndTeleport();
 	void FaceTargetYawOnly(AActor* Target, float DeltaTime);
 
-	/* ── Sight ── */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Sight", meta=(ToolTip="How far this AI can see.")) float SightRadius = 1500.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Sight", meta=(ToolTip="Distance at which AI loses sight. Should be > SightRadius.")) float LoseSightRadius = 2000.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Sight", meta=(ToolTip="Half-angle of the sight cone in degrees.")) float SightFOVDegrees = 90.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Hearing", meta=(ToolTip="360-degree hearing radius.")) float HearingRange = 1200.f;
 
-	/** Maximum detection distance. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Sight", meta=(ToolTip="How far this AI can see."))
-	float SightRadius = 1500.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Proximity", meta=(ToolTip="Enable 360-degree close range detection.")) bool bUseProximityDetection = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Proximity", meta=(EditCondition="bUseProximityDetection", ClampMin="50")) float ProximityRadius = 400.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Proximity", meta=(EditCondition="bUseProximityDetection", ClampMin="0.05", ClampMax="2.0")) float ProximityCheckInterval = 0.2f;
 
-	/** Distance at which the AI loses track of a previously seen target. Should be > SightRadius. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Sight", meta=(ToolTip="Range at which the AI loses sight of its target. Must be larger than SightRadius."))
-	float LoseSightRadius = 2000.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Flee", meta=(ClampMin="100", ToolTip="Distance from threat at which AI considers itself safe.")) float FleeSafeDistance = 2000.f;
 
-	/** Half angle of the sight cone in degrees. 90 = 180° total FOV. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Sight", meta=(ToolTip="Field of view half-angle. 90 = 180 degree total cone."))
-	float SightFOVDegrees = 90.f;
+	/** When the threat is closer than this, the AI re-evaluates its flee path every tick instead of waiting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Flee", meta=(ClampMin="50", ToolTip="Panic radius. AI recalculates flee direction every tick when threat is this close."))
+	float FleePanicRadius = 500.f;
 
-	/* ── Hearing ── */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Flee", meta=(ClampMin="0.1", ClampMax="3.0", ToolTip="Normal interval between flee direction recalculations.")) float FleeReevalInterval = 0.5f;
 
-	/** Radius for hearing detection (360°). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Hearing", meta=(ToolTip="360-degree hearing radius."))
-	float HearingRange = 1200.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat", meta=(ToolTip="Fallback attack range if no CombatComponent attacks.")) float AttackRange = 200.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat") float AttackCooldown = 1.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="Rotation interpolation speed toward target. Lower = smoother.")) float FaceTargetRotationSpeed = 8.f;
 
-	/* ── Proximity ── */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle") float IdleAnimInterval = 5.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle", meta=(ClampMin="0")) float IdleAnimRandomDeviation = 3.f;
 
-	/** Enable 360° close-range detection (ignores sight direction). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Proximity", meta=(ToolTip="360-degree proximity sphere. Detects the player even behind the AI."))
-	bool bUseProximityDetection = true;
-
-	/** Radius of the proximity detection sphere. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Proximity", meta=(EditCondition="bUseProximityDetection", ClampMin="50", ToolTip="Size of the proximity detection sphere."))
-	float ProximityRadius = 400.f;
-
-	/** Interval in seconds between proximity checks. Lower = more CPU. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Proximity", meta=(EditCondition="bUseProximityDetection", ClampMin="0.05", ClampMax="2.0", ToolTip="How often to run the proximity overlap test."))
-	float ProximityCheckInterval = 0.2f;
-
-	/* ── Flee ── */
-
-	/** Distance from the threat at which the AI considers itself safe and stops fleeing. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Flee", meta=(ClampMin="100", ToolTip="Once this far from the threat, the AI stops fleeing and returns home."))
-	float FleeSafeDistance = 2000.f;
-
-	/** How often the fleeing AI re-evaluates its escape direction (seconds). Lower = more responsive. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Flee", meta=(ClampMin="0.1", ClampMax="3.0", ToolTip="Re-evaluation interval for flee direction. Lower = AI changes course more often."))
-	float FleeReevalInterval = 0.5f;
-
-	/* ── Combat ── */
-
-	/** Fallback attack range used when AICombatComponent has no attacks configured. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat", meta=(ToolTip="Distance at which the AI starts attacking. Ignored if AICombatComponent has attacks."))
-	float AttackRange = 200.f;
-
-	/** Fallback attack cooldown. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat", meta=(ToolTip="Time between attacks when not using AICombatComponent."))
-	float AttackCooldown = 1.5f;
-
-	/** How fast the AI rotates to face its target during combat (degrees/sec interpolation speed). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="Rotation interpolation speed toward the target. Lower = smoother."))
-	float FaceTargetRotationSpeed = 8.f;
-
-	/* ── Idle ── */
-
-	/** Base interval between idle variation animations. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle", meta=(ToolTip="Seconds between idle variation animations."))
-	float IdleAnimInterval = 5.f;
-
-	/** Random extra time added to the idle interval for variety. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle", meta=(ClampMin="0", ToolTip="Random deviation added to idle interval for natural feel."))
-	float IdleAnimRandomDeviation = 3.f;
-
-	/* ── Strafing ── */
-
-	/** If true, the AI will strafe around its target between attacks. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="AI moves sideways around its target during combat pauses."))
-	bool bStrafeInCombat = false;
-
-	/** How often the strafe direction flips. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(EditCondition="bStrafeInCombat", ClampMin="0.5", ToolTip="Interval between strafe direction changes."))
-	float StrafeDirectionChangeInterval = 2.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="Strafe around target between attacks.")) bool bStrafeInCombat = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(EditCondition="bStrafeInCombat", ClampMin="0.5")) float StrafeDirectionChangeInterval = 2.f;
 
 private:
 	void SetupPerception();
