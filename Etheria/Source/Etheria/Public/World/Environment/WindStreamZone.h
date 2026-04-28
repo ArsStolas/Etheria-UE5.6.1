@@ -11,10 +11,9 @@
 #include "WindStreamZone.generated.h"
 
 class USplineComponent;
-class USplineMeshComponent;
 class UCapsuleComponent;
-class UStaticMesh;
-class UMaterialInterface;
+class UNiagaraComponent;
+class UNiagaraSystem;
 class APlayerCharacter;
 class UDiveMode;
 
@@ -56,10 +55,10 @@ protected:
     int32 NumCollisionCapsules = 8;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Visual")
-    UStaticMesh* StreamMesh;
+    UNiagaraSystem* StreamNiagaraSystem = nullptr;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Visual")
-    UMaterialInterface* StreamMaterial;
+    UNiagaraSystem* BoundaryNiagaraSystem = nullptr;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="2", ClampMax="64"))
     int32 NumVisualSegments = 12;
@@ -70,6 +69,18 @@ protected:
     UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.0", ClampMax="5.0"))
     float UVScrollSpeed = 1.2f;
 
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.25", ClampMax="4.0"))
+    float StreamVisualWidthMultiplier = 1.35f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.1", ClampMax="3.0"))
+    float StreamVisualLengthScale = 0.35f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float BoundaryOpacity = 0.55f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="1.0", ClampMax="2.5"))
+    float BoundaryRadiusMultiplier = 1.08f;
+
     UPROPERTY(EditAnywhere, Category="WindStream|Debug")
     bool bWindDebugMode = false;
 
@@ -78,7 +89,10 @@ private:
     TSet<APlayerCharacter*> PlayersInStream;
 
     UPROPERTY()
-    TArray<USplineMeshComponent*> SplineMeshes;
+    TArray<UNiagaraComponent*> StreamNiagaraComponents;
+
+    UPROPERTY()
+    TArray<UNiagaraComponent*> BoundaryNiagaraComponents;
 
     UPROPERTY()
     TArray<UCapsuleComponent*> CollisionCapsules;
@@ -87,6 +101,15 @@ private:
 
     void RebuildVisualTube();
     void RebuildCollisionCapsules();
+    void DestroyVisualComponents();
+    void ConfigureNiagaraComponent(
+        UNiagaraComponent* NiagaraComponent,
+        const FVector& StartPoint,
+        const FVector& EndPoint,
+        const FVector& Tangent,
+        float Radius,
+        float Opacity,
+        float SegmentIndex) const;
 
     float GetClosestSplineDistance(const FVector& WorldPosition) const;
     float GetRadialFalloff(const FVector& WorldPosition, float SplineDistance) const;

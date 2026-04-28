@@ -11,9 +11,9 @@
 #include "Components/Characters/Player/FlightModes/Dive/DiveMode.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
 #include "Components/SplineComponent.h"
-#include "Components/SplineMeshComponent.h"
 #include "DrawDebugHelpers.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWindStream, Log, All);
 
@@ -64,15 +64,20 @@ void AWindStreamZone::Tick(float DeltaTime)
 
     if (UVScrollSpeed > 0.f)
     {
-        UVOffset = FMath::Fmod(UVOffset + UVScrollSpeed * DeltaTime, 1.f);
-        for (int32 Index = 0; Index < SplineMeshes.Num(); ++Index)
-        {
-            if (!SplineMeshes[Index]) continue;
+        UVOffset = FMath::Fmod(UVOffset + UVScrollSpeed * DeltaTime, 1000.f);
 
-            if (UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(SplineMeshes[Index]->GetMaterial(0)))
-            {
-                Material->SetScalarParameterValue(TEXT("UVOffset"), UVOffset + Index * 0.05f);
-            }
+        for (int32 Index = 0; Index < StreamNiagaraComponents.Num(); ++Index)
+        {
+            if (!StreamNiagaraComponents[Index]) continue;
+            StreamNiagaraComponents[Index]->SetVariableFloat(TEXT("User.FlowOffset"), UVOffset + Index * 0.05f);
+            StreamNiagaraComponents[Index]->SetVariableFloat(TEXT("User.FlowSpeed"), UVScrollSpeed);
+        }
+
+        for (int32 Index = 0; Index < BoundaryNiagaraComponents.Num(); ++Index)
+        {
+            if (!BoundaryNiagaraComponents[Index]) continue;
+            BoundaryNiagaraComponents[Index]->SetVariableFloat(TEXT("User.FlowOffset"), UVOffset + Index * 0.05f);
+            BoundaryNiagaraComponents[Index]->SetVariableFloat(TEXT("User.FlowSpeed"), UVScrollSpeed);
         }
     }
 
@@ -145,61 +150,155 @@ void AWindStreamZone::Tick(float DeltaTime)
     }
 }
 
+void AWindStreamZone::DestroyVisualComponents()
+{
+    for (UNiagaraComponent* NiagaraComponent : StreamNiagaraComponents)
+    {
+        if (!NiagaraComponent) continue;
+        NiagaraComponent->UnregisterComponent();
+        NiagaraComponent->DestroyComponent();
+    }
+    StreamNiagaraComponents.Empty();
+
+    for (UNiagaraComponent* NiagaraComponent : BoundaryNiagaraComponents)
+    {
+        if (!NiagaraComponent) continue;
+        NiagaraComponent->UnregisterComponent();
+        NiagaraComponent->DestroyComponent();
+    }
+    BoundaryNiagaraComponents.Empty();
+}
+
+void AWindStreamZone::ConfigureNiagaraComponent(
+    UNiagaraComponent* NiagaraComponent,
+    const FVector& StartPoint,
+    const FVector& EndPoint,
+    const FVector& Tangent,
+    float Radius,
+    float Opacity,
+    float SegmentIndex) const
+{
+    if (!NiagaraComponent) return;
+
+    const FVector SegmentVector = EndPoint - StartPoint;
+    const float SegmentLength = SegmentVector.Size();
+    const FVector MidPoint = (StartPoint + EndPoint) * 0.5f;
+    const FRotator SegmentRotation = Tangent.Rotation();
+    
+    // ── POSITIONNEMENT DU NIAGARA ────────────────────────────────────────
+    // Le component est placé au centre du segment, orienté selon la tangente
+    NiagaraComponent->SetWorldLocationAndRotation(MidPoint, SegmentRotation);
+    NiagaraComponent->SetWorldScale3D(FVector(1.f, 1.f, 1.f)); // Reset scale
+    
+    // ── OVERRIDE DES BOX SIZES (pour Shape Location) ────────────────────
+    // Box_Size contrôle le spawn des particules Wind_Curved/Wind_Straight
+    // On veut spawner dans un cylindre de longueur=SegmentLength, rayon=Radius
+    // Dans le référentiel local du component (orienté selon Tangent) :
+    // X = forward (longueur), Y/Z = radial (rayon)
+    const FVector BoxSize = FVector(
+        SegmentLength,      // X = longueur du segment
+        Radius * 2.f,       // Y = diamètre
+        Radius * 2.f        // Z = diamètre
+    );
+    NiagaraComponent->SetVariableVec3(TEXT("User.Box_Size"), BoxSize);
+    
+    // Leaves_Box_Size (pour l'emitter Falling_Leaf si tu le gardes actif)
+    const FVector LeavesBoxSize = FVector(
+        SegmentLength * 0.8f,  // Un peu plus court
+        Radius * 1.8f,
+        Radius * 1.8f
+    );
+    NiagaraComponent->SetVariableVec3(TEXT("User.Leaves_Box_Size"), LeavesBoxSize);
+    
+    // ── PARAMÈTRES DE COULEUR/SPAWN RATE (optionnels) ───────────────────
+    // Ajuste le spawn rate en fonction de la taille du stream
+    const float DensityFactor = (Radius / 300.f) * (SegmentLength / 1000.f);
+    NiagaraComponent->SetVariableFloat(TEXT("User.Wind_Spawn_Rate"), 
+        FMath::Clamp(50.f * DensityFactor, 10.f, 200.f));
+    
+    // Si tu veux varier les couleurs des feuilles
+    NiagaraComponent->SetVariableLinearColor(TEXT("User.Leaves_ColorMin"), 
+        FLinearColor(0.8f, 0.6f, 0.2f)); // Orange clair
+    NiagaraComponent->SetVariableLinearColor(TEXT("User.Leaves_ColorMax"), 
+        FLinearColor(0.9f, 0.8f, 0.4f)); // Jaune pâle
+    
+    // ── PARAMÈTRES EXISTANTS (conservés) ─────────────────────────────────
+    NiagaraComponent->SetVariableVec3(TEXT("User.SegmentStart"), StartPoint);
+    NiagaraComponent->SetVariableVec3(TEXT("User.SegmentEnd"), EndPoint);
+    NiagaraComponent->SetVariableVec3(TEXT("User.StreamDirection"), Tangent);
+    NiagaraComponent->SetVariableFloat(TEXT("User.StreamRadius"), Radius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.SegmentLength"), SegmentLength);
+    NiagaraComponent->SetVariableFloat(TEXT("User.StreamOpacity"), Opacity);
+    NiagaraComponent->SetVariableFloat(TEXT("User.FlowSpeed"), UVScrollSpeed);
+    NiagaraComponent->SetVariableFloat(TEXT("User.FlowOffset"), UVOffset + SegmentIndex * 0.05f);
+    NiagaraComponent->SetVariableFloat(TEXT("User.SegmentIndex"), SegmentIndex);
+    
+    // Visuals multipliers (si tu les utilises dans le Niagara)
+    const float VisualWidth = FMath::Max((Radius / 100.f) * StreamVisualWidthMultiplier, 0.1f);
+    const float VisualLength = FMath::Max((SegmentLength / 100.f) * StreamVisualLengthScale, 0.1f);
+    NiagaraComponent->SetVariableFloat(TEXT("User.VisualWidth"), Radius * StreamVisualWidthMultiplier);
+    NiagaraComponent->SetVariableFloat(TEXT("User.VisualLength"), SegmentLength * StreamVisualLengthScale);
+}
+
 void AWindStreamZone::RebuildVisualTube()
 {
-    for (USplineMeshComponent* MeshComponent : SplineMeshes)
-    {
-        if (!MeshComponent) continue;
-        MeshComponent->UnregisterComponent();
-        MeshComponent->DestroyComponent();
-    }
-    SplineMeshes.Empty();
+    DestroyVisualComponents();
 
-    if (!StreamMesh || Spline->GetNumberOfSplinePoints() < 2)
+    if (Spline->GetNumberOfSplinePoints() < 2)
     {
         return;
     }
 
     const float TotalLength = Spline->GetSplineLength();
-    const float SegmentLength = TotalLength / FMath::Max(NumVisualSegments, 1);
+    const int32 SegmentCount = FMath::Max(NumVisualSegments, 1);
+    const float SegmentLength = TotalLength / SegmentCount;
 
-    for (int32 Index = 0; Index < NumVisualSegments; ++Index)
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
     {
         const float D0 = Index * SegmentLength;
         const float D1 = (Index + 1) * SegmentLength;
 
-        const FVector P0 = Spline->GetLocationAtDistanceAlongSpline(D0, ESplineCoordinateSpace::World);
-        const FVector P1 = Spline->GetLocationAtDistanceAlongSpline(D1, ESplineCoordinateSpace::World);
-        const FVector T0 = Spline->GetTangentAtDistanceAlongSpline(D0, ESplineCoordinateSpace::World).GetSafeNormal() * SegmentLength;
-        const FVector T1 = Spline->GetTangentAtDistanceAlongSpline(D1, ESplineCoordinateSpace::World).GetSafeNormal() * SegmentLength;
-
-        USplineMeshComponent* SplineMesh = NewObject<USplineMeshComponent>(this, *FString::Printf(TEXT("WindSeg_%d"), Index));
-        SplineMesh->SetMobility(EComponentMobility::Movable);
-        SplineMesh->SetupAttachment(RootComponent);
-        SplineMesh->SetAbsolute(true, true, true);
-        SplineMesh->RegisterComponent();
-
-        SplineMesh->SetStaticMesh(StreamMesh);
-        SplineMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        SplineMesh->SetCastShadow(false);
-        SplineMesh->SetForwardAxis(ESplineMeshAxis::Y);
-        SplineMesh->SetSplineUpDir(FVector::UpVector, false);
-        SplineMesh->SetStartAndEnd(P0, T0, P1, T1, true);
-
-        const float Scale = StreamRadius / 50.f;
-        SplineMesh->SetStartScale(FVector2D(Scale, Scale));
-        SplineMesh->SetEndScale(FVector2D(Scale, Scale));
-
-        if (StreamMaterial)
+        const FVector StartPoint = Spline->GetLocationAtDistanceAlongSpline(D0, ESplineCoordinateSpace::World);
+        const FVector EndPoint = Spline->GetLocationAtDistanceAlongSpline(D1, ESplineCoordinateSpace::World);
+        const FVector Tangent = (EndPoint - StartPoint).GetSafeNormal();
+        if (Tangent.IsNearlyZero())
         {
-            UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(StreamMaterial, this);
-            Material->SetScalarParameterValue(TEXT("Opacity"), TubeOpacity);
-            Material->SetScalarParameterValue(TEXT("UVOffset"), 0.f);
-            Material->SetScalarParameterValue(TEXT("SegmentIndex"), static_cast<float>(Index));
-            SplineMesh->SetMaterial(0, Material);
+            continue;
         }
 
-        SplineMeshes.Add(SplineMesh);
+        if (StreamNiagaraSystem)
+        {
+            UNiagaraComponent* StreamComponent = NewObject<UNiagaraComponent>(this, *FString::Printf(TEXT("WindFx_%d"), Index));
+            StreamComponent->SetAsset(StreamNiagaraSystem);
+            StreamComponent->SetMobility(EComponentMobility::Movable);
+            StreamComponent->SetupAttachment(RootComponent);
+            StreamComponent->SetAbsolute(true, true, false);
+            StreamComponent->RegisterComponent();
+            ConfigureNiagaraComponent(StreamComponent, StartPoint, EndPoint, Tangent, StreamRadius, TubeOpacity, static_cast<float>(Index));
+            StreamNiagaraComponents.Add(StreamComponent);
+        }
+
+        if (BoundaryNiagaraSystem)
+        {
+            UNiagaraComponent* BoundaryComponent = NewObject<UNiagaraComponent>(this, *FString::Printf(TEXT("WindBoundaryFx_%d"), Index));
+            BoundaryComponent->SetAsset(BoundaryNiagaraSystem);
+            BoundaryComponent->SetMobility(EComponentMobility::Movable);
+            BoundaryComponent->SetupAttachment(RootComponent);
+            BoundaryComponent->SetAbsolute(true, true, false);
+            BoundaryComponent->RegisterComponent();
+            ConfigureNiagaraComponent(
+                BoundaryComponent,
+                StartPoint,
+                EndPoint,
+                Tangent,
+                StreamRadius * BoundaryRadiusMultiplier,
+                BoundaryOpacity,
+                static_cast<float>(Index));
+            BoundaryComponent->SetVariableFloat(TEXT("User.BoundaryRadius"), StreamRadius * BoundaryRadiusMultiplier);
+            BoundaryComponent->SetVariableFloat(TEXT("User.InnerRadius"), StreamRadius);
+            BoundaryComponent->SetVariableFloat(TEXT("User.BoundaryOpacity"), BoundaryOpacity);
+            BoundaryNiagaraComponents.Add(BoundaryComponent);
+        }
     }
 }
 
@@ -446,4 +545,3 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTim
         Falloff,
         CenterOffset.Size());
 }
-
