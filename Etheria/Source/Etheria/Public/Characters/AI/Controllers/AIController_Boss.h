@@ -7,11 +7,11 @@
 
 #include "CoreMinimal.h"
 #include "Characters/AI/Controllers/AIController_Base.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "AIController_Boss.generated.h"
 
 class UBehaviorTree;
 
-/** Controller du boss : lance le Behavior Tree en OnPossess, ne gère pas la chase par perception. */
 UCLASS()
 class ETHERIA_API AAIController_Boss : public AAIController_Base
 {
@@ -26,4 +26,7 @@ public:
 protected:
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus) override;
+
+	UPROPERTY(VisibleAnywhere, Category = "AI Perception")
+	TObjectPtr<UAIPerceptionComponent> AIPerceptionComponent;
 };
