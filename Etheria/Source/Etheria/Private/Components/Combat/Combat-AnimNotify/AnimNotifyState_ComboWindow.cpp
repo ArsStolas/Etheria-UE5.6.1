@@ -9,7 +9,6 @@
 #include "Components/Combat/CombatComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
-#include "Characters/AI/BaseAI.h"
 #include "Math/UnrealMathUtility.h"
 
 void UAnimNotifyState_ComboWindow::NotifyBegin(
@@ -25,14 +24,6 @@ void UAnimNotifyState_ComboWindow::NotifyBegin(
         if (UCombatComponent* Combat = Owner->FindComponentByClass<UCombatComponent>())
         {
             Combat->BeginComboWindow(ComboId);
-
-            if (Owner->IsA(ABaseAI::StaticClass()))
-            {
-                if (FMath::FRand() <= AIComboContinueChance)
-                {
-                    Combat->RequestComboAdvanceAI();
-                }
-            }
         }
     }
 }

@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: Mato
  * Class: PlayerCharacter - Header
  */
 
@@ -32,7 +32,6 @@ class UInventoryComponent;
 //class UInteractionComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
-class UQuestComponent;
 class USwimComponent;
 
 // ============================================================
@@ -127,10 +126,6 @@ protected:
     ULockTargetComponent* LockTargetComponent;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Combat|LockTarget", meta=(AllowPrivateAccess="true"))
     ULockVisualComponent* LockVisualComponent;
-
-    // --- QUEST TARGET ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess="true"))
-    UQuestComponent* QuestComponent;
 
     // --- ROPE ---
     
