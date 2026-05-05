@@ -91,6 +91,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="0", ClampMax="1500"))
 	float DiveEntrySpeedBonus = 250.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="500", ClampMax="20000"))
+	float DiveWindStreamAcceleration = 2400.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="100", ClampMax="1000"))
 	float DiveMinimumHeight = 300.f;
 

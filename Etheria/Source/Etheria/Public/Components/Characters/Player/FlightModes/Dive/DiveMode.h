@@ -25,6 +25,7 @@ public:
         float InDiveAcceleration,
         float InDiveDeceleration,
         float InDiveEntrySpeedBonus,
+        float InWindStreamAcceleration,
         float InMaxPitch,
         float InMaxRoll,
         float InTurnRateDive,
@@ -55,6 +56,9 @@ protected:
 
     UPROPERTY(EditAnywhere, Category="Dive|Speed", meta=(ClampMin="0", ClampMax="1500"))
     float DiveEntrySpeedBonus = 250.f;
+
+    UPROPERTY(EditAnywhere, Category="Dive|Speed", meta=(ClampMin="500", ClampMax="20000"))
+    float WindStreamAcceleration = 2400.f;
 
     float CurrentSpeed = 400.f;
 

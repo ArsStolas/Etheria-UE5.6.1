@@ -25,6 +25,7 @@ void UDiveMode::ConfigureDiveTuning(
     float InDiveAcceleration,
     float InDiveDeceleration,
     float InDiveEntrySpeedBonus,
+    float InWindStreamAcceleration,
     float InMaxPitch,
     float InMaxRoll,
     float InTurnRateDive,
@@ -35,6 +36,7 @@ void UDiveMode::ConfigureDiveTuning(
     DiveAcceleration = InDiveAcceleration;
     DiveDeceleration = InDiveDeceleration;
     DiveEntrySpeedBonus = InDiveEntrySpeedBonus;
+    WindStreamAcceleration = InWindStreamAcceleration;
     MaxPitch = InMaxPitch;
     MaxRoll = InMaxRoll;
     TurnRateDive = InTurnRateDive;
@@ -138,6 +140,7 @@ void UDiveMode::TickMode(float DeltaTime)
     }
 
     const bool bHasWind = bWindStreamActive && PendingWindTargetSpeed > 0.f && !PendingWindDirection.IsNearlyZero();
+    const bool bPlayerProvidingSteer = !FMath::IsNearlyZero(HorizontalInput) || !FMath::IsNearlyZero(VerticalInput);
     if (!bHasWind)
     {
         const float TurnDrag = FMath::Abs(RollFactor) * DiveDeceleration * 0.3f * DeltaTime;
@@ -146,7 +149,12 @@ void UDiveMode::TickMode(float DeltaTime)
     }
     if (bHasWind)
     {
-        CurrentSpeed = FMath::Max(CurrentSpeed, PendingWindTargetSpeed);
+        const float AccelerationScale = bPlayerProvidingSteer ? 0.78f : 1.f;
+        CurrentSpeed = FMath::FInterpConstantTo(
+            CurrentSpeed,
+            FMath::Max(CurrentSpeed, PendingWindTargetSpeed),
+            DeltaTime,
+            WindStreamAcceleration * AccelerationScale);
     }
 
     const float MaxAllowedDiveSpeed = bHasWind
@@ -160,7 +168,6 @@ void UDiveMode::TickMode(float DeltaTime)
         NewRot.Yaw += RollFactor * TurnRateDive * SpeedScale * DeltaTime;
     }
 
-    const bool bPlayerProvidingSteer = !FMath::IsNearlyZero(HorizontalInput) || !FMath::IsNearlyZero(VerticalInput);
     if (bHasWind)
     {
         const float AlignmentStrength = bPlayerProvidingSteer
@@ -215,19 +222,22 @@ void UDiveMode::TickMode(float DeltaTime)
             DesiredVelocity = StreamVelocity;
         }
 
-        const float MinForwardSpeed = CurrentSpeed * (bPlayerProvidingSteer ? 0.72f : 0.9f);
+        const float StreamForwardAssist = FMath::Clamp(PendingWindAlignmentStrength, 0.f, 1.f);
+        const float MinForwardSpeed = CurrentSpeed * (bPlayerProvidingSteer ? 0.72f : 0.9f) * StreamForwardAssist;
         const float ForwardAlongStream = FVector::DotProduct(DesiredVelocity, PendingWindDirection);
-        if (ForwardAlongStream < MinForwardSpeed)
+        if (StreamForwardAssist > KINDA_SMALL_NUMBER && ForwardAlongStream < MinForwardSpeed)
         {
             DesiredVelocity += PendingWindDirection * (MinForwardSpeed - ForwardAlongStream);
         }
 
-        const float TargetWindSpeed = FMath::Max(CurrentSpeed, PendingWindTargetSpeed);
-        const float SmoothedSpeed = FMath::FInterpTo(CurrentSpeed, TargetWindSpeed, DeltaTime, bPlayerProvidingSteer ? 2.5f : 4.5f);
-        CurrentSpeed = FMath::Max(CurrentSpeed, SmoothedSpeed);
+        const float TargetWindSpeed = CurrentSpeed;
 
         const float MaxAllowedSpeed = CurrentSpeed * (bPlayerProvidingSteer ? 1.06f : 1.02f);
-        DesiredVelocity = FMath::Lerp(StreamVelocity, DesiredVelocity, bPlayerProvidingSteer ? 0.72f : 0.9f);
+        const float StreamVelocityBlend = FMath::Lerp(
+            1.f,
+            bPlayerProvidingSteer ? 0.72f : 0.9f,
+            StreamForwardAssist);
+        DesiredVelocity = FMath::Lerp(StreamVelocity, DesiredVelocity, StreamVelocityBlend);
         Velocity = DesiredVelocity.GetClampedToMaxSize(MaxAllowedSpeed);
         if (!Velocity.IsNearlyZero())
         {

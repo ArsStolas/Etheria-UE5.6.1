@@ -40,6 +40,7 @@ void UFlightComponent::BeginPlay()
         DiveAcceleration,
         DiveDeceleration,
         DiveEntrySpeedBonus,
+        DiveWindStreamAcceleration,
         DiveMaxPitch,
         DiveMaxRoll,
         DiveTurnRate,

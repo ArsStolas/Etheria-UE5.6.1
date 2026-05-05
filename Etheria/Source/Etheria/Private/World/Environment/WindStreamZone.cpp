@@ -11,9 +11,9 @@
 #include "Components/Characters/Player/FlightModes/Dive/DiveMode.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
 #include "Components/SplineComponent.h"
-#include "Components/SplineMeshComponent.h"
 #include "DrawDebugHelpers.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWindStream, Log, All);
 
@@ -42,7 +42,7 @@ void AWindStreamZone::OnConstruction(const FTransform& Transform)
 
     if (IsValid(this) && !IsUnreachable())
     {
-        RebuildVisualTube();
+        RebuildVisuals();
         RebuildCollisionCapsules();
     }
 }
@@ -50,6 +50,9 @@ void AWindStreamZone::OnConstruction(const FTransform& Transform)
 void AWindStreamZone::BeginPlay()
 {
     Super::BeginPlay();
+
+    RebuildVisuals();
+    RebuildCollisionCapsules();
 
     for (UCapsuleComponent* Capsule : CollisionCapsules)
     {
@@ -62,42 +65,18 @@ void AWindStreamZone::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (UVScrollSpeed > 0.f)
-    {
-        UVOffset = FMath::Fmod(UVOffset + UVScrollSpeed * DeltaTime, 1.f);
-        for (int32 Index = 0; Index < SplineMeshes.Num(); ++Index)
-        {
-            if (!SplineMeshes[Index]) continue;
-
-            if (UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(SplineMeshes[Index]->GetMaterial(0)))
-            {
-                Material->SetScalarParameterValue(TEXT("UVOffset"), UVOffset + Index * 0.05f);
-            }
-        }
-    }
-
     WIND_SCREEN(20, PlayersInStream.Num() > 0 ? FColor::Green : FColor::Orange,
-        TEXT("[WindStream] Players: %d | Capsules: %d | Speed: %.0f"),
-        PlayersInStream.Num(), CollisionCapsules.Num(), StreamSpeed);
+        TEXT("[WindStream] Players:%d | Caps:%d | FX:%d/%d | Speed:%.0f | Radius:%.0f"),
+        PlayersInStream.Num(),
+        CollisionCapsules.Num(),
+        StreamNiagaraComponents.Num(),
+        BoundaryNiagaraComponents.Num(),
+        StreamSpeed,
+        StreamRadius);
 
     if (bWindDebugMode)
     {
-        for (UCapsuleComponent* Capsule : CollisionCapsules)
-        {
-            if (!Capsule) continue;
-
-            DrawDebugCapsule(
-                GetWorld(),
-                Capsule->GetComponentLocation(),
-                Capsule->GetScaledCapsuleHalfHeight(),
-                Capsule->GetScaledCapsuleRadius(),
-                Capsule->GetComponentQuat(),
-                FColor::Yellow,
-                false,
-                0.f,
-                0,
-                2.f);
-        }
+        DrawWindDebug();
     }
 
     if (PlayersInStream.Num() == 0)
@@ -116,20 +95,19 @@ void AWindStreamZone::Tick(float DeltaTime)
 
         if (!IsPlayerInDiveMode(Player))
         {
+            PlayerWindUseTimes.FindOrAdd(Player) = 0.f;
+            PlayerSplineDistances.Remove(Player);
+            PlayerStreamDirectionSigns.Remove(Player);
             continue;
         }
 
-        const float SplineDistance = GetClosestSplineDistance(Player->GetActorLocation());
-        const float Falloff = GetRadialFalloff(Player->GetActorLocation(), SplineDistance);
-        if (Falloff <= 0.f)
-        {
-            continue;
-        }
-
-        ApplyWindEffect(Player, DeltaTime, Falloff);
+        ApplyWindEffect(Player, DeltaTime);
 
         if (bWindDebugMode)
         {
+            const float SplineDistance = PlayerSplineDistances.Contains(Player)
+                ? PlayerSplineDistances[Player]
+                : GetClosestSplineDistance(Player->GetActorLocation());
             const FVector ClosestPoint = Spline->GetLocationAtDistanceAlongSpline(SplineDistance, ESplineCoordinateSpace::World);
             const FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(SplineDistance, ESplineCoordinateSpace::World).GetSafeNormal();
 
@@ -142,25 +120,65 @@ void AWindStreamZone::Tick(float DeltaTime)
     for (APlayerCharacter* Player : InvalidPlayers)
     {
         PlayersInStream.Remove(Player);
+        PlayerWindUseTimes.Remove(Player);
+        PlayerSplineDistances.Remove(Player);
+        PlayerStreamDirectionSigns.Remove(Player);
     }
 }
 
-void AWindStreamZone::RebuildVisualTube()
+void AWindStreamZone::DestroyVisualComponents()
 {
-    for (USplineMeshComponent* MeshComponent : SplineMeshes)
+    for (UNiagaraComponent* NiagaraComponent : StreamNiagaraComponents)
     {
-        if (!MeshComponent) continue;
-        MeshComponent->UnregisterComponent();
-        MeshComponent->DestroyComponent();
+        if (!NiagaraComponent) continue;
+        NiagaraComponent->DeactivateImmediate();
+        NiagaraComponent->UnregisterComponent();
+        RemoveInstanceComponent(NiagaraComponent);
+        NiagaraComponent->DestroyComponent();
     }
-    SplineMeshes.Empty();
 
-    if (!StreamMesh || Spline->GetNumberOfSplinePoints() < 2)
+    for (UNiagaraComponent* NiagaraComponent : BoundaryNiagaraComponents)
+    {
+        if (!NiagaraComponent) continue;
+        NiagaraComponent->DeactivateImmediate();
+        NiagaraComponent->UnregisterComponent();
+        RemoveInstanceComponent(NiagaraComponent);
+        NiagaraComponent->DestroyComponent();
+    }
+
+    for (UNiagaraComponent* NiagaraComponent : BoundaryRingNiagaraComponents)
+    {
+        if (!NiagaraComponent) continue;
+        NiagaraComponent->DeactivateImmediate();
+        NiagaraComponent->UnregisterComponent();
+        RemoveInstanceComponent(NiagaraComponent);
+        NiagaraComponent->DestroyComponent();
+    }
+
+    StreamNiagaraComponents.Empty();
+    BoundaryNiagaraComponents.Empty();
+    BoundaryRingNiagaraComponents.Empty();
+}
+
+void AWindStreamZone::RebuildVisuals()
+{
+    DestroyVisualComponents();
+
+    if (Spline->GetNumberOfSplinePoints() < 2)
+    {
+        return;
+    }
+
+    if (!StreamNiagaraSystem && !BoundaryNiagaraSystem && !BoundaryRingNiagaraSystem)
     {
         return;
     }
 
     const float TotalLength = Spline->GetSplineLength();
+    if (TotalLength <= KINDA_SMALL_NUMBER)
+    {
+        return;
+    }
     const float SegmentLength = TotalLength / FMath::Max(NumVisualSegments, 1);
 
     for (int32 Index = 0; Index < NumVisualSegments; ++Index)
@@ -168,39 +186,259 @@ void AWindStreamZone::RebuildVisualTube()
         const float D0 = Index * SegmentLength;
         const float D1 = (Index + 1) * SegmentLength;
 
-        const FVector P0 = Spline->GetLocationAtDistanceAlongSpline(D0, ESplineCoordinateSpace::World);
-        const FVector P1 = Spline->GetLocationAtDistanceAlongSpline(D1, ESplineCoordinateSpace::World);
-        const FVector T0 = Spline->GetTangentAtDistanceAlongSpline(D0, ESplineCoordinateSpace::World).GetSafeNormal() * SegmentLength;
-        const FVector T1 = Spline->GetTangentAtDistanceAlongSpline(D1, ESplineCoordinateSpace::World).GetSafeNormal() * SegmentLength;
-
-        USplineMeshComponent* SplineMesh = NewObject<USplineMeshComponent>(this, *FString::Printf(TEXT("WindSeg_%d"), Index));
-        SplineMesh->SetMobility(EComponentMobility::Movable);
-        SplineMesh->SetupAttachment(RootComponent);
-        SplineMesh->SetAbsolute(true, true, true);
-        SplineMesh->RegisterComponent();
-
-        SplineMesh->SetStaticMesh(StreamMesh);
-        SplineMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        SplineMesh->SetCastShadow(false);
-        SplineMesh->SetForwardAxis(ESplineMeshAxis::Y);
-        SplineMesh->SetSplineUpDir(FVector::UpVector, false);
-        SplineMesh->SetStartAndEnd(P0, T0, P1, T1, true);
-
-        const float Scale = StreamRadius / 50.f;
-        SplineMesh->SetStartScale(FVector2D(Scale, Scale));
-        SplineMesh->SetEndScale(FVector2D(Scale, Scale));
-
-        if (StreamMaterial)
+        if (StreamNiagaraSystem)
         {
-            UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(StreamMaterial, this);
-            Material->SetScalarParameterValue(TEXT("Opacity"), TubeOpacity);
-            Material->SetScalarParameterValue(TEXT("UVOffset"), 0.f);
-            Material->SetScalarParameterValue(TEXT("SegmentIndex"), static_cast<float>(Index));
-            SplineMesh->SetMaterial(0, Material);
+            UNiagaraComponent* StreamNiagara = NewObject<UNiagaraComponent>(this, *FString::Printf(TEXT("WindStreamFX_%d"), Index));
+            StreamNiagara->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+            StreamNiagara->SetMobility(EComponentMobility::Movable);
+            StreamNiagara->SetupAttachment(RootComponent);
+            StreamNiagara->SetAbsolute(true, true, true);
+            StreamNiagara->SetAsset(StreamNiagaraSystem);
+            StreamNiagara->SetAutoActivate(false);
+            StreamNiagara->SetHiddenInGame(false);
+            StreamNiagara->SetVisibility(true, true);
+            AddInstanceComponent(StreamNiagara);
+            StreamNiagara->RegisterComponent();
+            ConfigureNiagaraComponent(StreamNiagara, Index, D0, D1, false);
+            StreamNiagara->Activate(true);
+            StreamNiagaraComponents.Add(StreamNiagara);
         }
 
-        SplineMeshes.Add(SplineMesh);
+        if (BoundaryNiagaraSystem)
+        {
+            UNiagaraComponent* BoundaryNiagara = NewObject<UNiagaraComponent>(this, *FString::Printf(TEXT("WindBoundaryFX_%d"), Index));
+            BoundaryNiagara->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+            BoundaryNiagara->SetMobility(EComponentMobility::Movable);
+            BoundaryNiagara->SetupAttachment(RootComponent);
+            BoundaryNiagara->SetAbsolute(true, true, true);
+            BoundaryNiagara->SetAsset(BoundaryNiagaraSystem);
+            BoundaryNiagara->SetAutoActivate(false);
+            BoundaryNiagara->SetHiddenInGame(false);
+            BoundaryNiagara->SetVisibility(true, true);
+            AddInstanceComponent(BoundaryNiagara);
+            BoundaryNiagara->RegisterComponent();
+            ConfigureNiagaraComponent(BoundaryNiagara, Index, D0, D1, true);
+            BoundaryNiagara->Activate(true);
+            BoundaryNiagaraComponents.Add(BoundaryNiagara);
+        }
     }
+
+    if (BoundaryRingNiagaraSystem && NumBoundaryRings > 0)
+    {
+        const int32 RingCount = FMath::Max(NumBoundaryRings, 1);
+        for (int32 Index = 0; Index < RingCount; ++Index)
+        {
+            const float Alpha = RingCount == 1
+                ? 0.5f
+                : static_cast<float>(Index) / static_cast<float>(RingCount - 1);
+            const float Distance = TotalLength * Alpha;
+
+            UNiagaraComponent* RingNiagara = NewObject<UNiagaraComponent>(this, *FString::Printf(TEXT("WindBoundaryRingFX_%d"), Index));
+            RingNiagara->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+            RingNiagara->SetMobility(EComponentMobility::Movable);
+            RingNiagara->SetupAttachment(RootComponent);
+            RingNiagara->SetAbsolute(true, true, true);
+            RingNiagara->SetAsset(BoundaryRingNiagaraSystem);
+            RingNiagara->SetAutoActivate(false);
+            RingNiagara->SetHiddenInGame(false);
+            RingNiagara->SetVisibility(true, true);
+            AddInstanceComponent(RingNiagara);
+            RingNiagara->RegisterComponent();
+            ConfigureBoundaryRingComponent(RingNiagara, Index, Distance);
+            RingNiagara->Activate(true);
+            BoundaryRingNiagaraComponents.Add(RingNiagara);
+        }
+    }
+}
+
+void AWindStreamZone::ConfigureNiagaraComponent(UNiagaraComponent* NiagaraComponent, int32 SegmentIndex,
+    float DistanceStart, float DistanceEnd, bool bBoundary) const
+{
+    if (!NiagaraComponent || !Spline)
+    {
+        return;
+    }
+
+    const float MidDistance = (DistanceStart + DistanceEnd) * 0.5f;
+    const FVector SegmentStart = Spline->GetLocationAtDistanceAlongSpline(DistanceStart, ESplineCoordinateSpace::World);
+    const FVector SegmentEnd = Spline->GetLocationAtDistanceAlongSpline(DistanceEnd, ESplineCoordinateSpace::World);
+    const FVector SegmentCenter = Spline->GetLocationAtDistanceAlongSpline(MidDistance, ESplineCoordinateSpace::World);
+    FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(MidDistance, ESplineCoordinateSpace::World).GetSafeNormal();
+    if (Tangent.IsNearlyZero())
+    {
+        Tangent = GetActorForwardVector();
+    }
+    const float SegmentLength = FMath::Max(FVector::Dist(SegmentStart, SegmentEnd), 1.f);
+    const float Radius = bBoundary ? StreamRadius * BoundaryRadiusMultiplier : StreamRadius * StreamVisualWidthMultiplier;
+    const float Diameter = FMath::Max(Radius * 2.f, 1.f);
+    const FVector BoxSize(SegmentLength * StreamVisualLengthMultiplier, Diameter, Diameter);
+
+    NiagaraComponent->SetWorldLocation(SegmentCenter);
+    NiagaraComponent->SetWorldRotation(Tangent.IsNearlyZero() ? GetActorRotation() : Tangent.Rotation());
+
+    // Keep the component scale neutral: the Niagara receives exact box dimensions in cm.
+    NiagaraComponent->SetWorldScale3D(FVector(StreamNiagaraComponentScale));
+    NiagaraComponent->SetVariablePosition(TEXT("User.SegmentStart"), SegmentStart);
+    NiagaraComponent->SetVariablePosition(TEXT("User.SegmentEnd"), SegmentEnd);
+    NiagaraComponent->SetVariableVec3(TEXT("User.StreamDirection"), Tangent);
+    NiagaraComponent->SetVariableFloat(TEXT("User.StreamRadius"), Radius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.InnerRadius"), StreamRadius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.SegmentLength"), SegmentLength);
+    NiagaraComponent->SetVariableFloat(TEXT("User.FlowSpeed"), StreamSpeed);
+    NiagaraComponent->SetVariableFloat(TEXT("User.SegmentIndex"), static_cast<float>(SegmentIndex));
+    NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryOpacity"), BoundaryOpacity);
+    NiagaraComponent->SetVariableFloat(TEXT("User.StreamOpacity"), bBoundary ? BoundaryOpacity : 1.f);
+
+    NiagaraComponent->SetVariableVec3(TEXT("User.Box Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Box_Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.BoxSize"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Wind_Box Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Wind_Box_Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.WindBoxSize"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Leaves_Box Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Leaves_Box_Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.LeavesBoxSize"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Boundary_Box Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Boundary_Box_Size"), BoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.BoundaryBoxSize"), BoxSize);
+
+    NiagaraComponent->SetVariableFloat(TEXT("User.Wind_Spawn Rate"), bBoundary ? 0.f : StreamWindSpawnRate);
+    NiagaraComponent->SetVariableFloat(TEXT("User.Wind_Spawn_Rate"), bBoundary ? 0.f : StreamWindSpawnRate);
+    NiagaraComponent->SetVariableFloat(TEXT("User.WindSpawnRate"), bBoundary ? 0.f : StreamWindSpawnRate);
+    NiagaraComponent->SetVariableFloat(TEXT("User.Leaves_Spawn Rate"), bBoundary ? 0.f : StreamLeavesSpawnRate);
+    NiagaraComponent->SetVariableFloat(TEXT("User.Leaves_Spawn_Rate"), bBoundary ? 0.f : StreamLeavesSpawnRate);
+    NiagaraComponent->SetVariableFloat(TEXT("User.LeavesSpawnRate"), bBoundary ? 0.f : StreamLeavesSpawnRate);
+}
+
+void AWindStreamZone::ConfigureBoundaryRingComponent(UNiagaraComponent* NiagaraComponent, int32 RingIndex, float Distance) const
+{
+    if (!NiagaraComponent || !Spline)
+    {
+        return;
+    }
+
+    const FVector Center = Spline->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
+    FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World).GetSafeNormal();
+    if (Tangent.IsNearlyZero())
+    {
+        Tangent = GetActorForwardVector();
+    }
+
+    const float RingRadius = StreamRadius * BoundaryRingRadiusMultiplier;
+    const float RingDiameter = FMath::Max(RingRadius * 2.f, 1.f);
+    const FVector RingBoxSize(20.f, RingDiameter, RingDiameter);
+
+    const FRotator BaseRotation = Tangent.Rotation();
+    NiagaraComponent->SetWorldLocation(Center);
+    NiagaraComponent->SetWorldRotation(FRotator(
+        BaseRotation.Pitch + BoundaryRingRotationOffset.Pitch,
+        BaseRotation.Yaw + BoundaryRingRotationOffset.Yaw,
+        BaseRotation.Roll + BoundaryRingRotationOffset.Roll));
+    NiagaraComponent->SetWorldScale3D(FVector(StreamNiagaraComponentScale));
+
+    NiagaraComponent->SetVariableFloat(TEXT("User.RingRadius"), RingRadius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.RingDiameter"), RingDiameter);
+    NiagaraComponent->SetVariableFloat(TEXT("User.StreamRadius"), StreamRadius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryRadius"), RingRadius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryOpacity"), BoundaryOpacity);
+    NiagaraComponent->SetVariableFloat(TEXT("User.RingIndex"), static_cast<float>(RingIndex));
+    NiagaraComponent->SetVariableVec3(TEXT("User.StreamDirection"), Tangent);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Box Size"), RingBoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Box_Size"), RingBoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.BoxSize"), RingBoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Ring_Box Size"), RingBoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.Ring_Box_Size"), RingBoxSize);
+    NiagaraComponent->SetVariableVec3(TEXT("User.RingBoxSize"), RingBoxSize);
+}
+
+void AWindStreamZone::DrawWindDebug() const
+{
+    if (!GetWorld() || !Spline)
+    {
+        return;
+    }
+
+    for (UCapsuleComponent* Capsule : CollisionCapsules)
+    {
+        if (!Capsule) continue;
+
+        DrawDebugCapsule(
+            GetWorld(),
+            Capsule->GetComponentLocation(),
+            Capsule->GetScaledCapsuleHalfHeight(),
+            Capsule->GetScaledCapsuleRadius(),
+            Capsule->GetComponentQuat(),
+            FColor::Yellow,
+            false,
+            0.f,
+            0,
+            2.f);
+    }
+
+    const int32 SampleCount = FMath::Max(DebugSplineSamples, 4);
+    if (!Spline || Spline->GetNumberOfSplinePoints() < 2)
+    {
+        return;
+    }
+
+    const float TotalLength = Spline->GetSplineLength();
+    if (TotalLength <= KINDA_SMALL_NUMBER)
+    {
+        return;
+    }
+    FVector PreviousCenter = FVector::ZeroVector;
+    bool bHasPreviousCenter = false;
+
+    for (int32 Index = 0; Index < SampleCount; ++Index)
+    {
+        const float Alpha = SampleCount > 1 ? static_cast<float>(Index) / static_cast<float>(SampleCount - 1) : 0.f;
+        const float Distance = TotalLength * Alpha;
+        const FVector Center = Spline->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
+        FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World).GetSafeNormal();
+        if (Tangent.IsNearlyZero())
+        {
+            Tangent = GetActorForwardVector();
+        }
+        const float CurveStrength = GetCurveStrength(Distance);
+        const FColor SampleColor = CurveStrength > 0.65f
+            ? FColor::Red
+            : (CurveStrength > 0.25f ? FColor::Orange : FColor::Cyan);
+
+        FVector UpAxis = FVector::UpVector;
+        if (FMath::Abs(FVector::DotProduct(Tangent, UpAxis)) > 0.92f)
+        {
+            UpAxis = FVector::RightVector;
+        }
+
+        const FVector RightAxis = FVector::CrossProduct(UpAxis, Tangent).GetSafeNormal();
+        const FVector VerticalAxis = FVector::CrossProduct(Tangent, RightAxis).GetSafeNormal();
+
+        DrawDebugSphere(GetWorld(), Center, 22.f, 8, SampleColor, false, 0.f, 0, 1.5f);
+        DrawDebugCircle(GetWorld(), Center, StreamRadius, 32, SampleColor, false, 0.f, 0, 1.5f, RightAxis, VerticalAxis, false);
+        DrawDebugDirectionalArrow(GetWorld(), Center, Center + Tangent * 220.f, 45.f, FColor::Green, false, 0.f, 0, 2.f);
+
+        if (bHasPreviousCenter)
+        {
+            DrawDebugLine(GetWorld(), PreviousCenter, Center, FColor::Cyan, false, 0.f, 0, 3.f);
+        }
+
+        PreviousCenter = Center;
+        bHasPreviousCenter = true;
+    }
+
+    const FString DebugText = FString::Printf(
+        TEXT("WindStream\nNiagara:%s FX:%d Boundary:%d Rings:%d Leaves:%.1f\nCaps:%d/%d Radius:%.0f Speed:%.0f Ramp:%.2fs"),
+        StreamNiagaraSystem ? TEXT("OK") : TEXT("NONE"),
+        StreamNiagaraComponents.Num(),
+        BoundaryNiagaraComponents.Num(),
+        BoundaryRingNiagaraComponents.Num(),
+        StreamLeavesSpawnRate,
+        CollisionCapsules.Num(),
+        MaxGeneratedCollisionCapsules,
+        StreamRadius,
+        StreamSpeed,
+        StreamSpeedRampTime);
+    DrawDebugString(GetWorld(), GetActorLocation() + FVector(0.f, 0.f, StreamRadius + 120.f), DebugText, nullptr, FColor::White, 0.f, false);
 }
 
 void AWindStreamZone::RebuildCollisionCapsules()
@@ -211,26 +449,52 @@ void AWindStreamZone::RebuildCollisionCapsules()
         Capsule->OnComponentBeginOverlap.RemoveAll(this);
         Capsule->OnComponentEndOverlap.RemoveAll(this);
         Capsule->UnregisterComponent();
+        RemoveInstanceComponent(Capsule);
         Capsule->DestroyComponent();
     }
     CollisionCapsules.Empty();
     PlayersInStream.Empty();
+    PlayerWindUseTimes.Empty();
+    PlayerSplineDistances.Empty();
+    PlayerStreamDirectionSigns.Empty();
 
-    const int32 CapsuleCount = FMath::Max(NumCollisionCapsules, 2);
+    if (!Spline || Spline->GetNumberOfSplinePoints() < 2)
+    {
+        return;
+    }
+
     const float TotalLength = Spline->GetSplineLength();
+    if (TotalLength <= KINDA_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    const int32 AutoCapsuleCount = StreamRadius > KINDA_SMALL_NUMBER
+        ? FMath::CeilToInt(TotalLength / FMath::Max(StreamRadius * 0.85f, 100.f)) + 1
+        : NumCollisionCapsules;
+    const int32 CapsuleCount = FMath::Clamp(
+        FMath::Max(NumCollisionCapsules, AutoCapsuleCount),
+        2,
+        FMath::Max(MaxGeneratedCollisionCapsules, 2));
     const float Step = TotalLength / (CapsuleCount - 1);
-    const float HalfHeight = Step * 0.55f;
+    const float HalfHeight = Step * CollisionCapsuleOverlap;
 
     for (int32 Index = 0; Index < CapsuleCount; ++Index)
     {
         const float Distance = Index * Step;
         const FVector WorldPos = Spline->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
-        const FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World).GetSafeNormal();
+        FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World).GetSafeNormal();
+        if (Tangent.IsNearlyZero())
+        {
+            Tangent = GetActorForwardVector();
+        }
 
         UCapsuleComponent* Capsule = NewObject<UCapsuleComponent>(this, *FString::Printf(TEXT("WindCapsule_%d"), Index));
+        Capsule->CreationMethod = EComponentCreationMethod::UserConstructionScript;
         Capsule->SetMobility(EComponentMobility::Movable);
         Capsule->SetupAttachment(RootComponent);
         Capsule->SetAbsolute(true, true, true);
+        AddInstanceComponent(Capsule);
         Capsule->RegisterComponent();
         Capsule->SetCapsuleSize(StreamRadius, FMath::Max(HalfHeight, StreamRadius));
         Capsule->SetCollisionProfileName(TEXT("Trigger"));
@@ -263,6 +527,8 @@ void AWindStreamZone::OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp,
 
     const bool bAlreadyIn = PlayersInStream.Contains(Player);
     PlayersInStream.Add(Player);
+    PlayerWindUseTimes.FindOrAdd(Player);
+    PlayerSplineDistances.FindOrAdd(Player, GetClosestSplineDistance(Player->GetActorLocation()));
 
     if (!bAlreadyIn)
     {
@@ -293,6 +559,9 @@ void AWindStreamZone::OnCapsuleEndOverlap(UPrimitiveComponent* OverlappedComp,
     if (!bStillInAnotherCapsule)
     {
         PlayersInStream.Remove(Player);
+        PlayerWindUseTimes.Remove(Player);
+        PlayerSplineDistances.Remove(Player);
+        PlayerStreamDirectionSigns.Remove(Player);
         WIND_LOG(Log, TEXT("[WindStream] EXIT %s"), *Player->GetName());
     }
 }
@@ -300,6 +569,39 @@ void AWindStreamZone::OnCapsuleEndOverlap(UPrimitiveComponent* OverlappedComp,
 float AWindStreamZone::GetClosestSplineDistance(const FVector& WorldPosition) const
 {
     return Spline->GetDistanceAlongSplineAtLocation(WorldPosition, ESplineCoordinateSpace::World);
+}
+
+float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const FVector& WorldPosition, float DeltaTime)
+{
+    if (!Player || !Spline)
+    {
+        return GetClosestSplineDistance(WorldPosition);
+    }
+
+    const float RawDistance = GetClosestSplineDistance(WorldPosition);
+    const float TotalLength = Spline->GetSplineLength();
+    if (TotalLength <= KINDA_SMALL_NUMBER)
+    {
+        return RawDistance;
+    }
+
+    float& TrackedDistance = PlayerSplineDistances.FindOrAdd(Player, RawDistance);
+    const float MaxDistanceStep = FMath::Max(Player->GetVelocity().Size() * DeltaTime * 1.8f, StreamRadius * 0.55f);
+    const float DeltaToRaw = RawDistance - TrackedDistance;
+
+    if (FMath::Abs(DeltaToRaw) <= MaxDistanceStep)
+    {
+        TrackedDistance = RawDistance;
+    }
+    else
+    {
+        const FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(TrackedDistance, ESplineCoordinateSpace::World).GetSafeNormal();
+        const float VelocityAlongSpline = FVector::DotProduct(Player->GetVelocity(), Tangent);
+        const float PredictedStep = FMath::Clamp(VelocityAlongSpline * DeltaTime, -MaxDistanceStep, MaxDistanceStep);
+        TrackedDistance = FMath::Clamp(TrackedDistance + PredictedStep, 0.f, TotalLength);
+    }
+
+    return TrackedDistance;
 }
 
 float AWindStreamZone::GetRadialFalloff(const FVector& WorldPosition, float SplineDistance) const
@@ -313,6 +615,35 @@ float AWindStreamZone::GetRadialFalloff(const FVector& WorldPosition, float Spli
     }
 
     return FMath::Clamp(FMath::Cos((DistanceToCore / StreamRadius) * PI * 0.5f), 0.f, 1.f);
+}
+
+float AWindStreamZone::GetCurveStrength(float SplineDistance) const
+{
+    if (!Spline)
+    {
+        return 0.f;
+    }
+
+    const float TotalLength = Spline->GetSplineLength();
+    if (TotalLength <= KINDA_SMALL_NUMBER)
+    {
+        return 0.f;
+    }
+
+    const float SampleDistance = FMath::Clamp(CurveLookAheadDistance, 100.f, TotalLength * 0.5f);
+    const float PrevDistance = FMath::Clamp(SplineDistance - SampleDistance, 0.f, TotalLength);
+    const float NextDistance = FMath::Clamp(SplineDistance + SampleDistance, 0.f, TotalLength);
+    const FVector PrevTangent = Spline->GetTangentAtDistanceAlongSpline(PrevDistance, ESplineCoordinateSpace::World).GetSafeNormal();
+    const FVector NextTangent = Spline->GetTangentAtDistanceAlongSpline(NextDistance, ESplineCoordinateSpace::World).GetSafeNormal();
+
+    if (PrevTangent.IsNearlyZero() || NextTangent.IsNearlyZero())
+    {
+        return 0.f;
+    }
+
+    const float Dot = FMath::Clamp(FVector::DotProduct(PrevTangent, NextTangent), -1.f, 1.f);
+    const float AngleDegrees = FMath::RadiansToDegrees(FMath::Acos(Dot));
+    return FMath::GetMappedRangeValueClamped(FVector2D(8.f, 70.f), FVector2D(0.f, 1.f), AngleDegrees);
 }
 
 bool AWindStreamZone::IsPlayerInDiveMode(APlayerCharacter* Player) const
@@ -342,7 +673,7 @@ UDiveMode* AWindStreamZone::GetPlayerDiveMode(APlayerCharacter* Player) const
     return FlightComponent->GetDiveMode();
 }
 
-FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, float SplineDistance) const
+FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, float SplineDistance)
 {
     const FVector SplineDirection = Spline->GetTangentAtDistanceAlongSpline(SplineDistance, ESplineCoordinateSpace::World).GetSafeNormal();
     if (!Player || SplineDirection.IsNearlyZero())
@@ -356,12 +687,19 @@ FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, f
         ReferenceDirection = Player->GetActorForwardVector().GetSafeNormal();
     }
 
-    return (FVector::DotProduct(ReferenceDirection, SplineDirection) >= 0.f)
+    int32& DirectionSign = PlayerStreamDirectionSigns.FindOrAdd(Player, 0);
+    const float SignedAlignment = FVector::DotProduct(ReferenceDirection, SplineDirection);
+    if (DirectionSign == 0)
+    {
+        DirectionSign = SignedAlignment >= 0.f ? 1 : -1;
+    }
+
+    return DirectionSign >= 0
         ? SplineDirection
         : -SplineDirection;
 }
 
-void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTime*/, float Falloff)
+void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
 {
     UDiveMode* DiveMode = GetPlayerDiveMode(Player);
     if (!DiveMode)
@@ -370,12 +708,17 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTim
     }
 
     const FVector PlayerPos = Player->GetActorLocation();
-    const float SplineDistance = GetClosestSplineDistance(PlayerPos);
+    const float RawSplineDistance = GetClosestSplineDistance(PlayerPos);
+    GetPreferredStreamDirection(Player, RawSplineDistance);
+    const float SplineDistance = GetTrackedSplineDistance(Player, PlayerPos, DeltaTime);
     const FVector ClosestPoint = Spline->GetLocationAtDistanceAlongSpline(SplineDistance, ESplineCoordinateSpace::World);
     const FVector StreamDirection = GetPreferredStreamDirection(Player, SplineDistance);
+    const float CurveStrength = GetCurveStrength(SplineDistance);
+    const float Falloff = GetRadialFalloff(PlayerPos, SplineDistance);
 
-    if (StreamDirection.IsNearlyZero())
+    if (Falloff <= 0.f || StreamDirection.IsNearlyZero())
     {
+        PlayerWindUseTimes.FindOrAdd(Player) = 0.f;
         return;
     }
 
@@ -410,18 +753,38 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTim
             FVector2D(0.35f, 1.f),
             StreamAlignment)
         : CrossingAssistStrength;
+    float& StreamUseTime = PlayerWindUseTimes.FindOrAdd(Player);
+    if (bFullyUsingStream)
+    {
+        StreamUseTime += DeltaTime * FMath::Lerp(0.7f, 1.25f, AlignmentAssist) * FMath::Clamp(Falloff, 0.25f, 1.f);
+    }
+    else
+    {
+        StreamUseTime = FMath::Max(0.f, StreamUseTime - DeltaTime * 2.f);
+    }
+
+    const float RampAlpha = StreamSpeedRampTime > KINDA_SMALL_NUMBER
+        ? FMath::Clamp(StreamUseTime / StreamSpeedRampTime, 0.f, 1.f)
+        : 1.f;
+    const float SmoothedRampAlpha = FMath::InterpEaseInOut(0.f, 1.f, RampAlpha, 2.f);
+    const float CurveGripScale = 1.f + CurveStrength * CurveGripBoost;
+    const float CurveSpeedScale = 1.f - CurveStrength * CurveSpeedReduction;
+    const float StreamSpeedAtEntry = StreamSpeed * StreamEntrySpeedRatio;
+    const float RampedStreamSpeed = FMath::Lerp(StreamSpeedAtEntry, StreamSpeed * CurveSpeedScale, SmoothedRampAlpha);
 
     const float EdgeCenteringStrength = CenteringStrength
         * EdgeAlpha
         * EdgeAlpha
         * Falloff
-        * FMath::Lerp(0.09f, 0.025f, SteeringInput);
+        * FMath::Lerp(0.09f, 0.025f, SteeringInput)
+        * CurveGripScale;
 
     const float IdleCenteringStrength = CenteringStrength
         * RadialRatio
         * RadialRatio
         * Falloff
-        * (bIdleInStream ? 0.75f : 0.f);
+        * (bIdleInStream ? 0.75f : 0.f)
+        * CurveGripScale;
 
     const float AlignmentCenteringScale = bFullyUsingStream ? FMath::Square(AlignmentAssist) : 0.f;
     const float SoftCenteringStrength = (EdgeCenteringStrength + IdleCenteringStrength) * AlignmentCenteringScale;
@@ -430,20 +793,21 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float /*DeltaTim
         : FVector::ZeroVector;
 
     const float EffectiveInfluence = bFullyUsingStream
-        ? DirectionInfluence * Falloff * FMath::Square(AlignmentAssist)
+        ? FMath::Clamp(DirectionInfluence * CurveGripScale, 0.f, 1.f) * Falloff * FMath::Square(AlignmentAssist)
         : 0.f;
     const float CurrentDiveSpeed = DiveMode->GetCurrentSpeed();
     const float TargetSpeed = bFullyUsingStream
-        ? FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeed), AlignmentAssist)
-        : FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeed * 0.35f), CrossingAssistStrength);
+        ? FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, RampedStreamSpeed), AlignmentAssist)
+        : FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeedAtEntry), CrossingAssistStrength);
 
     DiveMode->ApplyWindBoost(TargetSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
 
     WIND_SCREEN(21, FColor::Cyan,
-        TEXT("[WindStream] %s | Assist %.2f | Falloff %.2f | Center %.0f"),
+        TEXT("[WindStream] %s | Assist %.2f | Ramp %.2f | Curve %.2f | Center %.0f"),
         *Player->GetName(),
         AlignmentAssist,
-        Falloff,
+        SmoothedRampAlpha,
+        CurveStrength,
         CenterOffset.Size());
 }
 
