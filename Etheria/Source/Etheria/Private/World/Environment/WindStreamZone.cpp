@@ -51,6 +51,8 @@ void AWindStreamZone::BeginPlay()
 {
     Super::BeginPlay();
 
+    bWindDebugMode = true;
+
     RebuildVisuals();
     RebuildCollisionCapsules();
 
@@ -59,6 +61,11 @@ void AWindStreamZone::BeginPlay()
         if (!Capsule) continue;
         Capsule->SetHiddenInGame(!bWindDebugMode);
     }
+
+    WIND_LOG(Log, TEXT("[WindStream] Debug enabled | Radius=%.1f Speed=%.1f SplinePoints=%d"),
+        StreamRadius,
+        StreamSpeed,
+        Spline ? Spline->GetNumberOfSplinePoints() : 0);
 }
 
 void AWindStreamZone::Tick(float DeltaTime)
@@ -223,15 +230,38 @@ void AWindStreamZone::RebuildVisuals()
         }
     }
 
-    if (BoundaryRingNiagaraSystem && NumBoundaryRings > 0)
+    if (BoundaryRingNiagaraSystem)
     {
-        const int32 RingCount = FMath::Max(NumBoundaryRings, 1);
-        for (int32 Index = 0; Index < RingCount; ++Index)
+        TArray<float> RingDistances;
+
+        if (bPlaceBoundaryRingsAtSplinePoints && Spline->GetNumberOfSplinePoints() > 0)
         {
-            const float Alpha = RingCount == 1
-                ? 0.5f
-                : static_cast<float>(Index) / static_cast<float>(RingCount - 1);
-            const float Distance = TotalLength * Alpha;
+            const int32 FirstPoint = bIncludeBoundaryRingAtStreamEnds ? 0 : 1;
+            const int32 LastPointExclusive = bIncludeBoundaryRingAtStreamEnds
+                ? Spline->GetNumberOfSplinePoints()
+                : FMath::Max(Spline->GetNumberOfSplinePoints() - 1, 1);
+
+            for (int32 PointIndex = FirstPoint; PointIndex < LastPointExclusive; ++PointIndex)
+            {
+                RingDistances.Add(Spline->GetDistanceAlongSplineAtSplinePoint(PointIndex));
+            }
+        }
+
+        if (RingDistances.Num() == 0 && NumBoundaryRings > 0)
+        {
+            const int32 RingCount = FMath::Max(NumBoundaryRings, 1);
+            for (int32 Index = 0; Index < RingCount; ++Index)
+            {
+                const float Alpha = RingCount == 1
+                    ? 0.5f
+                    : static_cast<float>(Index) / static_cast<float>(RingCount - 1);
+                RingDistances.Add(TotalLength * Alpha);
+            }
+        }
+
+        for (int32 Index = 0; Index < RingDistances.Num(); ++Index)
+        {
+            const float Distance = RingDistances[Index];
 
             UNiagaraComponent* RingNiagara = NewObject<UNiagaraComponent>(this, *FString::Printf(TEXT("WindBoundaryRingFX_%d"), Index));
             RingNiagara->CreationMethod = EComponentCreationMethod::UserConstructionScript;
@@ -248,6 +278,11 @@ void AWindStreamZone::RebuildVisuals()
             RingNiagara->Activate(true);
             BoundaryRingNiagaraComponents.Add(RingNiagara);
         }
+
+        WIND_LOG(Log, TEXT("[WindStream] Rebuilt %d boundary rings | AutoSplinePoints=%s | IncludeEnds=%s"),
+            BoundaryRingNiagaraComponents.Num(),
+            bPlaceBoundaryRingsAtSplinePoints ? TEXT("true") : TEXT("false"),
+            bIncludeBoundaryRingAtStreamEnds ? TEXT("true") : TEXT("false"));
     }
 }
 
@@ -326,6 +361,7 @@ void AWindStreamZone::ConfigureBoundaryRingComponent(UNiagaraComponent* NiagaraC
     const float RingRadius = StreamRadius * BoundaryRingRadiusMultiplier;
     const float RingDiameter = FMath::Max(RingRadius * 2.f, 1.f);
     const FVector RingBoxSize(20.f, RingDiameter, RingDiameter);
+    const float RingScale = BoundaryRingNiagaraScaleMultiplier * FMath::Max(StreamRadius / 300.f, 0.01f);
 
     const FRotator BaseRotation = Tangent.Rotation();
     NiagaraComponent->SetWorldLocation(Center);
@@ -333,21 +369,36 @@ void AWindStreamZone::ConfigureBoundaryRingComponent(UNiagaraComponent* NiagaraC
         BaseRotation.Pitch + BoundaryRingRotationOffset.Pitch,
         BaseRotation.Yaw + BoundaryRingRotationOffset.Yaw,
         BaseRotation.Roll + BoundaryRingRotationOffset.Roll));
-    NiagaraComponent->SetWorldScale3D(FVector(StreamNiagaraComponentScale));
+    NiagaraComponent->SetWorldScale3D(FVector(StreamNiagaraComponentScale * RingScale));
 
     NiagaraComponent->SetVariableFloat(TEXT("User.RingRadius"), RingRadius);
     NiagaraComponent->SetVariableFloat(TEXT("User.RingDiameter"), RingDiameter);
     NiagaraComponent->SetVariableFloat(TEXT("User.StreamRadius"), StreamRadius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.InnerRadius"), StreamRadius);
     NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryRadius"), RingRadius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryRingRadius"), RingRadius);
+    NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryRingDiameter"), RingDiameter);
     NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryOpacity"), BoundaryOpacity);
+    NiagaraComponent->SetVariableFloat(TEXT("User.BoundaryRingOpacity"), BoundaryOpacity);
     NiagaraComponent->SetVariableFloat(TEXT("User.RingIndex"), static_cast<float>(RingIndex));
+    NiagaraComponent->SetVariableFloat(TEXT("User.RingDistance"), Distance);
+    NiagaraComponent->SetVariableFloat(TEXT("User.RingScale"), StreamNiagaraComponentScale * RingScale);
+    NiagaraComponent->SetVariableFloat(TEXT("User.RingRadiusMultiplier"), BoundaryRingRadiusMultiplier);
     NiagaraComponent->SetVariableVec3(TEXT("User.StreamDirection"), Tangent);
+    NiagaraComponent->SetVariablePosition(TEXT("User.RingCenter"), Center);
+    NiagaraComponent->SetVariablePosition(TEXT("User.BoundaryRingCenter"), Center);
     NiagaraComponent->SetVariableVec3(TEXT("User.Box Size"), RingBoxSize);
     NiagaraComponent->SetVariableVec3(TEXT("User.Box_Size"), RingBoxSize);
     NiagaraComponent->SetVariableVec3(TEXT("User.BoxSize"), RingBoxSize);
     NiagaraComponent->SetVariableVec3(TEXT("User.Ring_Box Size"), RingBoxSize);
     NiagaraComponent->SetVariableVec3(TEXT("User.Ring_Box_Size"), RingBoxSize);
     NiagaraComponent->SetVariableVec3(TEXT("User.RingBoxSize"), RingBoxSize);
+
+    WIND_LOG(Log, TEXT("[WindStream] Ring[%d] Distance=%.1f Radius=%.1f Scale=%.2f"),
+        RingIndex,
+        Distance,
+        RingRadius,
+        StreamNiagaraComponentScale * RingScale);
 }
 
 void AWindStreamZone::DrawWindDebug() const
@@ -553,8 +604,14 @@ void AWindStreamZone::OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp,
             DirectionSign = 1;
         }
 
-        WIND_LOG(Log, TEXT("[WindStream] ENTER %s via %s | DirectionSign=%d"),
-            *Player->GetName(), *OverlappedComp->GetName(), DirectionSign);
+        WIND_LOG(Log, TEXT("[WindStream] ENTER %s via %s | Sign=%d | Dist=%.1f | Vel=(%.1f,%.1f,%.1f)"),
+            *Player->GetName(),
+            *OverlappedComp->GetName(),
+            DirectionSign,
+            InitialSplineDistance,
+            PlayerVelocity.X,
+            PlayerVelocity.Y,
+            PlayerVelocity.Z);
     }
 }
 
@@ -671,6 +728,7 @@ float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const 
     if (!TrackedTangent.IsNearlyZero())
     {
         int32& DirectionSign = PlayerStreamDirectionSigns.FindOrAdd(Player, 0);
+        const int32 PreviousDirectionSign = DirectionSign;
         const float TrackedDelta = TrackedDistance - PreviousTrackedDistance;
 
         if (DirectionSign == 0)
@@ -707,7 +765,27 @@ float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const 
                 }
             }
         }
+
+        if (PreviousDirectionSign != DirectionSign)
+        {
+            WIND_LOG(Log, TEXT("[WindStream] SIGN %s | Prev=%d New=%d | Raw=%.1f PrevTracked=%.1f Tracked=%.1f"),
+                Player ? *Player->GetName() : TEXT("None"),
+                PreviousDirectionSign,
+                DirectionSign,
+                RawDistance,
+                PreviousTrackedDistance,
+                TrackedDistance);
+        }
     }
+
+    WIND_LOG(Log, TEXT("[WindStream] TRACK %s | Raw=%.1f Best=%.1f PrevTracked=%.1f Tracked=%.1f Delta=%.1f Window=%.1f"),
+        Player ? *Player->GetName() : TEXT("None"),
+        RawDistance,
+        BestDistance,
+        PreviousTrackedDistance,
+        TrackedDistance,
+        DeltaToBestDistance,
+        SearchWindow);
 
     return TrackedDistance;
 }
@@ -821,6 +899,7 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
     }
 
     const FVector PlayerPos = Player->GetActorLocation();
+    const float RawSplineDistance = GetClosestSplineDistance(PlayerPos);
     const float SplineDistance = GetTrackedSplineDistance(Player, PlayerPos, DeltaTime);
     const FVector ClosestPoint = Spline->GetLocationAtDistanceAlongSpline(SplineDistance, ESplineCoordinateSpace::World);
     const FVector StreamDirection = GetPreferredStreamDirection(Player, SplineDistance);
@@ -832,6 +911,12 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
     if (Falloff <= 0.f || StreamDirection.IsNearlyZero())
     {
         PlayerWindUseTimes.FindOrAdd(Player) = 0.f;
+        WIND_LOG(Log, TEXT("[WindStream] SKIP %s | Falloff=%.2f | DirZero=%s | Raw=%.1f Tracked=%.1f"),
+            *Player->GetName(),
+            Falloff,
+            StreamDirection.IsNearlyZero() ? TEXT("true") : TEXT("false"),
+            RawSplineDistance,
+            SplineDistance);
         return;
     }
 
@@ -927,4 +1012,23 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
         SmoothedRampAlpha,
         CurveStrength,
         CenterOffset.Size());
+
+    WIND_LOG(Log, TEXT("[WindStream] APPLY %s | Raw=%.1f Tracked=%.1f Sign=%d Falloff=%.2f Align=%.2f Center=%.1f Speed=%.1f Target=%.1f Input=(%.2f,%.2f) Pos=(%.1f,%.1f,%.1f) Vel=(%.1f,%.1f,%.1f)"),
+        *Player->GetName(),
+        RawSplineDistance,
+        SplineDistance,
+        PlayerStreamDirectionSigns.FindRef(Player),
+        Falloff,
+        StreamAlignment,
+        DistanceToCore,
+        CurrentDiveSpeed,
+        TargetSpeed,
+        Player->GetHorizontalInput(),
+        Player->GetVerticalInput(),
+        PlayerPos.X,
+        PlayerPos.Y,
+        PlayerPos.Z,
+        Player->GetVelocity().X,
+        Player->GetVelocity().Y,
+        Player->GetVelocity().Z);
 }

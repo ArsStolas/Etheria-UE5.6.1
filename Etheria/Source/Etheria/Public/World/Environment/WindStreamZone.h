@@ -112,6 +112,15 @@ protected:
     float BoundaryRingRadiusMultiplier = 1.05f;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Visual")
+    bool bPlaceBoundaryRingsAtSplinePoints = true;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual")
+    bool bIncludeBoundaryRingAtStreamEnds = true;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.1", ClampMax="5.0"))
+    float BoundaryRingNiagaraScaleMultiplier = 1.f;
+
+    UPROPERTY(EditAnywhere, Category="WindStream|Visual")
     FRotator BoundaryRingRotationOffset = FRotator::ZeroRotator;
 
     UPROPERTY(EditAnywhere, Category="WindStream|Visual", meta=(ClampMin="0.0", ClampMax="1.0"))
