@@ -56,6 +56,7 @@ void UDiveMode::Enter()
     Move->BrakingDecelerationFalling = 0.f;
 
     CurrentSpeed = FMath::Clamp(MinDiveSpeed + DiveEntrySpeedBonus, MinDiveSpeed, MaxDiveSpeed);
+    DiveDirection = FVector2D::ZeroVector;
     bWindStreamActive = false;
     PendingWindTargetSpeed = 0.f;
     PendingWindAlignmentStrength = 0.f;
@@ -74,6 +75,7 @@ void UDiveMode::Exit()
     RestoreMovementSettings();
 
     CurrentSpeed = MinDiveSpeed;
+    DiveDirection = FVector2D::ZeroVector;
     bWindStreamActive = false;
     PendingWindTargetSpeed = 0.f;
     PendingWindAlignmentStrength = 0.f;
@@ -125,6 +127,9 @@ void UDiveMode::TickMode(float DeltaTime)
 
     const float PitchFactor = MaxPitch > KINDA_SMALL_NUMBER ? (NewRot.Pitch / MaxPitch) : 0.f;
     const float RollFactor = MaxRoll > KINDA_SMALL_NUMBER ? (NewRot.Roll / MaxRoll) : 0.f;
+    DiveDirection = FVector2D(
+        FMath::Clamp(RollFactor, -1.f, 1.f),
+        FMath::Clamp(-PitchFactor, -1.f, 1.f));
 
     if (PitchFactor < -0.1f)
     {

@@ -11,7 +11,7 @@
 #include "Components/ActorComponent.h"
 #include "FlightComponent.generated.h"
 
-UENUM()
+UENUM(BlueprintType)
 enum class EFlightMode : uint8
 {
 	None,
@@ -37,6 +37,14 @@ public:
 	UFlightComponent();
 
 	bool IsInMode(const EFlightMode Mode) const { return CurrentMode == Mode; }
+	UFUNCTION(BlueprintPure, Category="Flight")
+	EFlightMode GetCurrentMode() const { return CurrentMode; }
+	UFUNCTION(BlueprintPure, Category="Flight|Dive")
+	FVector2D GetDiveDirection() const { return DiveDirection; }
+	UFUNCTION(BlueprintPure, Category="Flight|Dive")
+	float GetDiveBankDirection() const { return DiveDirection.X; }
+	UFUNCTION(BlueprintPure, Category="Flight|Dive")
+	float GetDivePitchDirection() const { return DiveDirection.Y; }
 
 	void StartGlide();
 	void StartDive();
@@ -47,7 +55,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	
 	FORCEINLINE UGlideMode* GetGlideMode() const { return GlideMode; }
-	FORCEINLINE UDiveMode* GetDiveMode() const { return DiveMode; }
+	UFUNCTION(BlueprintPure, Category="Flight|Dive")
+	UDiveMode* GetDiveMode() const { return DiveMode; }
 
 	UPROPERTY(BlueprintAssignable, Category="Flight")
 	FGlideEvent OnGlideStart;
@@ -108,6 +117,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Flight|Dive", meta=(ClampMin="0.1", ClampMax="2.0"))
 	float DiveLiftFactor = 0.6f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Flight|Dive")
+	FVector2D DiveDirection = FVector2D::ZeroVector;
 
 private:
 	EFlightMode CurrentMode = EFlightMode::None;

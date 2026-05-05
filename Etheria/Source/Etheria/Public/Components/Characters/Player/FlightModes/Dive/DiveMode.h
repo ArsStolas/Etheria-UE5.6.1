@@ -10,7 +10,7 @@
 #include "Components/Characters/Player/FlightModes/FlightModeBase.h"
 #include "DiveMode.generated.h"
 
-UCLASS()
+UCLASS(BlueprintType)
 class ETHERIA_API UDiveMode : public UFlightModeBase
 {
     GENERATED_BODY()
@@ -40,6 +40,12 @@ public:
                         float Influence, const FVector& CenteringAccel);
 
     float GetCurrentSpeed() const { return CurrentSpeed; }
+    UFUNCTION(BlueprintPure, Category="Dive|Animation")
+    FVector2D GetDiveDirection() const { return DiveDirection; }
+    UFUNCTION(BlueprintPure, Category="Dive|Animation")
+    float GetDiveBankDirection() const { return DiveDirection.X; }
+    UFUNCTION(BlueprintPure, Category="Dive|Animation")
+    float GetDivePitchDirection() const { return DiveDirection.Y; }
 
 protected:
     UPROPERTY(EditAnywhere, Category="Dive|Speed", meta=(ClampMin="500", ClampMax="5000"))
@@ -84,6 +90,11 @@ protected:
     bool bDiveDebugMode = false;
 
 private:
+    // X: bank left/right (-1 left, +1 right)
+    // Y: pitch/climb intent (-1 climb, +1 dive)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Dive|Animation", meta=(AllowPrivateAccess="true"))
+    FVector2D DiveDirection = FVector2D::ZeroVector;
+
     bool bWindStreamActive = false;
     float PendingWindTargetSpeed = 0.f;
     float PendingWindAlignmentStrength = 0.f;

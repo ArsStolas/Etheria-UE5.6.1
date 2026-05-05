@@ -54,9 +54,16 @@ void UFlightComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!Owner || !ActiveMode) return;
+    if (!Owner || !ActiveMode)
+    {
+        DiveDirection = FVector2D::ZeroVector;
+        return;
+    }
 
     ActiveMode->TickMode(DeltaTime);
+    DiveDirection = (CurrentMode == EFlightMode::Dive && DiveMode)
+        ? DiveMode->GetDiveDirection()
+        : FVector2D::ZeroVector;
 
     // Dive: vérifier contact sol
     if (CurrentMode == EFlightMode::Dive && Owner->IsGrounded())
@@ -129,6 +136,7 @@ void UFlightComponent::StopMode()
     ActiveMode->Exit();
     ActiveMode = nullptr;
     CurrentMode = EFlightMode::None;
+    DiveDirection = FVector2D::ZeroVector;
 
     // Broadcast l'événement correspondant
     if (PreviousMode == EFlightMode::Glide)

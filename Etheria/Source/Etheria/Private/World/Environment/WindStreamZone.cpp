@@ -276,7 +276,6 @@ void AWindStreamZone::ConfigureNiagaraComponent(UNiagaraComponent* NiagaraCompon
     NiagaraComponent->SetWorldLocation(SegmentCenter);
     NiagaraComponent->SetWorldRotation(Tangent.IsNearlyZero() ? GetActorRotation() : Tangent.Rotation());
 
-    // Keep the component scale neutral: the Niagara receives exact box dimensions in cm.
     NiagaraComponent->SetWorldScale3D(FVector(StreamNiagaraComponentScale));
     NiagaraComponent->SetVariablePosition(TEXT("User.SegmentStart"), SegmentStart);
     NiagaraComponent->SetVariablePosition(TEXT("User.SegmentEnd"), SegmentEnd);
@@ -528,11 +527,34 @@ void AWindStreamZone::OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp,
     const bool bAlreadyIn = PlayersInStream.Contains(Player);
     PlayersInStream.Add(Player);
     PlayerWindUseTimes.FindOrAdd(Player);
-    PlayerSplineDistances.FindOrAdd(Player, GetClosestSplineDistance(Player->GetActorLocation()));
 
     if (!bAlreadyIn)
     {
-        WIND_LOG(Log, TEXT("[WindStream] ENTER %s via %s"), *Player->GetName(), *OverlappedComp->GetName());
+        // FIX: Detect travel direction immediately on entry using velocity,
+        // so the first frames don't cause a violent direction conflict.
+        const float InitialSplineDistance = GetClosestSplineDistance(Player->GetActorLocation());
+        PlayerSplineDistances.FindOrAdd(Player, InitialSplineDistance);
+
+        const FVector SplineTangent = Spline->GetTangentAtDistanceAlongSpline(
+            InitialSplineDistance, ESplineCoordinateSpace::World).GetSafeNormal();
+        const FVector PlayerVelocity = Player->GetVelocity();
+        int32& DirectionSign = PlayerStreamDirectionSigns.FindOrAdd(Player, 0);
+
+        if (!SplineTangent.IsNearlyZero() && PlayerVelocity.SizeSquared() > 100.f * 100.f)
+        {
+            const float VelocityAlongSpline = FVector::DotProduct(PlayerVelocity.GetSafeNormal(), SplineTangent);
+            // Use a low threshold on entry so we commit immediately — avoids the
+            // 2–3 frame window where DirectionSign is 0 and the stream pushes back.
+            DirectionSign = VelocityAlongSpline >= 0.f ? 1 : -1;
+        }
+        else
+        {
+            // Default to forward if velocity is too low to determine direction.
+            DirectionSign = 1;
+        }
+
+        WIND_LOG(Log, TEXT("[WindStream] ENTER %s via %s | DirectionSign=%d"),
+            *Player->GetName(), *OverlappedComp->GetName(), DirectionSign);
     }
 }
 
@@ -586,19 +608,105 @@ float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const 
     }
 
     float& TrackedDistance = PlayerSplineDistances.FindOrAdd(Player, RawDistance);
+    const float PreviousTrackedDistance = TrackedDistance;
     const float MaxDistanceStep = FMath::Max(Player->GetVelocity().Size() * DeltaTime * 1.8f, StreamRadius * 0.55f);
-    const float DeltaToRaw = RawDistance - TrackedDistance;
 
-    if (FMath::Abs(DeltaToRaw) <= MaxDistanceStep)
+    const float SearchWindow = FMath::Max(MaxDistanceStep * 2.f, StreamRadius * 1.5f);
+    const float SearchStart = FMath::Clamp(PreviousTrackedDistance - SearchWindow, 0.f, TotalLength);
+    const float SearchEnd = FMath::Clamp(PreviousTrackedDistance + SearchWindow, 0.f, TotalLength);
+
+    float BestDistance = PreviousTrackedDistance;
+    float BestDistanceSq = FVector::DistSquared(
+        WorldPosition,
+        Spline->GetLocationAtDistanceAlongSpline(PreviousTrackedDistance, ESplineCoordinateSpace::World));
+
+    if (SearchEnd > SearchStart + KINDA_SMALL_NUMBER)
     {
-        TrackedDistance = RawDistance;
+        const int32 SampleCount = FMath::Clamp(
+            FMath::CeilToInt((SearchEnd - SearchStart) / FMath::Max(StreamRadius * 0.35f, 120.f)) + 1,
+            5,
+            17);
+
+        for (int32 Index = 0; Index < SampleCount; ++Index)
+        {
+            const float Alpha = SampleCount > 1
+                ? static_cast<float>(Index) / static_cast<float>(SampleCount - 1)
+                : 0.f;
+            const float CandidateDistance = FMath::Lerp(SearchStart, SearchEnd, Alpha);
+            const FVector CandidatePoint = Spline->GetLocationAtDistanceAlongSpline(CandidateDistance, ESplineCoordinateSpace::World);
+            const float CandidateDistanceSq = FVector::DistSquared(WorldPosition, CandidatePoint);
+
+            if (CandidateDistanceSq < BestDistanceSq)
+            {
+                BestDistanceSq = CandidateDistanceSq;
+                BestDistance = CandidateDistance;
+            }
+        }
     }
-    else
+
+    const bool bRawDistanceIsLocal = RawDistance >= SearchStart - KINDA_SMALL_NUMBER
+        && RawDistance <= SearchEnd + KINDA_SMALL_NUMBER;
+    if (bRawDistanceIsLocal)
     {
-        const FVector Tangent = Spline->GetTangentAtDistanceAlongSpline(TrackedDistance, ESplineCoordinateSpace::World).GetSafeNormal();
-        const float VelocityAlongSpline = FVector::DotProduct(Player->GetVelocity(), Tangent);
-        const float PredictedStep = FMath::Clamp(VelocityAlongSpline * DeltaTime, -MaxDistanceStep, MaxDistanceStep);
-        TrackedDistance = FMath::Clamp(TrackedDistance + PredictedStep, 0.f, TotalLength);
+        const float RawDistanceSq = FVector::DistSquared(
+            WorldPosition,
+            Spline->GetLocationAtDistanceAlongSpline(RawDistance, ESplineCoordinateSpace::World));
+        if (RawDistanceSq < BestDistanceSq)
+        {
+            BestDistanceSq = RawDistanceSq;
+            BestDistance = RawDistance;
+        }
+    }
+
+    const float DeltaToBestDistance = BestDistance - PreviousTrackedDistance;
+    TrackedDistance = FMath::Clamp(
+        PreviousTrackedDistance + FMath::Clamp(DeltaToBestDistance, -MaxDistanceStep, MaxDistanceStep),
+        0.f,
+        TotalLength);
+
+    // FIX: Direction sign update — only override an already-committed sign if
+    // the evidence is strong (larger movement threshold) to avoid flickering
+    // when the player slows down or briefly strafes across the spline axis.
+    const FVector TrackedTangent = Spline->GetTangentAtDistanceAlongSpline(TrackedDistance, ESplineCoordinateSpace::World).GetSafeNormal();
+    if (!TrackedTangent.IsNearlyZero())
+    {
+        int32& DirectionSign = PlayerStreamDirectionSigns.FindOrAdd(Player, 0);
+        const float TrackedDelta = TrackedDistance - PreviousTrackedDistance;
+
+        if (DirectionSign == 0)
+        {
+            // Not yet committed: use a low threshold to resolve ASAP.
+            if (FMath::Abs(TrackedDelta) > 0.5f)
+            {
+                DirectionSign = TrackedDelta >= 0.f ? 1 : -1;
+            }
+            else
+            {
+                const float VelocityAlongSpline = FVector::DotProduct(Player->GetVelocity(), TrackedTangent);
+                if (FMath::Abs(VelocityAlongSpline) > 50.f)
+                {
+                    DirectionSign = VelocityAlongSpline >= 0.f ? 1 : -1;
+                }
+            }
+        }
+        else
+        {
+            // Already committed: require a stronger signal to flip, preventing
+            // transient stutters from triggering a direction reversal mid-stream.
+            if (FMath::Abs(TrackedDelta) > 5.f)
+            {
+                const int32 NewSign = TrackedDelta >= 0.f ? 1 : -1;
+                if (NewSign != DirectionSign)
+                {
+                    // Only flip if velocity also agrees, so a slow stall doesn't reverse the sign.
+                    const float VelocityAlongSpline = FVector::DotProduct(Player->GetVelocity(), TrackedTangent);
+                    if (FMath::Abs(VelocityAlongSpline) > 150.f && (VelocityAlongSpline >= 0.f ? 1 : -1) == NewSign)
+                    {
+                        DirectionSign = NewSign;
+                    }
+                }
+            }
+        }
     }
 
     return TrackedDistance;
@@ -681,22 +789,27 @@ FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, f
         return SplineDirection;
     }
 
-    FVector ReferenceDirection = Player->GetVelocity().GetSafeNormal();
-    if (ReferenceDirection.IsNearlyZero())
-    {
-        ReferenceDirection = Player->GetActorForwardVector().GetSafeNormal();
-    }
-
-    int32& DirectionSign = PlayerStreamDirectionSigns.FindOrAdd(Player, 0);
-    const float SignedAlignment = FVector::DotProduct(ReferenceDirection, SplineDirection);
+    // FIX: DirectionSign is now always initialized on entry (in OnCapsuleBeginOverlap),
+    // so this fallback only triggers in edge cases (e.g. teleport into stream).
+    int32 DirectionSign = PlayerStreamDirectionSigns.FindRef(Player);
     if (DirectionSign == 0)
     {
-        DirectionSign = SignedAlignment >= 0.f ? 1 : -1;
+        const FVector PlayerVelocity = Player->GetVelocity();
+        if (PlayerVelocity.SizeSquared() > 50.f * 50.f)
+        {
+            const float VelocityAlongSpline = FVector::DotProduct(PlayerVelocity.GetSafeNormal(), SplineDirection);
+            DirectionSign = VelocityAlongSpline >= 0.f ? 1 : -1;
+            // Commit it so subsequent calls are consistent.
+            PlayerStreamDirectionSigns.FindOrAdd(Player) = DirectionSign;
+        }
+        else
+        {
+            // Cannot determine direction yet — don't apply stream influence this frame.
+            return FVector::ZeroVector;
+        }
     }
 
-    return DirectionSign >= 0
-        ? SplineDirection
-        : -SplineDirection;
+    return DirectionSign < 0 ? -SplineDirection : SplineDirection;
 }
 
 void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
@@ -708,14 +821,14 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
     }
 
     const FVector PlayerPos = Player->GetActorLocation();
-    const float RawSplineDistance = GetClosestSplineDistance(PlayerPos);
-    GetPreferredStreamDirection(Player, RawSplineDistance);
     const float SplineDistance = GetTrackedSplineDistance(Player, PlayerPos, DeltaTime);
     const FVector ClosestPoint = Spline->GetLocationAtDistanceAlongSpline(SplineDistance, ESplineCoordinateSpace::World);
     const FVector StreamDirection = GetPreferredStreamDirection(Player, SplineDistance);
     const float CurveStrength = GetCurveStrength(SplineDistance);
     const float Falloff = GetRadialFalloff(PlayerPos, SplineDistance);
 
+    // FIX: StreamDirection can now be ZeroVector when the direction is not yet
+    // committed — treat this the same as leaving the stream to avoid any push.
     if (Falloff <= 0.f || StreamDirection.IsNearlyZero())
     {
         PlayerWindUseTimes.FindOrAdd(Player) = 0.f;
@@ -745,6 +858,9 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
         ReferenceDirection = Player->GetActorForwardVector().GetSafeNormal();
     }
 
+    // FIX: StreamAlignment must be computed against the *signed* stream direction
+    // (already pointing in the player's travel direction) so a player going in
+    // reverse gets full alignment credit and is not treated as crossing the stream.
     const float StreamAlignment = FMath::Abs(FVector::DotProduct(ReferenceDirection, StreamDirection));
     const bool bFullyUsingStream = StreamAlignment >= 0.55f;
     const float AlignmentAssist = bFullyUsingStream
@@ -753,6 +869,7 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
             FVector2D(0.35f, 1.f),
             StreamAlignment)
         : CrossingAssistStrength;
+
     float& StreamUseTime = PlayerWindUseTimes.FindOrAdd(Player);
     if (bFullyUsingStream)
     {
@@ -803,11 +920,11 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
     DiveMode->ApplyWindBoost(TargetSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
 
     WIND_SCREEN(21, FColor::Cyan,
-        TEXT("[WindStream] %s | Assist %.2f | Ramp %.2f | Curve %.2f | Center %.0f"),
+        TEXT("[WindStream] %s | Sign:%d | Assist %.2f | Ramp %.2f | Curve %.2f | Center %.0f"),
         *Player->GetName(),
+        PlayerStreamDirectionSigns.FindRef(Player),
         AlignmentAssist,
         SmoothedRampAlpha,
         CurveStrength,
         CenterOffset.Size());
 }
-
