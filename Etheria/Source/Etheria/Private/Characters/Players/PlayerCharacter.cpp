@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: Mato
  * Class: PlayerCharacter - Source
  */
 
@@ -26,7 +26,6 @@
 #include "Components/Combat/CombatComponent.h"
 #include "Components/Combat/LockTarget/LockTargetComponent.h"
 #include "Components/Combat/LockTarget/LockVisualComponent.h"
-#include "Components/Quests/QuestComponent.h"
 #include "Core/System/EtheriaGameplayTags.h"
 #include "Data/Weapons/WeaponData.h"
 #include "World/Rope/RopeAttachPoint.h"
@@ -67,9 +66,6 @@ APlayerCharacter::APlayerCharacter()
     // --- LOCK COMPONENT ---
     LockTargetComponent = CreateDefaultSubobject<ULockTargetComponent>(TEXT("BPC_LockTarget"));
     LockVisualComponent = CreateDefaultSubobject<ULockVisualComponent>(TEXT("BPC_LockVisual"));
-
-    // --- QUEST COMPONENT ---
-    QuestComponent = CreateDefaultSubobject<UQuestComponent>(TEXT("BPC_QuestComponent"));
 
     // --- ROPE COMPONENTS ---
     RopeCableComponent = CreateDefaultSubobject<UCableComponent>(TEXT("BPC_RopeCable"));
@@ -189,10 +185,9 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         EIC->BindAction(BackAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnBackStarted);
         EIC->BindAction(BackAction,    ETriggerEvent::Completed, this, &APlayerCharacter::OnBackCompleted);
         EIC->BindAction(LeftAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
-        EIC->BindAction(LeftAction,  ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
-        EIC->BindAction(LeftAction,  ETriggerEvent::Completed, this, &APlayerCharacter::OnLeftCompleted);
-        EIC->BindAction(RightAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnRightStarted);
-        EIC->BindAction(RightAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnRightCompleted);
+        EIC->BindAction(LeftAction,    ETriggerEvent::Completed, this, &APlayerCharacter::OnLeftCompleted);
+        EIC->BindAction(RightAction,   ETriggerEvent::Started,   this, &APlayerCharacter::OnRightStarted);
+        EIC->BindAction(RightAction,   ETriggerEvent::Completed, this, &APlayerCharacter::OnRightCompleted);
         
         EIC->BindAction(CrouchAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnCrouchPressed);
         EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopCrouch);
