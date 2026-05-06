@@ -5,6 +5,9 @@
  * Class: "BaseAIController - Source"
  * Notes: HandleFleeState uses FleePanicRadius for urgent re-evaluation.
  *        When threat is close, AI recalculates flee direction every tick.
+ *        Initial patrol kickoff is DEFERRED via timer (InitialPatrolDelay) — for placed pawns,
+ *        AAIController::OnPossess fires BEFORE the character's BeginPlay, so calling StartPatrol()
+ *        directly here used to leave the patrol spline unset and the AI immobile in Path mode.
  */
 
 #include "Characters/AI/Controller/BaseAIController.h"
@@ -19,6 +22,7 @@
 #include "GameFramework/Character.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 ABaseAIController::ABaseAIController()
 {
@@ -71,10 +75,43 @@ void ABaseAIController::OnPossess(APawn* InPawn)
 		PerComp->RequestStimuliListenerUpdate();
 	}
 
-	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-		if (MC->PatrolMode != EPatrolMode::Stationary) { AICharacter->SetAIState(EAIState::Patrolling); MC->StartPatrol(); }
-
 	NextIdleAnimTime = IdleAnimInterval + FMath::FRandRange(0.f, IdleAnimRandomDeviation);
+
+	/* ── Defer initial patrol kickoff ─────────────────────────────────────
+	 * For placed pawns, OnPossess runs BEFORE the pawn's BeginPlay, which is
+	 * where the patrol spline gets wired up. Calling StartPatrol() directly
+	 * here would silently fail in Path mode (no spline → AI stuck on its own
+	 * spot). A small delay guarantees:
+	 *   - Character::BeginPlay has run (PatrolSpline pointer set).
+	 *   - The navmesh is fully built.
+	 *   - The movement component is ready to issue MoveTo requests.
+	 * ──────────────────────────────────────────────────────────────────── */
+	if (UWorld* W = GetWorld())
+	{
+		W->GetTimerManager().SetTimer(
+			InitialPatrolTimerHandle,
+			this,
+			&ABaseAIController::TryStartInitialPatrol,
+			FMath::Max(InitialPatrolDelay, 0.01f),
+			false);
+	}
+}
+
+void ABaseAIController::TryStartInitialPatrol()
+{
+	if (!AICharacter || AICharacter->IsDead() || AICharacter->IsDormant()) return;
+
+	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+	if (!MC) return;
+
+	// Don't override an active state (e.g. AI was already alerted during the delay window).
+	const EAIState State = AICharacter->GetCurrentAIState();
+	if (State != EAIState::Idle && State != EAIState::Patrolling) return;
+
+	if (MC->PatrolMode == EPatrolMode::Stationary) return;
+
+	AICharacter->SetAIState(EAIState::Patrolling);
+	MC->StartPatrol();
 }
 
 void ABaseAIController::Tick(float DeltaTime)

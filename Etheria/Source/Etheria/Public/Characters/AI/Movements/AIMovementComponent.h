@@ -5,6 +5,8 @@
  * Class: "AIMovementComponent - Header"
  * Notes: Patrol zones, spline paths (world-cached), flee, smooth acceleration.
  *        Spline points are snapshotted to world space at StartPatrol to prevent drift.
+ *        Path mode supports either the character's built-in spline OR an external
+ *        spline-bearing actor placed in the level (PatrolPathActor).
  */
 
 #pragma once
@@ -67,6 +69,13 @@ public:
 	
 	/** How the path loops: Loop, PingPong, or Once. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(EditCondition="PatrolMode==EPatrolMode::Path")) EPatrolLoopMode PatrolLoopMode = EPatrolLoopMode::Loop;
+
+	/** Optional: an actor in the world that carries a SplineComponent. If set, the AI follows THAT spline
+	 *  instead of the character's built-in PatrolSpline. Lets level designers draw paths visually in the level. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category="AI|Movement|Path",
+		meta=(EditCondition="PatrolMode==EPatrolMode::Path",
+		ToolTip="Optional. Drag a spline actor from the level here. Its spline overrides the character's built-in PatrolSpline. Leave empty to use the character's own spline."))
+	TObjectPtr<AActor> PatrolPathActor;
 
 	/** How long to wait at each patrol point. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="0", ToolTip="Seconds the AI waits at each patrol point."))
