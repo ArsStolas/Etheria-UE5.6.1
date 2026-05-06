@@ -185,10 +185,9 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
         EIC->BindAction(BackAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnBackStarted);
         EIC->BindAction(BackAction,    ETriggerEvent::Completed, this, &APlayerCharacter::OnBackCompleted);
         EIC->BindAction(LeftAction,    ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
-        EIC->BindAction(LeftAction,  ETriggerEvent::Started,   this, &APlayerCharacter::OnLeftStarted);
-        EIC->BindAction(LeftAction,  ETriggerEvent::Completed, this, &APlayerCharacter::OnLeftCompleted);
-        EIC->BindAction(RightAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnRightStarted);
-        EIC->BindAction(RightAction, ETriggerEvent::Completed, this, &APlayerCharacter::OnRightCompleted);
+        EIC->BindAction(LeftAction,    ETriggerEvent::Completed, this, &APlayerCharacter::OnLeftCompleted);
+        EIC->BindAction(RightAction,   ETriggerEvent::Started,   this, &APlayerCharacter::OnRightStarted);
+        EIC->BindAction(RightAction,   ETriggerEvent::Completed, this, &APlayerCharacter::OnRightCompleted);
         
         EIC->BindAction(CrouchAction, ETriggerEvent::Started,   this, &APlayerCharacter::OnCrouchPressed);
         EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopCrouch);

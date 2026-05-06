@@ -51,8 +51,6 @@ void AWindStreamZone::BeginPlay()
 {
     Super::BeginPlay();
 
-    bWindDebugMode = true;
-
     RebuildVisuals();
     RebuildCollisionCapsules();
 
@@ -581,8 +579,7 @@ void AWindStreamZone::OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp,
 
     if (!bAlreadyIn)
     {
-        // FIX: Detect travel direction immediately on entry using velocity,
-        // so the first frames don't cause a violent direction conflict.
+        // Detect travel direction immediately on entry so early frames do not fight the player.
         const float InitialSplineDistance = GetClosestSplineDistance(Player->GetActorLocation());
         PlayerSplineDistances.FindOrAdd(Player, InitialSplineDistance);
 
@@ -721,19 +718,17 @@ float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const 
         0.f,
         TotalLength);
 
-    // FIX: Direction sign update — only override an already-committed sign if
-    // the evidence is strong (larger movement threshold) to avoid flickering
-    // when the player slows down or briefly strafes across the spline axis.
+    // Travel direction is locked for the whole stream pass.
+    // This only initializes it if the player started diving while already inside.
     const FVector TrackedTangent = Spline->GetTangentAtDistanceAlongSpline(TrackedDistance, ESplineCoordinateSpace::World).GetSafeNormal();
     if (!TrackedTangent.IsNearlyZero())
     {
         int32& DirectionSign = PlayerStreamDirectionSigns.FindOrAdd(Player, 0);
-        const int32 PreviousDirectionSign = DirectionSign;
         const float TrackedDelta = TrackedDistance - PreviousTrackedDistance;
 
         if (DirectionSign == 0)
         {
-            // Not yet committed: use a low threshold to resolve ASAP.
+            // Resolve the direction quickly only while it has not been committed yet.
             if (FMath::Abs(TrackedDelta) > 0.5f)
             {
                 DirectionSign = TrackedDelta >= 0.f ? 1 : -1;
@@ -746,35 +741,6 @@ float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const 
                     DirectionSign = VelocityAlongSpline >= 0.f ? 1 : -1;
                 }
             }
-        }
-        else
-        {
-            // Already committed: require a stronger signal to flip, preventing
-            // transient stutters from triggering a direction reversal mid-stream.
-            if (FMath::Abs(TrackedDelta) > 5.f)
-            {
-                const int32 NewSign = TrackedDelta >= 0.f ? 1 : -1;
-                if (NewSign != DirectionSign)
-                {
-                    // Only flip if velocity also agrees, so a slow stall doesn't reverse the sign.
-                    const float VelocityAlongSpline = FVector::DotProduct(Player->GetVelocity(), TrackedTangent);
-                    if (FMath::Abs(VelocityAlongSpline) > 150.f && (VelocityAlongSpline >= 0.f ? 1 : -1) == NewSign)
-                    {
-                        DirectionSign = NewSign;
-                    }
-                }
-            }
-        }
-
-        if (PreviousDirectionSign != DirectionSign)
-        {
-            WIND_LOG(Log, TEXT("[WindStream] SIGN %s | Prev=%d New=%d | Raw=%.1f PrevTracked=%.1f Tracked=%.1f"),
-                Player ? *Player->GetName() : TEXT("None"),
-                PreviousDirectionSign,
-                DirectionSign,
-                RawDistance,
-                PreviousTrackedDistance,
-                TrackedDistance);
         }
     }
 
@@ -867,8 +833,7 @@ FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, f
         return SplineDirection;
     }
 
-    // FIX: DirectionSign is now always initialized on entry (in OnCapsuleBeginOverlap),
-    // so this fallback only triggers in edge cases (e.g. teleport into stream).
+    // Usually initialized on entry; this fallback handles teleports or diving inside a stream.
     int32 DirectionSign = PlayerStreamDirectionSigns.FindRef(Player);
     if (DirectionSign == 0)
     {
@@ -943,9 +908,7 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
         ReferenceDirection = Player->GetActorForwardVector().GetSafeNormal();
     }
 
-    // FIX: StreamAlignment must be computed against the *signed* stream direction
-    // (already pointing in the player's travel direction) so a player going in
-    // reverse gets full alignment credit and is not treated as crossing the stream.
+    // Use the signed stream direction so reverse travel receives normal alignment.
     const float StreamAlignment = FMath::Abs(FVector::DotProduct(ReferenceDirection, StreamDirection));
     const bool bFullyUsingStream = StreamAlignment >= 0.55f;
     const float AlignmentAssist = bFullyUsingStream
