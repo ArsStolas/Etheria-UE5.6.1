@@ -4,6 +4,8 @@
  * Last Updated by: Mato
  * Class: "BaseAIController - Header"
  * Notes: State machine, perception, robust flee, idle variation respect.
+ *        Initial patrol kickoff is deferred via timer so it runs AFTER the character's
+ *        BeginPlay (which is when the patrol spline is wired up).
  */
 
 #pragma once
@@ -69,11 +71,20 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="Strafe around target between attacks.")) bool bStrafeInCombat = false;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(EditCondition="bStrafeInCombat", ClampMin="0.5")) float StrafeDirectionChangeInterval = 2.f;
 
+	/** Delay (seconds) between OnPossess and the first patrol kickoff. Gives BeginPlay time to wire up the
+	 *  patrol spline and gives the navmesh time to be ready. Lower = snappier; too low and Path mode breaks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Init", meta=(ClampMin="0.0", ClampMax="2.0",
+		ToolTip="Delay before initial patrol kicks off after the controller possesses the pawn. Required for Path mode."))
+	float InitialPatrolDelay = 0.3f;
+
 private:
 	void SetupPerception();
 	void CheckProximityDetection();
 	void DrawDebugPerception() const;
 	float GetEffectiveAttackRange() const;
+
+	/** Deferred patrol kickoff. Called via timer after OnPossess so the character has finished its own BeginPlay. */
+	void TryStartInitialPatrol();
 
 	UPROPERTY() TObjectPtr<ABaseAICharacter> AICharacter;
 	UPROPERTY() TObjectPtr<UAISenseConfig_Sight> SightConfig;
@@ -87,4 +98,6 @@ private:
 	float FleeReevalTimer = 0.f;
 	int32 StrafeDirection = 1;
 	FVector SpawnOrigin = FVector::ZeroVector;
+
+	FTimerHandle InitialPatrolTimerHandle;
 };
