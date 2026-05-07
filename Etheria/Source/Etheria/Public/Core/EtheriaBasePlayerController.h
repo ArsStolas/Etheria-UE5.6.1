@@ -17,4 +17,17 @@ class ETHERIA_API AEtheriaBasePlayerController : public APlayerController
 
 public:
 	AEtheriaBasePlayerController();
+
+protected:
+	virtual void BeginPlay() override;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="UI|Notifications")
+	TSubclassOf<class UNotificationWidget> NotificationWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="UI|Notifications", meta=(ClampMin="1"))
+	int32 MaxVisibleNotifications = 3;
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<class UNotificationWidget> NotificationWidget;
 };

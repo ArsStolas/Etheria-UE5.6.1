@@ -33,6 +33,18 @@ public:
 
 	UFUNCTION(Exec, Category="Test|Health")
 	void Test_LogHealthStats(const FString& TargetName);
+
+	UFUNCTION(Exec, Category="Test|Notifications")
+	void Test_Notify(const FString& Title = TEXT("Debug Notification"), const FString& Message = TEXT("Notification system is working."));
+
+	UFUNCTION(Exec, Category="Test|Notifications")
+	void Test_NotifyWarning(const FString& Message = TEXT("This is a warning notification."));
+
+	UFUNCTION(Exec, Category="Test|Notifications")
+	void Test_NotifyQuest(const FString& Message = TEXT("Quest updated."));
+
+	UFUNCTION(Exec, Category="Test|Notifications")
+	void Test_NotifyClear();
 #endif
 
 private:

@@ -6,7 +6,10 @@
 
 #include "Tests/TestCheatManager.h"
 
+#include "Core/System/Notifications/NotificationSubsystem.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Tests/CharacterComponents/HealthTestManager.h"
 
 #if WITH_EDITOR || UE_BUILD_DEVELOPMENT
@@ -61,6 +64,80 @@ void UTestCheatManager::Test_LogHealthStats(const FString& TargetName)
 	if (const auto Manager = Cast<UHealthTestManager>(GetManager("Health")))
 	{
 		Manager->Test_LogHealthStats(TargetName);
+	}
+}
+
+void UTestCheatManager::Test_Notify(const FString& Title, const FString& Message)
+{
+	if (APlayerController* PlayerController = GetOuterAPlayerController())
+	{
+		if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+		{
+			if (UNotificationSubsystem* NotificationSubsystem = LocalPlayer->GetSubsystem<UNotificationSubsystem>())
+			{
+				FNotificationPayload Payload;
+				Payload.Title = FText::FromString(Title);
+				Payload.Message = FText::FromString(Message);
+				Payload.Type = ENotificationType::Info;
+				Payload.Priority = ENotificationPriority::Normal;
+				Payload.Duration = 3.0f;
+				NotificationSubsystem->ShowNotification(Payload);
+			}
+		}
+	}
+}
+
+void UTestCheatManager::Test_NotifyWarning(const FString& Message)
+{
+	if (APlayerController* PlayerController = GetOuterAPlayerController())
+	{
+		if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+		{
+			if (UNotificationSubsystem* NotificationSubsystem = LocalPlayer->GetSubsystem<UNotificationSubsystem>())
+			{
+				FNotificationPayload Payload;
+				Payload.Title = FText::FromString(TEXT("Warning"));
+				Payload.Message = FText::FromString(Message);
+				Payload.Type = ENotificationType::Warning;
+				Payload.Priority = ENotificationPriority::High;
+				Payload.Duration = 4.0f;
+				NotificationSubsystem->ShowNotification(Payload);
+			}
+		}
+	}
+}
+
+void UTestCheatManager::Test_NotifyQuest(const FString& Message)
+{
+	if (APlayerController* PlayerController = GetOuterAPlayerController())
+	{
+		if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+		{
+			if (UNotificationSubsystem* NotificationSubsystem = LocalPlayer->GetSubsystem<UNotificationSubsystem>())
+			{
+				FNotificationPayload Payload;
+				Payload.Title = FText::FromString(TEXT("Quest"));
+				Payload.Message = FText::FromString(Message);
+				Payload.Type = ENotificationType::Quest;
+				Payload.Priority = ENotificationPriority::High;
+				Payload.Duration = 5.0f;
+				NotificationSubsystem->ShowNotification(Payload);
+			}
+		}
+	}
+}
+
+void UTestCheatManager::Test_NotifyClear()
+{
+	if (APlayerController* PlayerController = GetOuterAPlayerController())
+	{
+		if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+		{
+			if (UNotificationSubsystem* NotificationSubsystem = LocalPlayer->GetSubsystem<UNotificationSubsystem>())
+			{
+				NotificationSubsystem->ClearAllNotifications();
+			}
+		}
 	}
 }
 
