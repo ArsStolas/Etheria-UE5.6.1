@@ -27,6 +27,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Animation/AnimMontage.h"
 #include "EngineUtils.h"
+#include "Engine/DamageEvents.h"
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
 
@@ -143,6 +144,26 @@ void ABaseAICharacter::Tick(float DeltaTime)
 }
 
 /* ═══════════ Damage Routing ═══════════ */
+
+float ABaseAICharacter::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+	AController* EventInstigator, AActor* DamageCauser)
+{
+	// Invulnerable — reject the damage entirely. Returning 0 BEFORE Super means the
+	// engine's OnTakeAnyDamage broadcast never fires, so HealthComponent doesn't
+	// touch HP and BaseAICharacter::HandleTakeAnyDamage doesn't fire OnReceiveDamage
+	// (no hit reaction, no fight-back trigger, no stagger). One check, all paths covered.
+	if (!bCanReceiveDamage)
+	{
+		OnAIDamageBlocked.Broadcast(DamageCauser, DamageAmount);
+		return 0.f;
+	}
+
+	// Already dead — also reject. Prevents double-Die() if the AI takes another hit
+	// during its death fade-out window before the actor is hidden.
+	if (CurrentState == EAIState::Dead) return 0.f;
+
+	return Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+}
 
 void ABaseAICharacter::HandleTakeAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
 	AController* InstigatedBy, AActor* DamageCauser)

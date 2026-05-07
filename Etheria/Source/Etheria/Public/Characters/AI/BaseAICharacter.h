@@ -37,6 +37,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIRespawned);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDormancyChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDeathFadeStarted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDeathFadeCompleted);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAIDamageBlocked, AActor*, Instigator, float, AttemptedDamage);
 
 UCLASS()
 class ETHERIA_API ABaseAICharacter : public ABaseCharacter
@@ -67,6 +68,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDormant() const { return bIsDormant; }
 	UFUNCTION(BlueprintPure, Category="AI") bool OnlyDetectsPlayers() const { return bOnlyDetectPlayers; }
 	UFUNCTION(BlueprintPure, Category="AI") bool ShouldShowDebugPatrol() const { return bShowDebugPatrol; }
+	UFUNCTION(BlueprintPure, Category="AI|Damage") bool GetCanReceiveDamage() const { return bCanReceiveDamage; }
 
 	/* ═══════════ Setters ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void SetAIState(EAIState NewState);
@@ -74,6 +76,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI") void ClearTarget();
 	UFUNCTION(BlueprintCallable, Category="AI") void SetAwarenessLevel(EAIAwarenessLevel NewLevel);
 	UFUNCTION(BlueprintCallable, Category="AI") void SetHostilityType(EAIHostilityType NewType) { HostilityType = NewType; }
+
+	/** Toggle damage immunity at runtime. Useful for cutscenes, scripted moments, or boss invulnerability phases. */
+	UFUNCTION(BlueprintCallable, Category="AI|Damage") void SetCanReceiveDamage(bool bNewCanReceiveDamage) { bCanReceiveDamage = bNewCanReceiveDamage; }
 
 	/* ═══════════ Perception / Damage ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void OnPerceiveTarget(AActor* PerceivedActor);
@@ -119,6 +124,16 @@ public:
 	/** Fired when the fade-out completes (actor is now hidden). */
 	UPROPERTY(BlueprintAssignable, Category="AI|Death") FOnAIDeathFadeCompleted OnAIDeathFadeCompleted;
 
+	/** Fires when damage was rejected because bCanReceiveDamage is false. Hook this in BP to play
+	 *  a "ting" sound, sparks, or a "shielded" tooltip — anything that signals "this attack didn't connect". */
+	UPROPERTY(BlueprintAssignable, Category="AI|Damage") FOnAIDamageBlocked OnAIDamageBlocked;
+
+	/** Override of AActor::TakeDamage. Returns 0 (and broadcasts OnAIDamageBlocked) when invulnerable
+	 *  or already dead, which short-circuits HP loss, hit reactions, and the OnTakeAnyDamage broadcast
+	 *  in one place — no need to add invulnerability checks anywhere else. */
+	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -155,6 +170,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
 		meta=(ToolTip="Enable interaction. When true, the player can talk to this AI."))
 	bool bIsInteractable = false;
+
+	/* ── Damage ── */
+
+	/** If true, this AI can take damage normally (HP loss, hit reaction, death). If false, all incoming
+	 *  damage is rejected — no HP change, no animation, no death — and OnAIDamageBlocked fires instead.
+	 *  Use this for invulnerable NPCs (merchants, story characters) or scripted invulnerability phases. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Damage",
+		meta=(ToolTip="When OFF, the player (and anything else using ApplyDamage) cannot harm this AI. The AI plays no hit reaction, loses no HP, and OnAIDamageBlocked fires for feedback hooks."))
+	bool bCanReceiveDamage = false;
 	
 	/* ── Component Movements ── */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIMovementComponent> AIMovementComponent;
