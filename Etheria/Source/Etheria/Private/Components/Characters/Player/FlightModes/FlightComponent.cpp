@@ -37,13 +37,26 @@ void UFlightComponent::BeginPlay()
     DiveMode->ConfigureDiveTuning(
         DiveMaxSpeed,
         DiveMinSpeed,
+        DiveCruiseSpeed,
         DiveAcceleration,
         DiveDeceleration,
         DiveEntrySpeedBonus,
+        DiveWindStreamAcceleration,
         DiveMaxPitch,
         DiveMaxRoll,
         DiveTurnRate,
-        DiveLiftFactor);
+        DiveLiftFactor,
+        DivePitchResponse,
+        DiveRollResponse,
+        DiveCruiseInterpSpeed,
+        DiveTurnDrag,
+        DiveNeutralSinkSpeed,
+        DiveMaxSinkSpeed,
+        DiveMaxClimbSpeed,
+        DiveLowSpeedClimbSink,
+        DiveClimbSpeedCostMultiplier,
+        bDiveUseInputAttitude,
+        bDiveDebugMode);
 
     GlideMode->Initialize(Owner);
     DiveMode->Initialize(Owner);
@@ -53,9 +66,22 @@ void UFlightComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!Owner || !ActiveMode) return;
+    if (!Owner || !ActiveMode)
+    {
+        DiveDirection = FVector2D::ZeroVector;
+        return;
+    }
+
+    if (DiveMode)
+    {
+        DiveMode->SetDiveDebugMode(bDiveDebugMode);
+        DiveMode->SetUseInputAttitude(bDiveUseInputAttitude);
+    }
 
     ActiveMode->TickMode(DeltaTime);
+    DiveDirection = (CurrentMode == EFlightMode::Dive && DiveMode)
+        ? DiveMode->GetDiveDirection()
+        : FVector2D::ZeroVector;
 
     // Dive: vérifier contact sol
     if (CurrentMode == EFlightMode::Dive && Owner->IsGrounded())
@@ -92,7 +118,12 @@ void UFlightComponent::StartGlide()
 
 void UFlightComponent::StartDive()
 {
-    if (!Owner || !Owner->GetCharacterMovement()->IsFalling())
+    if (!Owner || !Owner->GetCharacterMovement())
+        return;
+
+    const bool bCanStartFromAir = Owner->GetCharacterMovement()->IsFalling();
+    const bool bCanStartFromGlide = CurrentMode == EFlightMode::Glide && ActiveMode == GlideMode;
+    if (!bCanStartFromAir && !bCanStartFromGlide)
         return;
 
     FHitResult Hit;
@@ -107,13 +138,23 @@ void UFlightComponent::StartDive()
     if (bTooCloseToGround)
         return;
 
-    // Exit Glide, Enter Dive
+    // Exit previous flight mode, then enter dive.
+    const EFlightMode PreviousMode = CurrentMode;
     if (ActiveMode)
+    {
         ActiveMode->Exit();
+    }
     
     CurrentMode = EFlightMode::Dive;
     ActiveMode = DiveMode;
+    DiveMode->SetDiveDebugMode(bDiveDebugMode);
+    DiveMode->SetUseInputAttitude(bDiveUseInputAttitude);
     ActiveMode->Enter();
+
+    if (PreviousMode == EFlightMode::Glide)
+    {
+        OnGlideStop.Broadcast();
+    }
 
     OnDiveStart.Broadcast();
 }
@@ -128,6 +169,7 @@ void UFlightComponent::StopMode()
     ActiveMode->Exit();
     ActiveMode = nullptr;
     CurrentMode = EFlightMode::None;
+    DiveDirection = FVector2D::ZeroVector;
 
     // Broadcast l'événement correspondant
     if (PreviousMode == EFlightMode::Glide)
