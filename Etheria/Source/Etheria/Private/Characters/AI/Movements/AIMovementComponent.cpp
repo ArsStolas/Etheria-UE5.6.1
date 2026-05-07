@@ -5,6 +5,8 @@
  * Class: "AIMovementComponent - Source"
  * Notes: Spline points cached to world space at StartPatrol (fixes drift).
  *        FleeFrom uses perpendicular randomization to avoid getting stuck.
+ *        PatrolSpline is lazy-resolved (works whether it's set explicitly by the
+ *        character's BeginPlay, found on the owner, or pulled from a level actor).
  */
 
 #include "Characters/AI/Movements/AIMovementComponent.h"
@@ -32,6 +34,37 @@ void UAIMovementComponent::EnsureInitialized()
 		OwnerCharacter = Cast<ABaseAICharacter>(GetOwner());
 		if (OwnerCharacter) MovementComp = OwnerCharacter->GetCharacterMovement();
 	}
+
+	/* Lazy-resolve the patrol spline. ──────────────────────────────────────
+	 * Why this matters: for placed pawns, AAIController::OnPossess can fire
+	 * BEFORE the character's BeginPlay — meaning SetPatrolSpline() hasn't run
+	 * yet when the controller calls StartPatrol(). The previous code then
+	 * silently fell back to the character's own location as a "patrol point",
+	 * leaving the AI immobile.
+	 *
+	 * Resolution priority:
+	 *   1. PatrolSpline was already set explicitly (by character::BeginPlay).
+	 *   2. PatrolPathActor (an actor placed in the level) — preferred for
+	 *      level-design workflows where designers draw paths in the world.
+	 *   3. The character's built-in PatrolSpline subobject.
+	 * ──────────────────────────────────────────────────────────────────── */
+	if (!PatrolSpline && OwnerCharacter)
+	{
+		if (PatrolPathActor)
+		{
+			PatrolSpline = PatrolPathActor->FindComponentByClass<USplineComponent>();
+			if (!PatrolSpline)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("[%s] PatrolPathActor '%s' has no SplineComponent — falling back to the character's built-in PatrolSpline."),
+					*OwnerCharacter->GetName(), *PatrolPathActor->GetName());
+			}
+		}
+		if (!PatrolSpline)
+		{
+			PatrolSpline = OwnerCharacter->GetPatrolSpline();
+		}
+	}
 }
 
 void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -43,7 +76,7 @@ void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	if (bIsPatrolling) HandlePatrolTick(DeltaTime);
 
 #if ENABLE_DRAW_DEBUG
-	if (OwnerCharacter->ShouldShowDebugPatrol()) DrawDebugPatrol();
+	if (OwnerCharacter && OwnerCharacter->ShouldShowDebugPatrol()) DrawDebugPatrol();
 #endif
 }
 
@@ -51,8 +84,18 @@ void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 
 void UAIMovementComponent::CacheSplineWorldPositions()
 {
+	EnsureInitialized();
+
 	CachedSplineWorldPoints.Reset();
-	if (!PatrolSpline) return;
+	if (!PatrolSpline)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[%s] Path patrol mode requested but no PatrolSpline could be found. "
+			     "Either define points on the character's PatrolSpline subobject in the BP, "
+			     "or set PatrolPathActor to a spline actor in the level."),
+			OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("AIMovement"));
+		return;
+	}
 
 	const int32 Num = PatrolSpline->GetNumberOfSplinePoints();
 	CachedSplineWorldPoints.Reserve(Num);
@@ -61,6 +104,14 @@ void UAIMovementComponent::CacheSplineWorldPositions()
 	{
 		// Snapshot world position NOW — before the character moves
 		CachedSplineWorldPoints.Add(PatrolSpline->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World));
+	}
+
+	if (CachedSplineWorldPoints.Num() < 2)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[%s] PatrolSpline has only %d point(s). Path mode needs at least 2."),
+			OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("AIMovement"),
+			CachedSplineWorldPoints.Num());
 	}
 }
 
@@ -77,7 +128,20 @@ void UAIMovementComponent::StartPatrol()
 
 	// Cache spline points in world space so they don't drift with the character
 	if (PatrolMode == EPatrolMode::Path)
+	{
 		CacheSplineWorldPositions();
+
+		// Bail out cleanly if the path is unusable, instead of silently moving
+		// to the character's own location and looking frozen forever.
+		if (CachedSplineWorldPoints.Num() < 2)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("[%s] StartPatrol(Path) aborted: spline must have at least 2 points."),
+				*OwnerCharacter->GetName());
+			bIsPatrolling = false;
+			return;
+		}
+	}
 
 	bIsPatrolling = true;
 	bPatrolFinished = false;

@@ -3,7 +3,8 @@
  * Created by: Mato
  * Last Updated by: Mato
  * Class: "BaseAICharacter - Header"
- * Notes: Pack, respawn, dormancy, detection decal, hit reactions, flee/fight-back.
+ * Notes: Pack, respawn, dormancy (timer-based), detection decal, hit reactions,
+ *        death VFX + dissolve fade, flee/fight-back.
  */
 
 #pragma once
@@ -20,6 +21,10 @@ class ABaseAIController;
 class USplineComponent;
 class UDecalComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UNiagaraSystem;
+class UNiagaraComponent;
+class UHealthComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAIStateChanged, EAIState, OldState, EAIState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTargetAcquired, AActor*, Target);
@@ -30,6 +35,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPackAlerted, ABaseAICharacter*, 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDied);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIRespawned);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDormancyChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDeathFadeStarted);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDeathFadeCompleted);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAIDamageBlocked, AActor*, Instigator, float, AttemptedDamage);
 
 UCLASS()
 class ETHERIA_API ABaseAICharacter : public ABaseCharacter
@@ -60,6 +68,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDormant() const { return bIsDormant; }
 	UFUNCTION(BlueprintPure, Category="AI") bool OnlyDetectsPlayers() const { return bOnlyDetectPlayers; }
 	UFUNCTION(BlueprintPure, Category="AI") bool ShouldShowDebugPatrol() const { return bShowDebugPatrol; }
+	UFUNCTION(BlueprintPure, Category="AI|Damage") bool GetCanReceiveDamage() const { return bCanReceiveDamage; }
 
 	/* ═══════════ Setters ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void SetAIState(EAIState NewState);
@@ -67,6 +76,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI") void ClearTarget();
 	UFUNCTION(BlueprintCallable, Category="AI") void SetAwarenessLevel(EAIAwarenessLevel NewLevel);
 	UFUNCTION(BlueprintCallable, Category="AI") void SetHostilityType(EAIHostilityType NewType) { HostilityType = NewType; }
+
+	/** Toggle damage immunity at runtime. Useful for cutscenes, scripted moments, or boss invulnerability phases. */
+	UFUNCTION(BlueprintCallable, Category="AI|Damage") void SetCanReceiveDamage(bool bNewCanReceiveDamage) { bCanReceiveDamage = bNewCanReceiveDamage; }
 
 	/* ═══════════ Perception / Damage ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void OnPerceiveTarget(AActor* PerceivedActor);
@@ -89,6 +101,9 @@ public:
 	/* ═══════════ Optimization ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI|Optimization") void SetDormant(bool bDormant);
 
+	/** Manually force a dormancy re-evaluation (e.g. after teleporting the player). */
+	UFUNCTION(BlueprintCallable, Category="AI|Optimization") void ForceDormancyCheck() { UpdateDormancy(); }
+
 	/* ═══════════ Detection Decal ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI|Debug") void SetDetectionDecalVisible(bool bVisible);
 
@@ -103,8 +118,25 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="AI|Respawn") FOnAIRespawned OnAIRespawned;
 	UPROPERTY(BlueprintAssignable, Category="AI|Optimization") FOnAIDormancyChanged OnAIDormancyChanged;
 
+	/** Fired when the death VFX spawns and the fade-out begins. */
+	UPROPERTY(BlueprintAssignable, Category="AI|Death") FOnAIDeathFadeStarted OnAIDeathFadeStarted;
+
+	/** Fired when the fade-out completes (actor is now hidden). */
+	UPROPERTY(BlueprintAssignable, Category="AI|Death") FOnAIDeathFadeCompleted OnAIDeathFadeCompleted;
+
+	/** Fires when damage was rejected because bCanReceiveDamage is false. Hook this in BP to play
+	 *  a "ting" sound, sparks, or a "shielded" tooltip — anything that signals "this attack didn't connect". */
+	UPROPERTY(BlueprintAssignable, Category="AI|Damage") FOnAIDamageBlocked OnAIDamageBlocked;
+
+	/** Override of AActor::TakeDamage. Returns 0 (and broadcasts OnAIDamageBlocked) when invulnerable
+	 *  or already dead, which short-circuits HP loss, hit reactions, and the OnTakeAnyDamage broadcast
+	 *  in one place — no need to add invulnerability checks anywhere else. */
+	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaTime) override;
 
 	/* ── Identity ── */
@@ -138,6 +170,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
 		meta=(ToolTip="Enable interaction. When true, the player can talk to this AI."))
 	bool bIsInteractable = false;
+
+	/* ── Damage ── */
+
+	/** If true, this AI can take damage normally (HP loss, hit reaction, death). If false, all incoming
+	 *  damage is rejected — no HP change, no animation, no death — and OnAIDamageBlocked fires instead.
+	 *  Use this for invulnerable NPCs (merchants, story characters) or scripted invulnerability phases. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Damage",
+		meta=(ToolTip="When OFF, the player (and anything else using ApplyDamage) cannot harm this AI. The AI plays no hit reaction, loses no HP, and OnAIDamageBlocked fires for feedback hooks."))
+	bool bCanReceiveDamage = false;
 	
 	/* ── Component Movements ── */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIMovementComponent> AIMovementComponent;
@@ -189,17 +230,65 @@ protected:
 		ToolTip="Time in seconds before this AI respawns (only for Timer mode)."))
 	float RespawnTimerDuration = 300.f;
 
+	/* ═══════════ Death VFX & Smooth Fade ═══════════ */
+
+	/** Niagara VFX spawned near the end of the death montage to mask the disappearance (dust, ash, light, smoke...). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|VFX",
+		meta=(ToolTip="Niagara system spawned during the death sequence. Use to cover the fade-out with particles. Leave empty for no VFX."))
+	TObjectPtr<UNiagaraSystem> DeathVFX;
+
+	/** Mesh socket/bone where the VFX is attached. None = actor root. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|VFX",
+		meta=(ToolTip="Mesh socket or bone the VFX attaches to. Leave None to spawn at the actor's root location."))
+	FName DeathVFXSocket = NAME_None;
+
+	/** Time before the death montage ends at which the VFX spawns AND the fade-out starts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|VFX", meta=(ClampMin="0",
+		ToolTip="VFX spawns this many seconds BEFORE the death montage ends. The fade-out starts at the same moment. e.g. 0.5 = halfway through the last second."))
+	float DeathVFXTimeBeforeEnd = 0.5f;
+
+	/** If true, the AI doesn't stay frozen on the ground — it dissolves smoothly. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|Fade",
+		meta=(ToolTip="Smoothly fade the AI out instead of leaving the corpse on the ground."))
+	bool bUseDeathFade = true;
+
+	/** How long the fade lasts. Starts at the same moment as the VFX. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|Fade", meta=(EditCondition="bUseDeathFade", ClampMin="0.05",
+		ToolTip="Total duration of the dissolve/fade-out, starting from the VFX trigger moment."))
+	float DeathFadeDuration = 1.0f;
+
+	/** Scalar parameter on the mesh material driven from 0→1 during the fade.
+	 *  Requires a dissolve-capable material (with a parameter of this name). If absent, the fallback (scale-down) is used. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|Fade", meta=(EditCondition="bUseDeathFade",
+		ToolTip="Material scalar parameter name driven 0→1 during the fade. Requires a dissolve material on the mesh. Common names: 'DissolveAmount', 'Dissolve', 'Opacity'."))
+	FName DeathDissolveParameterName = TEXT("DissolveAmount");
+
+	/** Optional sink-into-ground distance during the fade (cm). 0 = no sink. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|Fade", meta=(EditCondition="bUseDeathFade", ClampMin="0",
+		ToolTip="Distance the body sinks into the ground while fading. 0 = stays in place. ~50-100 cm gives a 'sinking corpse' effect."))
+	float DeathSinkDistance = 0.f;
+
+	/** If true, when no dissolve parameter is found, the actor is scaled down as a fallback so it still disappears smoothly. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Death|Fade", meta=(EditCondition="bUseDeathFade",
+		ToolTip="If your material doesn't have the dissolve parameter, scale the actor down to 0 instead. Always works, but visually less elegant."))
+	bool bUseScaleFallback = true;
+
 	/* ── Optimization ── */
 
 	/** Distance from the player at which this AI goes dormant (hidden, stops ticking). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="1000",
-		ToolTip="AI further than this from the player will be put to sleep to save performance."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="500",
+		ToolTip="AI further than this from the player will be put to sleep to save performance. AI within DormantDistance * 0.8 wakes up."))
 	float DormantDistance = 8000.f;
 
 	/** How often the dormancy distance is checked (seconds). Higher = less CPU but slower reaction. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="0.5",
-		ToolTip="Interval between dormancy checks. Lower = more responsive but slightly more expensive."))
-	float DormancyCheckInterval = 2.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="0.1",
+		ToolTip="Interval between dormancy checks. Lower = more responsive but slightly more expensive. Runs on a timer, NOT on Tick (so it works even while dormant)."))
+	float DormancyCheckInterval = 1.f;
+
+	/** If true, the AI starts dormant. Useful for AI placed far from the player's spawn point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization",
+		meta=(ToolTip="If true, this AI starts dormant on BeginPlay. The dormancy timer will wake it up when the player gets close enough."))
+	bool bStartDormant = false;
 
 	/* ── Detection Decal ── */
 
@@ -233,6 +322,11 @@ protected:
 		meta=(ToolTip="Draw debug sphere showing the pack alert radius."))
 	bool bShowDebugPack = false;
 
+	/** Show debug info for dormancy (sphere of DormantDistance, color-coded by state). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Debug",
+		meta=(ToolTip="Draw a sphere showing the dormancy radius. Green = active, red = dormant."))
+	bool bShowDebugDormancy = false;
+
 	/* ── Components ── */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIAnimationComponent> AIAnimationComponent;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAICombatComponent> AICombatComponent;
@@ -241,22 +335,52 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UDecalComponent> SightDecal;
 
 private:
+	/* ── Dormancy ── */
 	void UpdateDormancy();
+
+	/* ── Pack ── */
 	void UpdatePackFollow(float DeltaTime);
+
+	/* ── Respawn ── */
 	void HandleRespawnTimer();
 
-	/** Called by HealthComponent via OnTakeAnyDamage — routes to OnReceiveDamage. */
+	/* ── Death sequence ── */
+	void OnDeathVFXAndFadeStart();
+	void TickDeathFade(float DeltaTime);
+	void FinishDeathFade();
+	void ResetDeathVisuals();
+	void CacheMeshMaterials();
+
+	/* ── Damage routing ── */
 	UFUNCTION()
 	void HandleTakeAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
 		AController* InstigatedBy, AActor* DamageCauser);
 
+	/** Bound to HealthComponent::OnHealthChanged. Triggers Die() when HP hits 0. */
+	UFUNCTION()
+	void HandleHealthChanged(float NewHealth, float MaxHealth);
+
+#if ENABLE_DRAW_DEBUG
+	void DrawDebugDormancy() const;
+#endif
+
 	UPROPERTY() EAIState CurrentState = EAIState::Idle;
 	UPROPERTY() EAIAwarenessLevel AwarenessLevel = EAIAwarenessLevel::Unaware;
 	UPROPERTY() TObjectPtr<AActor> CurrentTarget;
+	UPROPERTY() TObjectPtr<UNiagaraComponent> SpawnedDeathVFX;
+	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> CachedDynamicMaterials;
+	UPROPERTY() TObjectPtr<UHealthComponent> CachedHealthComponent;
 
 	FVector SpawnLocation;
 	FRotator SpawnRotation;
+	FVector SpawnScale = FVector::OneVector;
+	FVector DeathStartLocation;
 	bool bIsDormant = false;
-	float DormancyTimer = 0.f;
+	bool bIsDeathFading = false;
+	bool bDissolveParamFound = false;
+	float DeathFadeProgress = 0.f;
+
+	FTimerHandle DormancyCheckTimerHandle;
 	FTimerHandle RespawnTimerHandle;
+	FTimerHandle DeathVFXTimerHandle;
 };
