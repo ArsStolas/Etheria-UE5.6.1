@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "AICombatComponent - Header"
  * Notes: Blueprint-driven combat. Fill the Attacks array, bind dispatchers in your BP.
  *        OnAttackHitWindow fires at the right moment for you to spawn VFX, projectiles,
@@ -72,6 +72,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI|Combat") float GetEffectiveAttackRange() const;
 	UFUNCTION(BlueprintPure, Category="AI|Combat") bool GetCurrentPhaseData(FAICombatPhaseData& OutData) const;
 
+	UFUNCTION(BlueprintPure, Category="AI|Combat") float GetPhaseDamageMultiplier() const;
+	UFUNCTION(BlueprintPure, Category="AI|Combat") float GetPhaseSpeedMultiplier() const;
+
 	/** Get the attack data for a specific index. Returns false if invalid. */
 	UFUNCTION(BlueprintPure, Category="AI|Combat")
 	bool GetAttackByIndex(int32 Index, FAIAttackData& OutAttack) const;
@@ -111,6 +114,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI|Combat") void ResetCombo();
 	UFUNCTION(BlueprintCallable, Category="AI|Combat") bool ExecuteRandomCombo();
 	UFUNCTION(BlueprintCallable, Category="AI|Combat") void InterruptAttack();
+	UFUNCTION(BlueprintCallable, Category="AI|Combat") bool TryInterruptCurrentAttack();
 	UFUNCTION(BlueprintCallable, Category="AI|Combat") void ApplyStagger(float Duration);
 	UFUNCTION(BlueprintCallable, Category="AI|Combat") void EnterCombat();
 	UFUNCTION(BlueprintCallable, Category="AI|Combat") void ExitCombat();
@@ -203,6 +207,10 @@ public:
 		meta=(ToolTip="Auto mode: hit window fires after HitWindowTime seconds. Manual mode: call ManualTriggerHitWindow from an AnimNotify."))
 	bool bUseAutoHitWindow = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Damage",
+		meta=(ToolTip="When ON, the hit window automatically applies the attack's BaseDamage to the current target if it's within Range and AttackArc. Turn OFF if you apply damage yourself from the OnAIAttackHitWindow event in Blueprint."))
+	bool bAutoApplyHitWindowDamage = true;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -211,9 +219,10 @@ private:
 	void TickCharge(float DeltaTime);
 	void TickStagger(float DeltaTime);
 	void TickAttack(float DeltaTime);
-	float GetPhaseDamageMultiplier() const;
 	float GetPhaseCooldownMultiplier() const;
 	void FireHitWindow();
+	bool HasPendingCombatWork() const;
+	bool IsTargetInHitZone(const AActor* Target, const FAIAttackData& Atk) const;
 
 	UPROPERTY() TObjectPtr<ABaseAICharacter> OwnerCharacter;
 

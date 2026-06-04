@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "AIMovementComponent - Source"
  * Notes: Spline points cached to world space at StartPatrol (fixes drift).
  *        FleeFrom uses perpendicular randomization to avoid getting stuck.
@@ -385,6 +385,7 @@ FVector UAIMovementComponent::GetRandomPointInZone() const
 void UAIMovementComponent::ApplySmoothAcceleration(float DeltaTime)
 {
 	if (!MovementComp) return;
+	if (FMath::IsNearlyEqual(MovementComp->MaxWalkSpeed, DesiredMaxSpeed, 0.5f)) return;
 	MovementComp->MaxWalkSpeed = FMath::FInterpTo(MovementComp->MaxWalkSpeed, DesiredMaxSpeed, DeltaTime, AccelerationInterpSpeed);
 }
 

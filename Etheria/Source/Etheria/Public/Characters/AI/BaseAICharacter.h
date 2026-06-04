@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "BaseAICharacter - Header"
  * Notes: Pack, respawn, dormancy (timer-based), detection decal, hit reactions,
  *        death VFX + dissolve fade, flee/fight-back.
@@ -67,6 +67,8 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDead() const { return CurrentState == EAIState::Dead; }
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDormant() const { return bIsDormant; }
 	UFUNCTION(BlueprintPure, Category="AI") bool OnlyDetectsPlayers() const { return bOnlyDetectPlayers; }
+
+	UFUNCTION(BlueprintPure, Category="AI") bool ShouldEngageTargets() const;
 	UFUNCTION(BlueprintPure, Category="AI") bool ShouldShowDebugPatrol() const { return bShowDebugPatrol; }
 	UFUNCTION(BlueprintPure, Category="AI|Damage") bool GetCanReceiveDamage() const { return bCanReceiveDamage; }
 
@@ -78,7 +80,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI") void SetHostilityType(EAIHostilityType NewType) { HostilityType = NewType; }
 
 	/** Toggle damage immunity at runtime. Useful for cutscenes, scripted moments, or boss invulnerability phases. */
-	UFUNCTION(BlueprintCallable, Category="AI|Damage") void SetCanReceiveDamage(bool bNewCanReceiveDamage) { bCanReceiveDamage = bNewCanReceiveDamage; }
+	UFUNCTION(BlueprintCallable, Category="AI|Damage") void SetCanReceiveDamage(bool bNewCanReceiveDamage);
 
 	/* ═══════════ Perception / Damage ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void OnPerceiveTarget(AActor* PerceivedActor);
@@ -165,6 +167,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0",
 		ToolTip="How far this AI can go from its spawn before it teleports back."))
 	float LeashRange = 2000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0.1",
+		ToolTip="Duration (seconds) of the stagger triggered after taking StaggerThreshold hits."))
+	float StaggerDuration = 1.f;
 
 	/** If true, the player can interact with this AI (talk, quest, trade). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
@@ -341,6 +347,8 @@ private:
 	/* ── Pack ── */
 	void UpdatePackFollow(float DeltaTime);
 
+	bool ReactToThreat(AActor* Threat, bool bFromDamage);
+
 	/* ── Respawn ── */
 	void HandleRespawnTimer();
 
@@ -367,6 +375,10 @@ private:
 	UPROPERTY() EAIState CurrentState = EAIState::Idle;
 	UPROPERTY() EAIAwarenessLevel AwarenessLevel = EAIAwarenessLevel::Unaware;
 	UPROPERTY() TObjectPtr<AActor> CurrentTarget;
+
+	mutable TWeakObjectPtr<ABaseAICharacter> CachedPackLeader;
+	mutable float PackLeaderCacheStamp = -1000.f;
+	static constexpr float PACK_LEADER_CACHE_TTL = 0.5f;
 	UPROPERTY() TObjectPtr<UNiagaraComponent> SpawnedDeathVFX;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> CachedDynamicMaterials;
 	UPROPERTY() TObjectPtr<UHealthComponent> CachedHealthComponent;

@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "BaseAICharacter - Source"
  * Notes: Connects to HealthComponent for hit reactions AND auto-Die() on HP=0.
  *        Dormancy is timer-driven (FTimerManager) so it works even when Tick is off.
@@ -91,7 +91,10 @@ void ABaseAICharacter::BeginPlay()
 	 *  We bind here so HP=0 → Die() automatically. */
 	CachedHealthComponent = FindComponentByClass<UHealthComponent>();
 	if (CachedHealthComponent)
+	{
 		CachedHealthComponent->OnHealthChanged.AddDynamic(this, &ABaseAICharacter::HandleHealthChanged);
+		CachedHealthComponent->SetInvulnerable(!bCanReceiveDamage);
+	}
 
 	/* ── Dormancy on a TIMER, not on Tick ──
 	 *  The previous design checked dormancy in Tick. But SetDormant() disables Tick when
@@ -171,10 +174,23 @@ void ABaseAICharacter::HandleTakeAnyDamage(AActor* DamagedActor, float Damage, c
 	OnReceiveDamage(DamageCauser, Damage);
 }
 
+void ABaseAICharacter::SetCanReceiveDamage(bool bNewCanReceiveDamage)
+{
+	bCanReceiveDamage = bNewCanReceiveDamage;
+	if (CachedHealthComponent)
+		CachedHealthComponent->SetInvulnerable(!bNewCanReceiveDamage);
+}
+
 void ABaseAICharacter::HandleHealthChanged(float NewHealth, float MaxHealth)
 {
 	if (NewHealth <= 0.f && CurrentState != EAIState::Dead)
+	{
 		Die();
+		return;
+	}
+
+	if (AICombatComponent && MaxHealth > 0.f)
+		AICombatComponent->EvaluatePhaseFromHP(NewHealth / MaxHealth);
 }
 
 /* ═══════════ State ═══════════ */
@@ -189,8 +205,11 @@ void ABaseAICharacter::SetAIState(EAIState NewState)
 
 	if (AICombatComponent)
 	{
-		const bool bNowInCombat = (NewState == EAIState::Attacking || NewState == EAIState::Chasing);
-		const bool bWasInCombat = (OldState == EAIState::Attacking || OldState == EAIState::Chasing);
+		auto IsCombatState = [](EAIState S)
+		{ return S == EAIState::Attacking || S == EAIState::Chasing || S == EAIState::Staggered; };
+
+		const bool bNowInCombat = IsCombatState(NewState);
+		const bool bWasInCombat = IsCombatState(OldState);
 
 		if (bNowInCombat && !AICombatComponent->IsInCombat()) AICombatComponent->EnterCombat();
 		else if (bWasInCombat && !bNowInCombat) AICombatComponent->ExitCombat();
@@ -217,7 +236,70 @@ void ABaseAICharacter::SetAwarenessLevel(EAIAwarenessLevel NewLevel)
 	OnAwarenessChanged.Broadcast(Old, NewLevel);
 }
 
-/* ═══════════ Perception ═══════════ */
+/* ═══════════ Perception / Threat Response ═══════════ */
+
+bool ABaseAICharacter::ShouldEngageTargets() const
+{
+	return HostilityType == EAIHostilityType::Aggressive
+		|| (HostilityType == EAIHostilityType::Neutral && bFightBackWhenAttacked);
+}
+
+bool ABaseAICharacter::ReactToThreat(AActor* Threat, bool bFromDamage)
+{
+	if (!Threat || CurrentState == EAIState::Dead || bIsDormant) return false;
+
+	const bool bAlreadyEngaging = (CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking);
+	const bool bAlreadyFleeing  = (CurrentState == EAIState::Fleeing);
+
+	const bool bWantsFight =
+		(HostilityType == EAIHostilityType::Aggressive) ||
+		(bFromDamage && HostilityType == EAIHostilityType::Neutral && bFightBackWhenAttacked);
+
+	bool bWantsFlee = false;
+	if (!bWantsFight && bCanFlee &&
+		(HostilityType == EAIHostilityType::Passive || HostilityType == EAIHostilityType::Neutral))
+	{
+		if (bFromDamage)
+		{
+			bWantsFlee = true;
+		}
+		else
+		{
+			bWantsFlee = (FleeFromTags.Num() == 0);
+			for (const FName& Tag : FleeFromTags)
+				if (Threat->ActorHasTag(Tag)) { bWantsFlee = true; break; }
+		}
+	}
+
+	if (bWantsFight)
+	{
+		if (bAlreadyEngaging) return false;
+		SetAwarenessLevel(EAIAwarenessLevel::InCombat);
+		SetTarget(Threat);
+		SetAIState(EAIState::Chasing);
+		if (AIMovementComponent)
+		{
+			AIMovementComponent->StopPatrol();
+			AIMovementComponent->SetDesiredSpeed(AIMovementComponent->ChaseSpeed);
+			AIMovementComponent->MoveToLocation(Threat->GetActorLocation());
+		}
+		if (PackID != NAME_None) AlertPack(Threat);
+		return true;
+	}
+
+	if (bWantsFlee)
+	{
+		if (bAlreadyFleeing) { SetTarget(Threat); return false; }
+		SetAwarenessLevel(EAIAwarenessLevel::Alert);
+		SetTarget(Threat);
+		SetAIState(EAIState::Fleeing);
+		if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(Threat); }
+		if (PackID != NAME_None) AlertPack(Threat);
+		return true;
+	}
+
+	return false;
+}
 
 void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 {
@@ -229,60 +311,7 @@ void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 		if (!P || !P->IsPlayerControlled()) return;
 	}
 
-	switch (HostilityType)
-	{
-	case EAIHostilityType::Passive:
-		if (bCanFlee && CurrentState != EAIState::Fleeing)
-		{
-			bool bShouldFlee = FleeFromTags.Num() == 0;
-			for (const FName& Tag : FleeFromTags)
-				if (PerceivedActor->ActorHasTag(Tag)) { bShouldFlee = true; break; }
-
-			if (bShouldFlee)
-			{
-				SetAwarenessLevel(EAIAwarenessLevel::Alert);
-				SetTarget(PerceivedActor);
-				SetAIState(EAIState::Fleeing);
-				if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(PerceivedActor); }
-				if (PackID != NAME_None) AlertPack(PerceivedActor);
-			}
-		}
-		break;
-
-	case EAIHostilityType::Neutral:
-		if (bCanFlee && CurrentState != EAIState::Fleeing && CurrentState != EAIState::Chasing && CurrentState != EAIState::Attacking)
-		{
-			bool bShouldFlee = FleeFromTags.Num() == 0;
-			for (const FName& Tag : FleeFromTags)
-				if (PerceivedActor->ActorHasTag(Tag)) { bShouldFlee = true; break; }
-
-			if (bShouldFlee)
-			{
-				SetAwarenessLevel(EAIAwarenessLevel::Alert);
-				SetTarget(PerceivedActor);
-				SetAIState(EAIState::Fleeing);
-				if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(PerceivedActor); }
-				if (PackID != NAME_None) AlertPack(PerceivedActor);
-			}
-		}
-		break;
-
-	case EAIHostilityType::Aggressive:
-		if (CurrentState != EAIState::Chasing && CurrentState != EAIState::Attacking)
-		{
-			SetAwarenessLevel(EAIAwarenessLevel::InCombat);
-			SetTarget(PerceivedActor);
-			SetAIState(EAIState::Chasing);
-			if (AIMovementComponent)
-			{
-				AIMovementComponent->StopPatrol();
-				AIMovementComponent->SetDesiredSpeed(AIMovementComponent->ChaseSpeed);
-				AIMovementComponent->MoveToLocation(PerceivedActor->GetActorLocation());
-			}
-			if (PackID != NAME_None) AlertPack(PerceivedActor);
-		}
-		break;
-	}
+	ReactToThreat(PerceivedActor, false);
 }
 
 void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmount)
@@ -291,44 +320,31 @@ void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmo
 
 	OnAIDamaged.Broadcast(DamageInstigator);
 
-	if (AIAnimationComponent) AIAnimationComponent->PlayHitReaction();
-
+	bool bStaggering = false;
 	if (AICombatComponent)
 	{
 		AICombatComponent->CurrentHitCount++;
 		if (AICombatComponent->CurrentHitCount >= AICombatComponent->StaggerThreshold)
-			AICombatComponent->ApplyStagger(1.f);
+			bStaggering = true;
 	}
 
-	if (HostilityType == EAIHostilityType::Neutral && DamageInstigator)
+	if (bStaggering && AICombatComponent)
 	{
-		if (bFightBackWhenAttacked)
-		{
-			SetAwarenessLevel(EAIAwarenessLevel::InCombat);
-			SetTarget(DamageInstigator);
-			SetAIState(EAIState::Chasing);
-			if (AIMovementComponent)
-			{
-				AIMovementComponent->StopPatrol();
-				AIMovementComponent->SetDesiredSpeed(AIMovementComponent->ChaseSpeed);
-				AIMovementComponent->MoveToLocation(DamageInstigator->GetActorLocation());
-			}
-			if (PackID != NAME_None) AlertPack(DamageInstigator);
-		}
-		else if (bCanFlee && CurrentState != EAIState::Fleeing)
-		{
-			SetTarget(DamageInstigator);
-			SetAIState(EAIState::Fleeing);
-			if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(DamageInstigator); }
-		}
+		AICombatComponent->ApplyStagger(StaggerDuration);
+	}
+	else if (AIAnimationComponent)
+	{
+		const bool bInterrupted = AICombatComponent ? AICombatComponent->TryInterruptCurrentAttack() : false;
+		const bool bUnderHyperArmor = AICombatComponent && AICombatComponent->IsAttacking() && !bInterrupted;
+		if (!bUnderHyperArmor)
+			AIAnimationComponent->PlayHitReaction();
 	}
 
-	if (HostilityType == EAIHostilityType::Passive && bCanFlee && DamageInstigator)
-	{
+	if (!DamageInstigator) return;
+	if (bStaggering)
 		SetTarget(DamageInstigator);
-		SetAIState(EAIState::Fleeing);
-		if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(DamageInstigator); }
-	}
+	else
+		ReactToThreat(DamageInstigator, true);
 }
 
 /* ═══════════ Pack ═══════════ */
@@ -358,11 +374,12 @@ TArray<ABaseAICharacter*> ABaseAICharacter::GetPackMembers() const
 	TArray<ABaseAICharacter*> Members;
 	if (PackID == NAME_None) return Members;
 	const FVector MyLoc = GetActorLocation();
+	const float RadiusSq = PackAlertRadius * PackAlertRadius;
 	for (TActorIterator<ABaseAICharacter> It(GetWorld()); It; ++It)
 	{
 		ABaseAICharacter* O = *It;
 		if (O == this || O->GetPackID() != PackID || O->IsDead()) continue;
-		if (FVector::Dist(MyLoc, O->GetActorLocation()) <= PackAlertRadius) Members.Add(O);
+		if (FVector::DistSquared(MyLoc, O->GetActorLocation()) <= RadiusSq) Members.Add(O);
 	}
 	return Members;
 }
@@ -370,6 +387,16 @@ TArray<ABaseAICharacter*> ABaseAICharacter::GetPackMembers() const
 ABaseAICharacter* ABaseAICharacter::GetPackLeader() const
 {
 	if (PackID == NAME_None) return nullptr;
+
+	const UWorld* W = GetWorld();
+	const float Now = W ? W->GetTimeSeconds() : 0.f;
+	if (CachedPackLeader.IsValid() && !CachedPackLeader->IsDead()
+		&& CachedPackLeader->GetPackID() == PackID
+		&& (Now - PackLeaderCacheStamp) < PACK_LEADER_CACHE_TTL)
+	{
+		return CachedPackLeader.Get();
+	}
+
 	ABaseAICharacter* Leader = nullptr;
 	for (TActorIterator<ABaseAICharacter> It(GetWorld()); It; ++It)
 	{
@@ -377,6 +404,9 @@ ABaseAICharacter* ABaseAICharacter::GetPackLeader() const
 		if (O->GetPackID() != PackID || O->IsDead()) continue;
 		if (!Leader || O->GetUniqueID() < Leader->GetUniqueID()) Leader = O;
 	}
+
+	CachedPackLeader = Leader;
+	PackLeaderCacheStamp = Now;
 	return Leader;
 }
 
@@ -387,8 +417,8 @@ void ABaseAICharacter::UpdatePackFollow(float DeltaTime)
 	ABaseAICharacter* Leader = GetPackLeader();
 	if (!Leader || Leader == this) return;
 
-	const float Dist = FVector::Dist(GetActorLocation(), Leader->GetActorLocation());
-	if (Dist > PackFollowDistance + PackSpreadRadius && AIMovementComponent)
+	const float FollowThreshold = PackFollowDistance + PackSpreadRadius;
+	if (FVector::DistSquared(GetActorLocation(), Leader->GetActorLocation()) > FollowThreshold * FollowThreshold && AIMovementComponent)
 	{
 		const FVector DirToLeader = (Leader->GetActorLocation() - GetActorLocation()).GetSafeNormal();
 		const FVector RandOffset = FMath::VRand().GetSafeNormal2D() * FMath::FRandRange(0.f, PackSpreadRadius);
@@ -412,7 +442,7 @@ void ABaseAICharacter::TeleportToSpawn()
 	SetActorHiddenInGame(false);
 
 	SetAwarenessLevel(EAIAwarenessLevel::Unaware);
-	CurrentState = EAIState::Idle;
+	SetAIState(EAIState::Idle);
 
 	if (AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
 	{
@@ -624,7 +654,7 @@ void ABaseAICharacter::Respawn()
 	if (CachedHealthComponent) CachedHealthComponent->ResetHealth();
 
 	SetAwarenessLevel(EAIAwarenessLevel::Unaware);
-	CurrentState = EAIState::Idle;
+	SetAIState(EAIState::Idle);
 
 	if (AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
 	{
@@ -682,14 +712,16 @@ void ABaseAICharacter::UpdateDormancy()
 	const APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PC || !PC->GetPawn()) return;
 
-	const float Dist = FVector::Dist(GetActorLocation(), PC->GetPawn()->GetActorLocation());
+	const float DistSq = FVector::DistSquared(GetActorLocation(), PC->GetPawn()->GetActorLocation());
 
 	// Hysteresis prevents rapid toggling at the boundary:
 	//   sleep when further than DormantDistance,
 	//   wake when closer than DormantDistance * 0.8 (so we need to come ~20% inside).
-	if (!bIsDormant && Dist > DormantDistance)
+	const float SleepSq = DormantDistance * DormantDistance;
+	const float WakeSq  = (DormantDistance * 0.8f) * (DormantDistance * 0.8f);
+	if (!bIsDormant && DistSq > SleepSq)
 		SetDormant(true);
-	else if (bIsDormant && Dist < DormantDistance * 0.8f)
+	else if (bIsDormant && DistSq < WakeSq)
 		SetDormant(false);
 }
 

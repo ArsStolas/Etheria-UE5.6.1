@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "BaseAIController - Header"
  * Notes: State machine, perception, robust flee, idle variation respect.
  *        Initial patrol kickoff is deferred via timer so it runs AFTER the character's
@@ -65,6 +65,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat") float AttackCooldown = 1.5f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="Rotation interpolation speed toward target. Lower = smoother.")) float FaceTargetRotationSpeed = 8.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Range", meta=(ClampMin="0.3", ClampMax="1.0",
+		ToolTip="Fraction of attack range the AI closes to before attacking. 0.85 = stop at 85% of range, comfortably inside."))
+	float CombatEngageRangeRatio = 0.85f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Range", meta=(ClampMin="1.05", ClampMax="3.0",
+		ToolTip="How far past attack range the AI keeps re-approaching before switching back to a full chase."))
+	float CombatDisengageRangeRatio = 1.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(EditCondition="bStrafeInCombat", ClampMin="50",
+		ToolTip="How far sideways the AI steps when strafing around its target."))
+	float StrafeRadius = 200.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle") float IdleAnimInterval = 5.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle", meta=(ClampMin="0")) float IdleAnimRandomDeviation = 3.f;
 
@@ -82,6 +94,9 @@ private:
 	void CheckProximityDetection();
 	void DrawDebugPerception() const;
 	float GetEffectiveAttackRange() const;
+
+	float GetChaseSpeed() const;
+	void ApproachTarget(AActor* Target, float DesiredDistance);
 
 	/** Deferred patrol kickoff. Called via timer after OnPossess so the character has finished its own BeginPlay. */
 	void TryStartInitialPatrol();

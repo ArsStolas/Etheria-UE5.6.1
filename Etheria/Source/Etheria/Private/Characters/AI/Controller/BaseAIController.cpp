@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "BaseAIController - Source"
  * Notes: HandleFleeState uses FleePanicRadius for urgent re-evaluation.
  *        When threat is close, AI recalculates flee direction every tick.
@@ -185,6 +185,8 @@ void ABaseAIController::CheckProximityDetection()
 	GetWorld()->OverlapMultiByObjectType(Overlaps, MyLoc, FQuat::Identity,
 		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn), Sphere, Params);
 
+	AActor* Nearest = nullptr;
+	float NearestDistSq = TNumericLimits<float>::Max();
 	for (const FOverlapResult& O : Overlaps)
 	{
 		AActor* Hit = O.GetActor();
@@ -192,18 +194,20 @@ void ABaseAIController::CheckProximityDetection()
 		if (AICharacter->OnlyDetectsPlayers())
 		{ APawn* P = Cast<APawn>(Hit); if (!P || !P->IsPlayerControlled()) continue; }
 
-		// If already fleeing, don't re-trigger OnPerceiveTarget (it would early-return anyway)
-		// Instead, ensure the target is set so HandleFleeState can use it
-		if (AICharacter->GetCurrentAIState() == EAIState::Fleeing)
-		{
-			if (!AICharacter->GetCurrentTarget())
-				AICharacter->SetTarget(Hit);
-		}
-		else
-		{
-			AICharacter->OnPerceiveTarget(Hit);
-		}
-		break;
+		const float DSq = FVector::DistSquared(MyLoc, Hit->GetActorLocation());
+		if (DSq < NearestDistSq) { NearestDistSq = DSq; Nearest = Hit; }
+	}
+
+	if (!Nearest) return;
+
+	if (AICharacter->GetCurrentAIState() == EAIState::Fleeing)
+	{
+		if (!AICharacter->GetCurrentTarget())
+			AICharacter->SetTarget(Nearest);
+	}
+	else
+	{
+		AICharacter->OnPerceiveTarget(Nearest);
 	}
 }
 
@@ -216,9 +220,33 @@ float ABaseAIController::GetEffectiveAttackRange() const
 	return AttackRange;
 }
 
+float ABaseAIController::GetChaseSpeed() const
+{
+	float Speed = AICharacter->GetAIMovement() ? AICharacter->GetAIMovement()->ChaseSpeed : 500.f;
+	if (const UAICombatComponent* C = AICharacter->GetAICombat())
+		Speed *= C->GetPhaseSpeedMultiplier();
+	return Speed;
+}
+
+void ABaseAIController::ApproachTarget(AActor* Target, float DesiredDistance)
+{
+	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+	if (!MC || !Target) return;
+
+	const FVector MyLoc = AICharacter->GetActorLocation();
+	const FVector TgtLoc = Target->GetActorLocation();
+	FVector Away = (MyLoc - TgtLoc).GetSafeNormal2D();
+	if (Away.IsNearlyZero()) Away = AICharacter->GetActorForwardVector();
+
+	const FVector Standoff = TgtLoc + Away * FMath::Max(DesiredDistance, 0.f);
+	MC->SetDesiredSpeed(GetChaseSpeed());
+	MC->MoveToLocation(Standoff);
+}
+
 bool ABaseAIController::CheckLeashAndTeleport()
 {
-	if (FVector::Dist(AICharacter->GetActorLocation(), SpawnOrigin) > AICharacter->GetLeashRange())
+	const float Leash = AICharacter->GetLeashRange();
+	if (FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > Leash * Leash)
 	{ AICharacter->TeleportToSpawn(); return true; }
 	return false;
 }
@@ -260,8 +288,10 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 	if (!Target) { AICharacter->SetAIState(EAIState::Returning); return; }
 	if (CheckLeashAndTeleport()) return;
 
+	const float Range = GetEffectiveAttackRange();
 	const float Dist = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
-	if (Dist <= GetEffectiveAttackRange())
+
+	if (Dist <= Range * CombatEngageRangeRatio)
 	{
 		AICharacter->SetAIState(EAIState::Attacking);
 		if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
@@ -269,7 +299,7 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 	}
 
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-	{ MC->SetDesiredSpeed(MC->ChaseSpeed); MC->MoveToLocation(Target->GetActorLocation()); }
+	{ MC->SetDesiredSpeed(GetChaseSpeed()); MC->MoveToLocation(Target->GetActorLocation()); }
 }
 
 void ABaseAIController::HandleAttackState(float DeltaTime)
@@ -277,30 +307,51 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 	AActor* Target = AICharacter->GetCurrentTarget();
 	if (!Target) { AICharacter->SetAIState(EAIState::Returning); return; }
 
-	const float Dist = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
-	if (Dist > GetEffectiveAttackRange() * 1.3f) { AICharacter->SetAIState(EAIState::Chasing); return; }
+	const float Range = GetEffectiveAttackRange();
+	const float Dist  = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+
+	if (Dist > Range * CombatDisengageRangeRatio) { AICharacter->SetAIState(EAIState::Chasing); return; }
 
 	FaceTargetYawOnly(Target, DeltaTime);
 
 	UAICombatComponent* Combat = AICharacter->GetAICombat();
+	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+
 	if (Combat && Combat->GetAttacks().Num() > 0)
 	{
-		if (!Combat->IsAttacking() && !Combat->IsCharging() && !Combat->IsStaggered())
-			Combat->ExecuteRandomAttack(Dist);
+		if (Combat->IsAttacking() || Combat->IsCharging() || Combat->IsStaggered())
+			return;
 
-		if (bStrafeInCombat && !Combat->IsAttacking())
+		const bool bInRange = (Dist <= Range);
+		const bool bFired = bInRange && Combat->ExecuteRandomAttack(Dist);
+
+		if (bFired)
 		{
-			StrafeTimer -= DeltaTime;
-			if (StrafeTimer <= 0.f) { StrafeTimer = StrafeDirectionChangeInterval + FMath::FRandRange(-0.5f, 0.5f); StrafeDirection *= -1; }
-			if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-			{ MC->SetDesiredSpeed(MC->PatrolSpeed * 0.8f); MC->MoveToLocation(AICharacter->GetActorLocation() + AICharacter->GetActorRightVector() * StrafeDirection * 200.f); }
+			if (!bStrafeInCombat && MC) MC->StopMovement();
+		}
+		else if (bInRange && Combat->GetGlobalCooldownRemaining() > 0.f)
+		{
+			if (bStrafeInCombat && MC)
+			{
+				StrafeTimer -= DeltaTime;
+				if (StrafeTimer <= 0.f) { StrafeTimer = StrafeDirectionChangeInterval + FMath::FRandRange(-0.5f, 0.5f); StrafeDirection *= -1; }
+				MC->SetDesiredSpeed(MC->PatrolSpeed * 0.8f);
+				MC->MoveToLocation(AICharacter->GetActorLocation() + AICharacter->GetActorRightVector() * StrafeDirection * StrafeRadius);
+			}
+			else if (MC)
+			{
+				MC->StopMovement();
+			}
+		}
+		else if (MC)
+		{
+			ApproachTarget(Target, Range * CombatEngageRangeRatio);
 		}
 	}
-	else
+	else if (MC)
 	{
-		AttackTimer -= DeltaTime;
-		if (AttackTimer <= 0.f)
-		{ AttackTimer = AttackCooldown; if (UAIAnimationComponent* A = AICharacter->GetAIAnimation()) A->PlayRandomAttack(); }
+		if (Dist > Range) ApproachTarget(Target, Range * CombatEngageRangeRatio);
+		else MC->StopMovement();
 	}
 }
 
@@ -365,8 +416,10 @@ void ABaseAIController::HandleStaggerState(float DeltaTime)
 	UAICombatComponent* C = AICharacter->GetAICombat();
 	if (!C || !C->IsStaggered())
 	{
-		if (AICharacter->GetCurrentTarget()) AICharacter->SetAIState(EAIState::Chasing);
-		else AICharacter->SetAIState(EAIState::Returning);
+		if (AICharacter->GetCurrentTarget() && AICharacter->ShouldEngageTargets())
+			AICharacter->SetAIState(EAIState::Chasing);
+		else
+			AICharacter->SetAIState(EAIState::Returning);
 	}
 }
 

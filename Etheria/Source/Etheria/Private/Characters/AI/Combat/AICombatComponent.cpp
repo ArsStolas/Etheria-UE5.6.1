@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "AICombatComponent - Source"
  * Notes: ExecuteAttack plays the montage and starts a hit window timer.
  *        OnAttackHitWindow fires at HitWindowTime — bind this in BP to do damage/VFX/projectiles.
@@ -13,6 +13,10 @@
 #include "Characters/AI/BaseAICharacter.h"
 #include "Characters/AI/Animations/AIAnimationComponent.h"
 #include "Animation/AnimMontage.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/DamageType.h"
+#include "Components/CapsuleComponent.h"
+#include "Kismet/GameplayStatics.h"
 
 UAICombatComponent::UAICombatComponent() { PrimaryComponentTick.bCanEverTick = true; }
 
@@ -25,6 +29,9 @@ void UAICombatComponent::BeginPlay()
 void UAICombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (!HasPendingCombatWork()) return;
+
 	TickCooldowns(DeltaTime);
 	TickCharge(DeltaTime);
 	TickStagger(DeltaTime);
@@ -35,6 +42,16 @@ void UAICombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		ComboWindowTimer -= DeltaTime;
 		if (ComboWindowTimer <= 0.f) ResetCombo();
 	}
+}
+
+bool UAICombatComponent::HasPendingCombatWork() const
+{
+	if (bIsAttacking || bIsCharging || bIsStaggered) return true;
+	if (GlobalCooldownTimer > 0.f) return true;
+	if (CurrentComboIndex >= 0) return true;
+	for (const FAIAttackData& A : Attacks)
+		if (A.CurrentCooldown > 0.f) return true;
+	return false;
 }
 
 /* ═══════════ Getters ═══════════ */
@@ -48,17 +65,16 @@ float UAICombatComponent::GetChargePercent() const
 
 float UAICombatComponent::GetEffectiveAttackRange() const
 {
+	float MaxAttack = 0.f;
+	for (const FAIAttackData& A : Attacks)
+		if (A.AttackMontage) MaxAttack = FMath::Max(MaxAttack, A.Range);
+	if (MaxAttack > 0.f) return MaxAttack;
+
 	switch (CombatStyle)
 	{
 	case EAICombatStyle::Melee:  return MeleeRange;
 	case EAICombatStyle::Ranged: return RangedRange;
-	case EAICombatStyle::Hybrid:
-	{
-		float Max = MeleeRange;
-		for (const FAIAttackData& A : Attacks)
-			if (A.CurrentCooldown <= 0.f) Max = FMath::Max(Max, A.Range);
-		return Max;
-	}
+	case EAICombatStyle::Hybrid: return FMath::Max(MeleeRange, RangedRange);
 	}
 	return MeleeRange;
 }
@@ -142,6 +158,8 @@ bool UAICombatComponent::ExecuteAttack(int32 AttackIndex)
 {
 	if (!Attacks.IsValidIndex(AttackIndex) || !OwnerCharacter) return false;
 
+	if (bIsAttacking) return false;
+
 	FAIAttackData& Atk = Attacks[AttackIndex];
 	if (!Atk.AttackMontage) return false;
 
@@ -200,10 +218,43 @@ void UAICombatComponent::FireHitWindow()
 	if (!Attacks.IsValidIndex(CurrentAttackIndex) || !OwnerCharacter) return;
 
 	bHitWindowFired = true;
+	const FAIAttackData& Atk = Attacks[CurrentAttackIndex];
 	AActor* Target = OwnerCharacter->GetCurrentTarget();
 
-	// THIS IS THE KEY EVENT — Blueprint binds here to do damage, spawn VFX, projectiles, AoE, etc.
-	OnAIAttackHitWindow.Broadcast(Attacks[CurrentAttackIndex], CurrentAttackIndex, Target);
+	if (bAutoApplyHitWindowDamage && Target && Atk.BaseDamage > 0.f && IsTargetInHitZone(Target, Atk))
+	{
+		const float Damage = Atk.BaseDamage * GetPhaseDamageMultiplier();
+		UGameplayStatics::ApplyDamage(Target, Damage, OwnerCharacter->GetController(), OwnerCharacter, UDamageType::StaticClass());
+	}
+
+	OnAIAttackHitWindow.Broadcast(Atk, CurrentAttackIndex, Target);
+}
+
+bool UAICombatComponent::IsTargetInHitZone(const AActor* Target, const FAIAttackData& Atk) const
+{
+	if (!Target || !OwnerCharacter) return false;
+
+	const FVector OwnerLoc = OwnerCharacter->GetActorLocation();
+	const FVector TgtLoc = Target->GetActorLocation();
+
+	float Reach = Atk.Range;
+	if (const ACharacter* C = Cast<ACharacter>(Target))
+		if (const UCapsuleComponent* Cap = C->GetCapsuleComponent())
+			Reach += Cap->GetScaledCapsuleRadius();
+
+	if (FVector::DistSquared2D(OwnerLoc, TgtLoc) > Reach * Reach)
+		return false;
+
+	if (Atk.AttackArc >= 360.f)
+		return true;
+
+	const FVector ToTarget = (TgtLoc - OwnerLoc).GetSafeNormal2D();
+	if (ToTarget.IsNearlyZero())
+		return true;
+
+	const float Dot = FVector::DotProduct(OwnerCharacter->GetActorForwardVector().GetSafeNormal2D(), ToTarget);
+	const float HalfArcCos = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(Atk.AttackArc, 0.f, 360.f) * 0.5f));
+	return Dot >= HalfArcCos;
 }
 
 /* ═══════════ Charge ═══════════ */
@@ -286,6 +337,15 @@ void UAICombatComponent::InterruptAttack()
 	if (CurrentComboIndex >= 0) ResetCombo();
 }
 
+bool UAICombatComponent::TryInterruptCurrentAttack()
+{
+	if (!bIsAttacking) return false;
+	if (Attacks.IsValidIndex(CurrentAttackIndex) && !Attacks[CurrentAttackIndex].bCanInterrupt)
+		return false;
+	InterruptAttack();
+	return true;
+}
+
 void UAICombatComponent::ApplyStagger(float Duration)
 {
 	InterruptAttack();
@@ -293,6 +353,9 @@ void UAICombatComponent::ApplyStagger(float Duration)
 	bIsStaggered = true;
 	StaggerTimer = Duration;
 	CurrentHitCount = 0;
+
+	if (OwnerCharacter && !OwnerCharacter->IsDead())
+		OwnerCharacter->SetAIState(EAIState::Staggered);
 
 	if (OwnerCharacter && StaggerMontage)
 		if (UAIAnimationComponent* AnimComp = OwnerCharacter->GetAIAnimation())
@@ -391,3 +454,4 @@ void UAICombatComponent::TickAttack(float DeltaTime)
 
 float UAICombatComponent::GetPhaseDamageMultiplier() const { FAICombatPhaseData D; return GetCurrentPhaseData(D) ? D.DamageMultiplier : 1.f; }
 float UAICombatComponent::GetPhaseCooldownMultiplier() const { FAICombatPhaseData D; return GetCurrentPhaseData(D) ? D.CooldownMultiplier : 1.f; }
+float UAICombatComponent::GetPhaseSpeedMultiplier() const { FAICombatPhaseData D; return GetCurrentPhaseData(D) ? D.SpeedMultiplier : 1.f; }
