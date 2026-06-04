@@ -8,6 +8,7 @@
 #include "Characters/Players/PlayerCharacter.h"
 
 #include "CableComponent.h"
+#include "Components/ActorComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -142,6 +143,8 @@ void APlayerCharacter::BeginPlay()
             RopeStartSocketName
         );
     }
+
+    ApplyRopeSystemEnabled();
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
@@ -307,6 +310,74 @@ bool APlayerCharacter::IsGrounded() const
     return bHit;
 }
 
+void APlayerCharacter::SetRopeSystemEnabled(bool bEnabled)
+{
+    bEnableRopeSystem = bEnabled;
+    ApplyRopeSystemEnabled();
+}
+
+void APlayerCharacter::ApplyRopeSystemEnabled()
+{
+    if (!bEnableRopeSystem)
+    {
+        if (RopeLengthControllerComponent)
+        {
+            RopeLengthControllerComponent->SetRopeLengthInput(0.f);
+        }
+
+        if (RopeSwingComponent && RopeSwingComponent->IsSwinging())
+        {
+            RopeSwingComponent->StopSwing(true);
+        }
+
+        if (RopeLockComponent)
+        {
+            RopeLockComponent->Unlock();
+        }
+
+        if (RopeAttachComponent && RopeAttachComponent->IsAttached())
+        {
+            RopeAttachComponent->DetachRope();
+        }
+
+        if (StateComponent && StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope))
+        {
+            StateComponent->SetMovementState(EtheriaTags::State_Movement_Rope_Detached);
+        }
+    }
+
+    const auto SetRopeComponentEnabled = [this](UActorComponent* Component, bool bTickWhenEnabled)
+    {
+        if (!Component)
+        {
+            return;
+        }
+
+        Component->SetActive(bEnableRopeSystem);
+        Component->SetComponentTickEnabled(bEnableRopeSystem && bTickWhenEnabled);
+    };
+
+    if (RopeCableComponent)
+    {
+        RopeCableComponent->SetActive(bEnableRopeSystem);
+        RopeCableComponent->SetComponentTickEnabled(bEnableRopeSystem);
+
+        if (!bEnableRopeSystem)
+        {
+            RopeCableComponent->SetVisibility(false);
+        }
+    }
+
+    SetRopeComponentEnabled(RopeDetectionComponent, true);
+    SetRopeComponentEnabled(RopeLockComponent, false);
+    SetRopeComponentEnabled(RopeAttachComponent, false);
+    SetRopeComponentEnabled(RopeConstraintComponent, false);
+    SetRopeComponentEnabled(RopeSwingComponent, false);
+    SetRopeComponentEnabled(RopeLengthControllerComponent, false);
+    SetRopeComponentEnabled(RopeCameraComponent, false);
+    SetRopeComponentEnabled(RopePullComponent, false);
+}
+
 #pragma endregion
 
 #pragma region AIMING
@@ -456,7 +527,7 @@ void APlayerCharacter::OnJumpPressed()
     // ROPE JUMP HANDLING
     // ===============================
 
-    if (RopeSwingComponent && RopeSwingComponent->IsSwinging())
+    if (bEnableRopeSystem && RopeSwingComponent && RopeSwingComponent->IsSwinging())
     {
         FVector LaunchVelocity;
 
@@ -567,7 +638,7 @@ void APlayerCharacter::HandleMovementInput()
 {
     if (!Controller) return;
     
-    if (RopeSwingComponent && RopeSwingComponent->IsSwinging())
+    if (bEnableRopeSystem && RopeSwingComponent && RopeSwingComponent->IsSwinging())
     {
         UE_LOG(LogTemp, VeryVerbose, TEXT("Swinging - skipping normal movement input"));
         return;
@@ -696,7 +767,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 
 void APlayerCharacter::ToggleGlideMode()
 {
-    if (!FlightComponent || RopeAttachComponent->IsAttached()) return;
+    if (!FlightComponent || (bEnableRopeSystem && RopeAttachComponent && RopeAttachComponent->IsAttached())) return;
 
     if (FlightComponent->IsInMode(EFlightMode::Glide))
     {
@@ -715,7 +786,7 @@ void APlayerCharacter::ToggleGlideMode()
 
 void APlayerCharacter::ToggleDiveMode()
 {
-    if (!FlightComponent || RopeAttachComponent->IsAttached()) return;
+    if (!FlightComponent || (bEnableRopeSystem && RopeAttachComponent && RopeAttachComponent->IsAttached())) return;
 
     if (FlightComponent->IsInMode(EFlightMode::Dive))
     {
@@ -1002,6 +1073,7 @@ void APlayerCharacter::Input_Interact()
 
 void APlayerCharacter::OnRopeAttachPressed()
 {
+    if (!bEnableRopeSystem) return;
     if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
 
     if (RopeAttachComponent->IsAttached())
@@ -1026,6 +1098,7 @@ void APlayerCharacter::OnRopeAttachPressed()
 
 void APlayerCharacter::CheckRopeAttachMode()
 {
+    if (!bEnableRopeSystem) return;
     if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
 
     ARopeAttachPoint* LockedPoint = RopeLockComponent->GetLockedPoint();
@@ -1049,6 +1122,8 @@ void APlayerCharacter::CheckRopeAttachMode()
 
 void APlayerCharacter::RopeLengthInput(const FInputActionValue& Value)
 {
+    if (!bEnableRopeSystem) return;
+
     const float AxisVal = Value.Get<float>();
 
     if (!RopeAttachComponent || !RopeAttachComponent->IsAttached())
@@ -1079,6 +1154,8 @@ void APlayerCharacter::RopeLengthInput(const FInputActionValue& Value)
 
 void APlayerCharacter::StopRopeLengthInput(const FInputActionValue& Value)
 {
+    if (!bEnableRopeSystem) return;
+
     if (RopeLengthControllerComponent)
         RopeLengthControllerComponent->SetRopeLengthInput(0.f);
 }

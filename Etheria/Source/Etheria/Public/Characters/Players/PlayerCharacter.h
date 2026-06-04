@@ -85,10 +85,14 @@ public:
     FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
     FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
     FORCEINLINE URopePullComponent* GetRopePullComponent() const { return RopePullComponent; }
+    FORCEINLINE bool IsRopeSystemEnabled() const { return bEnableRopeSystem; }
     FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
     FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
     FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
     
+    UFUNCTION(BlueprintCallable, Category = "Rope")
+    void SetRopeSystemEnabled(bool bEnabled);
+
     // Simple accessor
     bool IsGrounded() const;
     
@@ -128,6 +132,9 @@ protected:
     ULockVisualComponent* LockVisualComponent;
 
     // --- ROPE ---
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rope")
+    bool bEnableRopeSystem = true;
     
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
     UCableComponent* RopeCableComponent;
@@ -354,6 +361,7 @@ private:
     UFUNCTION() void Input_Interact();
 
     // --- Rope ---
+    void ApplyRopeSystemEnabled();
     void OnRopeAttachPressed();
     void CheckRopeAttachMode();
     void RopeLengthInput(const FInputActionValue& Value);
