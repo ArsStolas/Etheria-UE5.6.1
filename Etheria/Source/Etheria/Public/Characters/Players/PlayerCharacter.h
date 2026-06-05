@@ -93,6 +93,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Rope")
     void SetRopeSystemEnabled(bool bEnabled);
 
+    UFUNCTION(BlueprintPure, Category = "Grapple")
+    bool IsInGrapplingAnimation() const { return bInGrapplingAnimation; }
+
+    UFUNCTION(BlueprintCallable, Category = "Grapple")
+    void SetInGrapplingAnimation(bool bInAnimation) { bInGrapplingAnimation = bInAnimation; }
+
     // Simple accessor
     bool IsGrounded() const;
     
@@ -131,6 +137,11 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Combat|LockTarget", meta=(AllowPrivateAccess="true"))
     ULockVisualComponent* LockVisualComponent;
 
+    // --- GRAPPLE ---
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grapple")
+    bool bInGrapplingAnimation = false;
+    
     // --- ROPE ---
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rope")
@@ -325,6 +336,7 @@ private:
     void OnJumpPressed();                              virtual void Landed(const FHitResult&) override;
 
     // --- Movement State ---
+    bool IsGrapplingAnimationLocked() const;
     void HandleMovementInput();
     void UpdateMovementState();
     void HandleAirborneState();

@@ -150,6 +150,11 @@ void APlayerCharacter::BeginPlay()
 void APlayerCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+
+    if (bInGrapplingAnimation && StateComponent)
+    {
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_IsGrappling);
+    }
     
     HandleMovementInput();
     UpdateMovementState();
@@ -310,6 +315,11 @@ bool APlayerCharacter::IsGrounded() const
     return bHit;
 }
 
+bool APlayerCharacter::IsGrapplingAnimationLocked() const
+{
+    return bInGrapplingAnimation;
+}
+
 void APlayerCharacter::SetRopeSystemEnabled(bool bEnabled)
 {
     bEnableRopeSystem = bEnabled;
@@ -461,6 +471,7 @@ void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal
     
 void APlayerCharacter::StartSprint()
 {
+    if (IsGrapplingAnimationLocked()) return;
     if (!StateComponent) return;
     
     if (SwimComponent && SwimComponent->IsSwimmingActive())
@@ -514,6 +525,8 @@ void APlayerCharacter::StopSprint()
 
 void APlayerCharacter::OnJumpPressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!CombatComponent)
     {
         Jump();
@@ -585,6 +598,8 @@ void APlayerCharacter::Landed(const FHitResult& Hit)
 {
     Super::Landed(Hit);
 
+    if (IsGrapplingAnimationLocked()) return;
+
     if (UCharacterStateComponent* StateComp = GetStateComponent())
     {
         if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
@@ -598,6 +613,8 @@ void APlayerCharacter::Landed(const FHitResult& Hit)
 
 void APlayerCharacter::OnCrouchPressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!CombatComponent) { Crouch(); return; }
     if (CombatComponent->IsCrouchBlocked()) return;
     if (CombatComponent->IsAttackActive()) return;
@@ -619,6 +636,8 @@ void APlayerCharacter::StopCrouch()
 {
     UnCrouch();
 
+    if (IsGrapplingAnimationLocked()) return;
+
     if (StateComponent)
     {
         if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
@@ -637,6 +656,8 @@ void APlayerCharacter::StopCrouch()
 void APlayerCharacter::HandleMovementInput()
 {
     if (!Controller) return;
+
+    if (IsGrapplingAnimationLocked()) return;
     
     if (bEnableRopeSystem && RopeSwingComponent && RopeSwingComponent->IsSwinging())
     {
@@ -663,6 +684,17 @@ void APlayerCharacter::UpdateMovementState()
     if (!StateComponent || !GetCharacterMovement()) return;
 
     UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+
+    if (bInGrapplingAnimation)
+    {
+        if (MoveComp->MaxWalkSpeed == SprintSpeed)
+        {
+            MoveComp->MaxWalkSpeed = WalkSpeed;
+        }
+
+        StateComponent->SetMovementState(EtheriaTags::State_Movement_IsGrappling);
+        return;
+    }
 
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope) &&
         !StateComponent->IsInMovementState(EtheriaTags::State_Movement_Rope_Detached))
@@ -767,6 +799,8 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 
 void APlayerCharacter::ToggleGlideMode()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!FlightComponent || (bEnableRopeSystem && RopeAttachComponent && RopeAttachComponent->IsAttached())) return;
 
     if (FlightComponent->IsInMode(EFlightMode::Glide))
@@ -786,6 +820,8 @@ void APlayerCharacter::ToggleGlideMode()
 
 void APlayerCharacter::ToggleDiveMode()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!FlightComponent || (bEnableRopeSystem && RopeAttachComponent && RopeAttachComponent->IsAttached())) return;
 
     if (FlightComponent->IsInMode(EFlightMode::Dive))
@@ -815,24 +851,32 @@ void APlayerCharacter::AlignToCamera()
 #pragma region "FLIGHT MODE HANDLERS"
 void APlayerCharacter::OnGlideStart()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (StateComponent)
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Gliding);
 }
 
 void APlayerCharacter::OnGlideStop()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (StateComponent)
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
 }
 
 void APlayerCharacter::OnDiveStart()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (StateComponent)
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Diving);
 }
 
 void APlayerCharacter::OnDiveStop()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (StateComponent)
         StateComponent->SetMovementState(EtheriaTags::State_Movement_Airborne_Falling);
 }
@@ -842,6 +886,8 @@ void APlayerCharacter::OnDiveStop()
 
 void APlayerCharacter::OnAttackLightPressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!CombatComponent || !StateComponent) return;
 
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
@@ -876,6 +922,8 @@ void APlayerCharacter::OnAttackLightReleased()
 
 void APlayerCharacter::OnAttackHeavyPressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!CombatComponent || !StateComponent) return;
 
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
@@ -926,6 +974,8 @@ void APlayerCharacter::OnAttackHeavyCanceled()
 
 void APlayerCharacter::OnParryPressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!CombatComponent || !StateComponent) return;
 
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
@@ -946,6 +996,8 @@ void APlayerCharacter::OnParryReleased()
 
 void APlayerCharacter::OnDodgePressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (!CombatComponent || !StateComponent) return;
 
     if (StateComponent->IsInMovementState(EtheriaTags::State_Movement_Airborne_Gliding) ||
@@ -1020,6 +1072,8 @@ void APlayerCharacter::HandleAttackEnd(FName)
 #pragma region "LOCK TARGET INPUTS"
 void APlayerCharacter::OnLockToggle()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (LockTargetComponent)
     {
         LockTargetComponent->ToggleLock(nullptr);
@@ -1028,6 +1082,8 @@ void APlayerCharacter::OnLockToggle()
 
 void APlayerCharacter::OnLockSwitchLeft()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (LockTargetComponent)
     {
         LockTargetComponent->SwitchTarget(false);
@@ -1036,6 +1092,8 @@ void APlayerCharacter::OnLockSwitchLeft()
 
 void APlayerCharacter::OnLockSwitchRight()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     if (LockTargetComponent)
     {
         LockTargetComponent->SwitchTarget(true);
@@ -1046,10 +1104,10 @@ void APlayerCharacter::OnLockSwitchRight()
 #pragma region "INVENTORY INPUTS"
 
 // INVENTORY INPUTS
-void APlayerCharacter::Input_SelectNext() { if (InventoryComponent) { InventoryComponent->SelectNext(); } }
-void APlayerCharacter::Input_SelectPrev() { if (InventoryComponent) { InventoryComponent->SelectPrevious(); } }
-void APlayerCharacter::Input_UseItem() { if (InventoryComponent) { InventoryComponent->UseSelected(); } }
-void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
+void APlayerCharacter::Input_SelectNext() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->SelectNext(); } }
+void APlayerCharacter::Input_SelectPrev() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->SelectPrevious(); } }
+void APlayerCharacter::Input_UseItem() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->UseSelected(); } }
+void APlayerCharacter::Input_DropItem() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
 
 #pragma endregion
 
@@ -1058,6 +1116,8 @@ void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryCom
 // INTERACTION INPUT
 void APlayerCharacter::Input_Interact()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     //UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
     //if (!InteractionComponent)
     //{
@@ -1073,6 +1133,7 @@ void APlayerCharacter::Input_Interact()
 
 void APlayerCharacter::OnRopeAttachPressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
     if (!bEnableRopeSystem) return;
     if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
 
@@ -1098,6 +1159,7 @@ void APlayerCharacter::OnRopeAttachPressed()
 
 void APlayerCharacter::CheckRopeAttachMode()
 {
+    if (IsGrapplingAnimationLocked()) return;
     if (!bEnableRopeSystem) return;
     if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
 
@@ -1122,6 +1184,7 @@ void APlayerCharacter::CheckRopeAttachMode()
 
 void APlayerCharacter::RopeLengthInput(const FInputActionValue& Value)
 {
+    if (IsGrapplingAnimationLocked()) return;
     if (!bEnableRopeSystem) return;
 
     const float AxisVal = Value.Get<float>();
@@ -1165,6 +1228,8 @@ void APlayerCharacter::StopRopeLengthInput(const FInputActionValue& Value)
 #pragma region "SWIM INPUTS"
 void APlayerCharacter::OnDiveInputPressed()
 {
+    if (IsGrapplingAnimationLocked()) return;
+
     // If we're in water (or currently swimming), this input is for Swim
     if (SwimComponent && (SwimComponent->IsInWater() || SwimComponent->IsSwimmingActive()))
     {

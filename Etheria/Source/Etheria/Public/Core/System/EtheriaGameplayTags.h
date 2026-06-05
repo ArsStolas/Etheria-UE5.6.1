@@ -10,6 +10,7 @@ namespace EtheriaTags
 {
 	// === Movement ===
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement);
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_IsGrappling);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Grounded);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Grounded_Idle);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Movement_Grounded_Walking);
