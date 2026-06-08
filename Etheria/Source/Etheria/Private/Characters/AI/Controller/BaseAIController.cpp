@@ -3,11 +3,6 @@
  * Created by: Mato
  * Last Updated by: ArsStolas
  * Class: "BaseAIController - Source"
- * Notes: HandleFleeState uses FleePanicRadius for urgent re-evaluation.
- *        When threat is close, AI recalculates flee direction every tick.
- *        Initial patrol kickoff is DEFERRED via timer (InitialPatrolDelay) — for placed pawns,
- *        AAIController::OnPossess fires BEFORE the character's BeginPlay, so calling StartPatrol()
- *        directly here used to leave the patrol spline unset and the AI immobile in Path mode.
  */
 
 #include "Characters/AI/Controller/BaseAIController.h"
@@ -16,15 +11,19 @@
 #include "Characters/AI/Movements/AIMovementComponent.h"
 #include "Characters/AI/Animations/AIAnimationComponent.h"
 #include "Characters/AI/Combat/AICombatComponent.h"
+#include "Characters/AI/Combat/AICombatDirectorSubsystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Navigation/CrowdFollowingComponent.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
 
-ABaseAIController::ABaseAIController()
+ABaseAIController::ABaseAIController(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UCrowdFollowingComponent>(TEXT("PathFollowingComponent")))
 {
 	PrimaryActorTick.bCanEverTick = true;
 	SetupPerception();
@@ -66,6 +65,10 @@ void ABaseAIController::OnPossess(APawn* InPawn)
 
 	SpawnOrigin = AICharacter->GetActorLocation();
 
+	AICharacter->OnAIStateChanged.AddDynamic(this, &ABaseAIController::HandleAIStateChanged);
+	AICharacter->OnAIDormancyChanged.AddDynamic(this, &ABaseAIController::HandleDormancyChanged);
+	ConfigureCrowdAvoidance();
+
 	if (UAIPerceptionComponent* PerComp = GetPerceptionComponent())
 	{
 		SightConfig->SightRadius = SightRadius;
@@ -95,6 +98,85 @@ void ABaseAIController::OnPossess(APawn* InPawn)
 			FMath::Max(InitialPatrolDelay, 0.01f),
 			false);
 	}
+}
+
+void ABaseAIController::OnUnPossess()
+{
+	ReleaseAttackTokenHeld();
+	if (AICharacter)
+	{
+		AICharacter->OnAIStateChanged.RemoveDynamic(this, &ABaseAIController::HandleAIStateChanged);
+		AICharacter->OnAIDormancyChanged.RemoveDynamic(this, &ABaseAIController::HandleDormancyChanged);
+	}
+	if (UWorld* W = GetWorld())
+		W->GetTimerManager().ClearTimer(InitialPatrolTimerHandle);
+	Super::OnUnPossess();
+}
+
+void ABaseAIController::ConfigureCrowdAvoidance()
+{
+	if (!bUseCrowdAvoidance) return;
+	if (UCrowdFollowingComponent* Crowd = Cast<UCrowdFollowingComponent>(GetPathFollowingComponent()))
+	{
+		Crowd->SetCrowdSimulationState(ECrowdSimulationState::Enabled);
+		Crowd->SetCrowdSeparation(true);
+		Crowd->SetCrowdSeparationWeight(CrowdSeparationWeight);
+		Crowd->SetCrowdAvoidanceRangeMultiplier(CrowdAvoidanceRangeMultiplier);
+		Crowd->SetCrowdAvoidanceQuality(ECrowdAvoidanceQuality::Medium);
+	}
+}
+
+void ABaseAIController::HandleAIStateChanged(EAIState OldState, EAIState NewState)
+{
+	if (OldState == EAIState::Attacking && NewState != EAIState::Attacking)
+		ReleaseAttackTokenHeld();
+
+	if (AICharacter)
+		if (UCharacterMovementComponent* MC = AICharacter->GetCharacterMovement())
+			MC->bOrientRotationToMovement = (NewState != EAIState::Attacking);
+}
+
+void ABaseAIController::HandleDormancyChanged()
+{
+	if (AICharacter && AICharacter->IsDormant())
+		ReleaseAttackTokenHeld();
+}
+
+UAICombatDirectorSubsystem* ABaseAIController::GetCombatDirector() const
+{
+	const UWorld* W = GetWorld();
+	return W ? W->GetSubsystem<UAICombatDirectorSubsystem>() : nullptr;
+}
+
+bool ABaseAIController::TryTakeAttackTurn(AActor* Target)
+{
+	if (!bUseAttackTokens) return true;
+
+	UAICombatDirectorSubsystem* Dir = GetCombatDirector();
+	if (!Dir || !AICharacter || !Target) return true;
+
+	const bool bGranted = Dir->RequestAttackToken(Target, AICharacter, MaxSimultaneousAttackers, AttackTokenLeaseDuration);
+	bHoldingAttackToken = bGranted;
+	TokenTarget = bGranted ? Target : nullptr;
+	return bGranted;
+}
+
+void ABaseAIController::ReleaseAttackTokenHeld()
+{
+	if (!bHoldingAttackToken) return;
+	if (UAICombatDirectorSubsystem* Dir = GetCombatDirector())
+		Dir->ReleaseAttackToken(TokenTarget.Get(), AICharacter);
+	bHoldingAttackToken = false;
+	TokenTarget = nullptr;
+}
+
+bool ABaseAIController::HasUsableAttack(const UAICombatComponent* Combat, float Distance) const
+{
+	if (!Combat) return false;
+	const int32 Num = Combat->GetAttacks().Num();
+	for (int32 i = 0; i < Num; ++i)
+		if (Combat->CanUseAttack(i, Distance)) return true;
+	return false;
 }
 
 void ABaseAIController::TryStartInitialPatrol()
@@ -305,12 +387,12 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 void ABaseAIController::HandleAttackState(float DeltaTime)
 {
 	AActor* Target = AICharacter->GetCurrentTarget();
-	if (!Target) { AICharacter->SetAIState(EAIState::Returning); return; }
+	if (!Target) { ReleaseAttackTokenHeld(); AICharacter->SetAIState(EAIState::Returning); return; }
 
 	const float Range = GetEffectiveAttackRange();
 	const float Dist  = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
 
-	if (Dist > Range * CombatDisengageRangeRatio) { AICharacter->SetAIState(EAIState::Chasing); return; }
+	if (Dist > Range * CombatDisengageRangeRatio) { ReleaseAttackTokenHeld(); AICharacter->SetAIState(EAIState::Chasing); return; }
 
 	FaceTargetYawOnly(Target, DeltaTime);
 
@@ -319,29 +401,32 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 
 	if (Combat && Combat->GetAttacks().Num() > 0)
 	{
+		// Mid-action: renew our token so it can't expire under us, then let the attack finish.
 		if (Combat->IsAttacking() || Combat->IsCharging() || Combat->IsStaggered())
+		{
+			if (bHoldingAttackToken) TryTakeAttackTurn(Target);
 			return;
+		}
 
 		const bool bInRange = (Dist <= Range);
-		const bool bFired = bInRange && Combat->ExecuteRandomAttack(Dist);
+		const bool bReady   = bInRange && HasUsableAttack(Combat, Dist);
 
-		if (bFired)
+		if (bReady)
 		{
-			if (!bStrafeInCombat && MC) MC->StopMovement();
+			if (TryTakeAttackTurn(Target) && Combat->ExecuteRandomAttack(Dist))
+			{
+				if (!bStrafeInCombat && MC) MC->StopMovement();
+			}
+			else
+			{
+				ReleaseAttackTokenHeld();
+				CircleTarget(Target, DeltaTime);
+			}
 		}
-		else if (bInRange && Combat->GetGlobalCooldownRemaining() > 0.f)
+		else if (bInRange)
 		{
-			if (bStrafeInCombat && MC)
-			{
-				StrafeTimer -= DeltaTime;
-				if (StrafeTimer <= 0.f) { StrafeTimer = StrafeDirectionChangeInterval + FMath::FRandRange(-0.5f, 0.5f); StrafeDirection *= -1; }
-				MC->SetDesiredSpeed(MC->PatrolSpeed * 0.8f);
-				MC->MoveToLocation(AICharacter->GetActorLocation() + AICharacter->GetActorRightVector() * StrafeDirection * StrafeRadius);
-			}
-			else if (MC)
-			{
-				MC->StopMovement();
-			}
+			ReleaseAttackTokenHeld();
+			CircleTarget(Target, DeltaTime);
 		}
 		else if (MC)
 		{
@@ -353,6 +438,39 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 		if (Dist > Range) ApproachTarget(Target, Range * CombatEngageRangeRatio);
 		else MC->StopMovement();
 	}
+}
+
+void ABaseAIController::CircleTarget(AActor* Target, float DeltaTime)
+{
+	UAIMovementComponent* MC = AICharacter ? AICharacter->GetAIMovement() : nullptr;
+	if (!MC || !Target) return;
+
+	if (!bStrafeInCombat && !bUseAttackTokens)
+	{
+		MC->StopMovement();
+		return;
+	}
+
+	StrafeTimer -= DeltaTime;
+	if (StrafeTimer <= 0.f)
+	{
+		StrafeTimer = StrafeDirectionChangeInterval + FMath::FRandRange(-0.5f, 0.5f);
+		StrafeDirection *= -1;
+	}
+
+	const FVector TgtLoc = Target->GetActorLocation();
+	FVector Radial = (AICharacter->GetActorLocation() - TgtLoc).GetSafeNormal2D();
+	if (Radial.IsNearlyZero()) Radial = -AICharacter->GetActorForwardVector().GetSafeNormal2D();
+
+	const float DesiredDist = FMath::Max(GetEffectiveAttackRange() * CombatEngageRangeRatio, 1.f);
+	const FVector Tangent = FVector::CrossProduct(FVector::UpVector, Radial) * static_cast<float>(StrafeDirection);
+
+	FVector ToLead = (AICharacter->GetActorLocation() + Tangent * DesiredDist - TgtLoc).GetSafeNormal2D();
+	if (ToLead.IsNearlyZero()) ToLead = Radial;
+	const FVector Dest = TgtLoc + ToLead * DesiredDist;
+
+	MC->SetDesiredSpeed(StrafeSpeed);
+	MC->MoveToLocation(Dest);
 }
 
 void ABaseAIController::HandleReturnState(float DeltaTime)

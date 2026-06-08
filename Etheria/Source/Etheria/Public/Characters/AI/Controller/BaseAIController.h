@@ -3,9 +3,6 @@
  * Created by: Mato
  * Last Updated by: ArsStolas
  * Class: "BaseAIController - Header"
- * Notes: State machine, perception, robust flee, idle variation respect.
- *        Initial patrol kickoff is deferred via timer so it runs AFTER the character's
- *        BeginPlay (which is when the patrol spline is wired up).
  */
 
 #pragma once
@@ -19,6 +16,8 @@
 class UAISenseConfig_Sight;
 class UAISenseConfig_Hearing;
 class ABaseAICharacter;
+class UAICombatComponent;
+class UAICombatDirectorSubsystem;
 
 UCLASS()
 class ETHERIA_API ABaseAIController : public AAIController
@@ -26,13 +25,17 @@ class ETHERIA_API ABaseAIController : public AAIController
 	GENERATED_BODY()
 
 public:
-	ABaseAIController();
+	ABaseAIController(const FObjectInitializer& ObjectInitializer);
 
 protected:
 	virtual void OnPossess(APawn* InPawn) override;
+	virtual void OnUnPossess() override;
 	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION() void OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+
+	UFUNCTION() void HandleAIStateChanged(EAIState OldState, EAIState NewState);
+	UFUNCTION() void HandleDormancyChanged();
 
 	void HandleIdleState(float DeltaTime);
 	void HandlePatrolState(float DeltaTime);
@@ -73,15 +76,40 @@ protected:
 		ToolTip="How far past attack range the AI keeps re-approaching before switching back to a full chase."))
 	float CombatDisengageRangeRatio = 1.4f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(EditCondition="bStrafeInCombat", ClampMin="50",
-		ToolTip="How far sideways the AI steps when strafing around its target."))
-	float StrafeRadius = 200.f;
+	/* ── Crowd avoidance (Detour) ── */
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Avoidance",
+		meta=(ToolTip="Enable Detour Crowd avoidance so groups of AI flow around each other instead of overlapping."))
+	bool bUseCrowdAvoidance = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Avoidance", meta=(EditCondition="bUseCrowdAvoidance", ClampMin="0",
+		ToolTip="How strongly AI push apart from each other. Higher = more personal space."))
+	float CrowdSeparationWeight = 1.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Avoidance", meta=(EditCondition="bUseCrowdAvoidance", ClampMin="0.1",
+		ToolTip="Scales how far ahead the AI looks to avoid others."))
+	float CrowdAvoidanceRangeMultiplier = 1.0f;
+
+	/* ── Combat director (attack tokens) ── */
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director",
+		meta=(ToolTip="Limit how many AI may attack the SAME target at once. Others circle and wait their turn."))
+	bool bUseAttackTokens = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(EditCondition="bUseAttackTokens", ClampMin="1",
+		ToolTip="Max number of AI attacking the same target simultaneously."))
+	int32 MaxSimultaneousAttackers = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(EditCondition="bUseAttackTokens", ClampMin="0.5",
+		ToolTip="Safety auto-release for an attack turn if the AI never releases it (death, dormancy, etc.)."))
+	float AttackTokenLeaseDuration = 3.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle") float IdleAnimInterval = 5.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Idle", meta=(ClampMin="0")) float IdleAnimRandomDeviation = 3.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="Strafe around target between attacks.")) bool bStrafeInCombat = false;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(EditCondition="bStrafeInCombat", ClampMin="0.5")) float StrafeDirectionChangeInterval = 2.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ToolTip="Circle the target while waiting for an attack turn (also used by the attack-token director).")) bool bStrafeInCombat = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ClampMin="0.5", ToolTip="How often the circling direction flips.")) float StrafeDirectionChangeInterval = 2.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Movement", meta=(ClampMin="50", ToolTip="Speed while circling the target.")) float StrafeSpeed = 320.f;
 
 	/** Delay (seconds) between OnPossess and the first patrol kickoff. Gives BeginPlay time to wire up the
 	 *  patrol spline and gives the navmesh time to be ready. Lower = snappier; too low and Path mode breaks. */
@@ -98,6 +126,16 @@ private:
 	float GetChaseSpeed() const;
 	void ApproachTarget(AActor* Target, float DesiredDistance);
 
+	/** Orbit the target at engage distance while waiting for an attack turn. */
+	void CircleTarget(AActor* Target, float DeltaTime);
+
+	void ConfigureCrowdAvoidance();
+
+	UAICombatDirectorSubsystem* GetCombatDirector() const;
+	bool TryTakeAttackTurn(AActor* Target);
+	void ReleaseAttackTokenHeld();
+	bool HasUsableAttack(const UAICombatComponent* Combat, float Distance) const;
+
 	/** Deferred patrol kickoff. Called via timer after OnPossess so the character has finished its own BeginPlay. */
 	void TryStartInitialPatrol();
 
@@ -113,6 +151,9 @@ private:
 	float FleeReevalTimer = 0.f;
 	int32 StrafeDirection = 1;
 	FVector SpawnOrigin = FVector::ZeroVector;
+
+	bool bHoldingAttackToken = false;
+	TWeakObjectPtr<AActor> TokenTarget;
 
 	FTimerHandle InitialPatrolTimerHandle;
 };

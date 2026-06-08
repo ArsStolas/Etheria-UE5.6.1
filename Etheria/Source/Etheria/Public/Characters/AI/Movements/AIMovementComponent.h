@@ -1,12 +1,8 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "AIMovementComponent - Header"
- * Notes: Patrol zones, spline paths (world-cached), flee, smooth acceleration.
- *        Spline points are snapshotted to world space at StartPatrol to prevent drift.
- *        Path mode supports either the character's built-in spline OR an external
- *        spline-bearing actor placed in the level (PatrolPathActor).
  */
 
 #pragma once
@@ -114,6 +110,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Flee", meta=(ClampMin="200", ToolTip="Distance to flee from the threat per move request."))
 	float FleeDistance = 1500.f;
 
+	/* ── Repath gating ── */
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Repath", meta=(ClampMin="0",
+		ToolTip="Minimum goal movement (cm) before re-pathing to a moving target. Higher = smoother but slightly laggier tracking."))
+	float RepathTolerance = 120.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Repath", meta=(ClampMin="0",
+		ToolTip="Minimum delay between re-paths to a near-identical goal. Caps repath frequency to avoid stutter."))
+	float MinRepathInterval = 0.2f;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -137,6 +143,11 @@ private:
 
 	FVector CurrentDestination = FVector::ZeroVector;
 	FVector PatrolOrigin = FVector::ZeroVector;
+
+	FVector LastRequestedGoal = FVector::ZeroVector;
+	float RepathCooldown = 0.f;
+	bool bHasLastGoal = false;
+
 	float DesiredMaxSpeed = 0.f;
 	float WaitTimer = 0.f;
 	int32 CurrentPatrolIndex = 0;

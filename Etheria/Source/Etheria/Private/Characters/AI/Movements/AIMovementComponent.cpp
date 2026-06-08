@@ -3,10 +3,6 @@
  * Created by: Mato
  * Last Updated by: ArsStolas
  * Class: "AIMovementComponent - Source"
- * Notes: Spline points cached to world space at StartPatrol (fixes drift).
- *        FleeFrom uses perpendicular randomization to avoid getting stuck.
- *        PatrolSpline is lazy-resolved (works whether it's set explicitly by the
- *        character's BeginPlay, found on the owner, or pulled from a level actor).
  */
 
 #include "Characters/AI/Movements/AIMovementComponent.h"
@@ -73,6 +69,7 @@ void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 
 	ApplySmoothAcceleration(DeltaTime);
 	if (MoveGraceTimer > 0.f) MoveGraceTimer -= DeltaTime;
+	if (RepathCooldown > 0.f) RepathCooldown -= DeltaTime;
 	if (bIsPatrolling) HandlePatrolTick(DeltaTime);
 
 #if ENABLE_DRAW_DEBUG
@@ -169,6 +166,15 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 	EnsureInitialized();
 	if (!OwnerCharacter) return false;
 
+	// Repath gate: don't re-pathfind every frame toward a near-identical, recently-requested goal.
+	if (bMoveRequestActive && bHasLastGoal && RepathCooldown > 0.f
+		&& FVector::DistSquared(Target, LastRequestedGoal) < FMath::Square(RepathTolerance))
+	{
+		CurrentDestination = Target;
+		OnMovementTargetUpdated.Broadcast(Target);
+		return true;
+	}
+
 	CurrentDestination = Target;
 	OnMovementTargetUpdated.Broadcast(Target);
 
@@ -188,6 +194,7 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 		if (Result == EPathFollowingRequestResult::AlreadyAtGoal)
 		{
 			bMoveRequestActive = false;
+			bHasLastGoal = false;
 			MoveGraceTimer = 0.f;
 			return true;
 		}
@@ -196,10 +203,14 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 		{
 			bMoveRequestActive = true;
 			MoveGraceTimer = MOVE_GRACE_DURATION;
+			LastRequestedGoal = Target;
+			bHasLastGoal = true;
+			RepathCooldown = MinRepathInterval;
 		}
 		else
 		{
 			bMoveRequestActive = false;
+			bHasLastGoal = false;
 		}
 	}
 	return bSuccess;
@@ -209,6 +220,8 @@ void UAIMovementComponent::StopMovement()
 {
 	DesiredMaxSpeed = 0.f;
 	bMoveRequestActive = false;
+	bHasLastGoal = false;
+	RepathCooldown = 0.f;
 	EnsureInitialized();
 	if (OwnerCharacter)
 		if (AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
