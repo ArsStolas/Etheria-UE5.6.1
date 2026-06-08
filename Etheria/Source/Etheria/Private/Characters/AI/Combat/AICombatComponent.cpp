@@ -441,14 +441,16 @@ void UAICombatComponent::TickAttack(float DeltaTime)
 	AttackAnimTimer -= DeltaTime;
 	if (AttackAnimTimer <= 0.f)
 	{
+		if (!Attacks.IsValidIndex(CurrentAttackIndex)) { bIsAttacking = false; return; }
+
 		FAIAttackData& Atk = Attacks[CurrentAttackIndex];
 		bIsAttacking = false;
 		bHitWindowFired = false;
 		Atk.CurrentCooldown = Atk.Cooldown;
 		GlobalCooldownTimer = GlobalCooldown + FMath::FRandRange(0.f, AttackDelayRandomDeviation);
 		OnAIAttackEnded.Broadcast(Atk, false);
-		if (CurrentComboIndex >= 0) AdvanceCombo();
 		CurrentAttackIndex = -1;
+		if (CurrentComboIndex >= 0) AdvanceCombo();
 	}
 }
 

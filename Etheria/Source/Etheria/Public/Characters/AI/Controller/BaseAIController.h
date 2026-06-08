@@ -125,6 +125,7 @@ private:
 
 	float GetChaseSpeed() const;
 	void ApproachTarget(AActor* Target, float DesiredDistance);
+	float GetCombatApproachDistance(float Range) const;
 
 	/** Orbit the target at engage distance while waiting for an attack turn. */
 	void CircleTarget(AActor* Target, float DeltaTime);

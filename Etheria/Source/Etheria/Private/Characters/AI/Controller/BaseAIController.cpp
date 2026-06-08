@@ -325,6 +325,14 @@ void ABaseAIController::ApproachTarget(AActor* Target, float DesiredDistance)
 	MC->MoveToLocation(Standoff);
 }
 
+float ABaseAIController::GetCombatApproachDistance(float Range) const
+{
+	float Dist = Range * CombatEngageRangeRatio;
+	if (const UAIMovementComponent* MC = AICharacter ? AICharacter->GetAIMovement() : nullptr)
+		Dist = FMath::Min(Dist, Range - MC->AcceptanceRadius - 20.f);
+	return FMath::Max(Dist, 0.f);
+}
+
 bool ABaseAIController::CheckLeashAndTeleport()
 {
 	const float Leash = AICharacter->GetLeashRange();
@@ -430,12 +438,12 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 		}
 		else if (MC)
 		{
-			ApproachTarget(Target, Range * CombatEngageRangeRatio);
+			ApproachTarget(Target, GetCombatApproachDistance(Range));
 		}
 	}
 	else if (MC)
 	{
-		if (Dist > Range) ApproachTarget(Target, Range * CombatEngageRangeRatio);
+		if (Dist > Range) ApproachTarget(Target, GetCombatApproachDistance(Range));
 		else MC->StopMovement();
 	}
 }
