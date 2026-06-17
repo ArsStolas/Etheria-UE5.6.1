@@ -85,10 +85,20 @@ public:
     FORCEINLINE URopeSwingComponent* GetRopeSwingComponent() const { return RopeSwingComponent; }
     FORCEINLINE URopeLengthControllerComponent* GetRopeLengthControllerComponent() const { return RopeLengthControllerComponent; }
     FORCEINLINE URopePullComponent* GetRopePullComponent() const { return RopePullComponent; }
+    FORCEINLINE bool IsRopeSystemEnabled() const { return bEnableRopeSystem; }
     FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
     FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
     FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
     
+    UFUNCTION(BlueprintCallable, Category = "Rope")
+    void SetRopeSystemEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintPure, Category = "Grapple")
+    bool IsInGrapplingAnimation() const { return bInGrapplingAnimation; }
+
+    UFUNCTION(BlueprintCallable, Category = "Grapple")
+    void SetInGrapplingAnimation(bool bInAnimation) { bInGrapplingAnimation = bInAnimation; }
+
     // Simple accessor
     bool IsGrounded() const;
     
@@ -127,7 +137,15 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components|Combat|LockTarget", meta=(AllowPrivateAccess="true"))
     ULockVisualComponent* LockVisualComponent;
 
+    // --- GRAPPLE ---
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grapple")
+    bool bInGrapplingAnimation = false;
+    
     // --- ROPE ---
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rope")
+    bool bEnableRopeSystem = true;
     
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rope")
     UCableComponent* RopeCableComponent;
@@ -318,6 +336,7 @@ private:
     void OnJumpPressed();                              virtual void Landed(const FHitResult&) override;
 
     // --- Movement State ---
+    bool IsGrapplingAnimationLocked() const;
     void HandleMovementInput();
     void UpdateMovementState();
     void HandleAirborneState();
@@ -354,6 +373,7 @@ private:
     UFUNCTION() void Input_Interact();
 
     // --- Rope ---
+    void ApplyRopeSystemEnabled();
     void OnRopeAttachPressed();
     void CheckRopeAttachMode();
     void RopeLengthInput(const FInputActionValue& Value);

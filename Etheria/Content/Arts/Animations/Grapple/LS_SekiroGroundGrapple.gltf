@@ -1,0 +1,478 @@
+{
+	"asset":
+	{
+		"version": "2.0",
+		"generator": "Unreal Engine 5.6.1"
+	},
+	"scene": 0,
+	"accessors": [
+		{
+			"bufferView": 0,
+			"count": 187,
+			"type": "SCALAR",
+			"componentType": 5126,
+			"min": [ 0 ],
+			"max": [ 3.0999999 ]
+		},
+		{
+			"bufferView": 1,
+			"count": 11904,
+			"type": "SCALAR",
+			"componentType": 5123
+		},
+		{
+			"bufferView": 2,
+			"count": 2208,
+			"type": "VEC3",
+			"componentType": 5126,
+			"min": [ -40.9599991, -40.9599991, -40.9599991 ],
+			"max": [ 40.9599991, 40.9599991, 40.9599991 ]
+		},
+		{
+			"bufferView": 3,
+			"count": 2208,
+			"type": "VEC3",
+			"componentType": 5126
+		},
+		{
+			"bufferView": 4,
+			"count": 2208,
+			"type": "VEC4",
+			"componentType": 5126
+		},
+		{
+			"bufferView": 5,
+			"count": 2208,
+			"type": "VEC2",
+			"componentType": 5126
+		},
+		{
+			"bufferView": 6,
+			"count": 2208,
+			"type": "VEC2",
+			"componentType": 5126
+		},
+		{
+			"bufferView": 7,
+			"count": 306,
+			"type": "SCALAR",
+			"componentType": 5121
+		},
+		{
+			"bufferView": 8,
+			"count": 156,
+			"type": "VEC3",
+			"componentType": 5126,
+			"min": [ -0.74448818, -0.11039371, -0.74448818 ],
+			"max": [ 0.74448812, 0.889999986, 1.22000003 ]
+		},
+		{
+			"bufferView": 9,
+			"count": 156,
+			"type": "VEC3",
+			"componentType": 5126
+		},
+		{
+			"bufferView": 10,
+			"count": 156,
+			"type": "VEC4",
+			"componentType": 5126
+		},
+		{
+			"bufferView": 11,
+			"count": 156,
+			"type": "VEC2",
+			"componentType": 5126
+		},
+		{
+			"bufferView": 12,
+			"count": 156,
+			"type": "VEC2",
+			"componentType": 5126
+		}
+	],
+	"animations": [
+		{
+			"name": "LS_SekiroGroundGrapple_0",
+			"channels": [],
+			"samplers": []
+		}
+	],
+	"buffers": [
+		{
+			"uri": "LS_SekiroGroundGrapple.bin",
+			"byteLength": 157248
+		}
+	],
+	"bufferViews": [
+		{
+			"buffer": 0,
+			"byteLength": 748
+		},
+		{
+			"buffer": 0,
+			"byteLength": 23808,
+			"byteOffset": 748,
+			"target": 34963
+		},
+		{
+			"buffer": 0,
+			"byteLength": 26496,
+			"byteOffset": 24556,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 26496,
+			"byteOffset": 51052,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 35328,
+			"byteOffset": 77548,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 17664,
+			"byteOffset": 112876,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 17664,
+			"byteOffset": 130540,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 306,
+			"byteOffset": 148204,
+			"target": 34963
+		},
+		{
+			"buffer": 0,
+			"byteLength": 1872,
+			"byteOffset": 148512,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 1872,
+			"byteOffset": 150384,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 2496,
+			"byteOffset": 152256,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 1248,
+			"byteOffset": 154752,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteLength": 1248,
+			"byteOffset": 156000,
+			"target": 34962
+		}
+	],
+	"images": [
+		{
+			"uri": "MID_M_Sky_Panning_Clouds2_0_SkySphereMesh_BaseColor.png"
+		}
+	],
+	"materials": [
+		{
+			"name": "MID_M_Sky_Panning_Clouds2_0_SkySphereMesh",
+			"pbrMetallicRoughness":
+			{
+				"baseColorTexture":
+				{
+					"index": 0,
+					"texCoord": 1
+				}
+			},
+			"extensions":
+			{
+				"KHR_materials_unlit":
+				{
+				}
+			}
+		},
+		{
+			"name": "M_Hair",
+			"pbrMetallicRoughness":
+			{
+				"baseColorFactor": [ 0.020833334, 0.0140620116, 0.00801664591, 1 ],
+				"metallicFactor": 0
+			},
+			"doubleSided": true
+		}
+	],
+	"meshes": [
+		{
+			"name": "SkySphereMesh",
+			"primitives": [
+				{
+					"attributes":
+					{
+						"POSITION": 2,
+						"NORMAL": 3,
+						"TANGENT": 4,
+						"TEXCOORD_0": 5,
+						"TEXCOORD_1": 6
+					},
+					"indices": 1,
+					"material": 0
+				}
+			]
+		},
+		{
+			"name": "SM_GrapplePoint",
+			"primitives": [
+				{
+					"attributes":
+					{
+						"POSITION": 8,
+						"NORMAL": 9,
+						"TANGENT": 10,
+						"TEXCOORD_0": 11,
+						"TEXCOORD_1": 12
+					},
+					"indices": 7,
+					"material": 1
+				}
+			]
+		}
+	],
+	"nodes": [
+		{
+			"name": "Brush",
+			"translation": [ 2.95840359, -1.14977324, 2.83252406 ]
+		},
+		{
+			"name": "LightmassImportanceVolume",
+			"translation": [ 15.35075, 59.9821777, -44.537693 ],
+			"scale": [ 2.5, 5.25, 3 ]
+		},
+		{
+			"name": "AtmosphericFog",
+			"translation": [ 0, -1000, 0 ]
+		},
+		{
+			"name": "SkySphereBlueprint",
+			"children": [ 4 ]
+		},
+		{
+			"name": "SkySphereMesh",
+			"scale": [ 400, 400, 400 ],
+			"mesh": 0
+		},
+		{
+			"name": "SphereReflectionCapture",
+			"translation": [ 10.3043842, 5.11999989, -39.3830414 ],
+			"children": [ 6, 7 ]
+		},
+		{
+			"name": "DrawRadius0"
+		},
+		{
+			"name": "DrawRadius1"
+		},
+		{
+			"name": "Light Source",
+			"translation": [ 1, 5.69999981, -2 ],
+			"rotation": [ -0.010429658, -0.0254772417, -0.547975123, 0.83604151 ],
+			"scale": [ 2.5, 2.5, 2.5 ],
+			"children": [ 9 ]
+		},
+		{
+			"name": "LightNode_Light Source",
+			"rotation": [ -0, -0.707106829, 0, 0.707106769 ],
+			"extensions":
+			{
+				"KHR_lights_punctual":
+				{
+					"light": 0
+				}
+			}
+		},
+		{
+			"name": "Box Brush2",
+			"translation": [ 15.0526562, -2.16155267, -18.5748463 ]
+		},
+		{
+			"name": "PlayerStart",
+			"translation": [ 13.9406977, 0.919999242, -14.3461361 ],
+			"rotation": [ 0, 0.707107246, -0, 0.707106292 ]
+		},
+		{
+			"name": "Box Brush3",
+			"translation": [ 28.223835, 9.53884983, -47.107357 ]
+		},
+		{
+			"name": "Box Brush4",
+			"translation": [ 11.3862505, 3.73925042, -36.5432892 ]
+		},
+		{
+			"name": "Box Brush5",
+			"translation": [ 10.5528402, 14.2966232, -72.4526901 ],
+			"rotation": [ 0, 0.707107544, -0, 0.707106054 ]
+		},
+		{
+			"name": "Box Brush6",
+			"translation": [ -1.36741328, 23.0469322, -60.1755714 ],
+			"rotation": [ -0, -1, 0, 1.86421278e-06 ]
+		},
+		{
+			"name": "Box Brush7",
+			"translation": [ 0.379793376, 26.4531651, -35.0941315 ],
+			"rotation": [ -0, -0.707104325, 0, 0.707109213 ]
+		},
+		{
+			"name": "BP_GrapplePoint2",
+			"translation": [ 19.9374084, 11.5264521, -51.6890373 ],
+			"rotation": [ -0, -0.707107484, 0, 0.707106054 ],
+			"children": [ 18, 19, 20 ]
+		},
+		{
+			"name": "Widget",
+			"translation": [ 4.05311589e-08, -0.0700000003, 0.0199999977 ]
+		},
+		{
+			"name": "LandingZone",
+			"translation": [ -2.28881822e-06, -0.885675013, -1.14682114 ],
+			"mesh": 1
+		},
+		{
+			"name": "DeactivateZone",
+			"translation": [ 5.21944332, 1.00022089, -7.21592331 ]
+		},
+		{
+			"name": "BP_GrapplePoint3",
+			"translation": [ 15.6783323, 16.2842216, -64.166275 ],
+			"children": [ 22, 23, 24 ]
+		},
+		{
+			"name": "Widget",
+			"translation": [ 0, -0.0700000003, 0.0199999996 ]
+		},
+		{
+			"name": "LandingZone",
+			"translation": [ 0, -0.885675013, -1.14682126 ],
+			"mesh": 1
+		},
+		{
+			"name": "DeactivateZone",
+			"translation": [ -4.62926245, 1.00022089, -8.90766621 ]
+		},
+		{
+			"name": "BP_GrapplePoint",
+			"translation": [ 10.3488588, 5.7585206, -27.8771496 ],
+			"children": [ 26, 27, 28 ]
+		},
+		{
+			"name": "Widget",
+			"translation": [ 0, -0.0700000003, 0.0199999996 ]
+		},
+		{
+			"name": "LandingZone",
+			"translation": [ 0, -0.885674417, -1.14682126 ],
+			"mesh": 1
+		},
+		{
+			"name": "DeactivateZone",
+			"translation": [ 0.899089336, 1.00022089, -7.57155752 ]
+		},
+		{
+			"name": "BP_GrapplePoint4",
+			"translation": [ 2.02884603, 25.0345364, -60.6464424 ],
+			"rotation": [ 0, 0.707107544, -0, 0.707106054 ],
+			"children": [ 30, 31, 32 ]
+		},
+		{
+			"name": "Widget",
+			"translation": [ -4.29153424e-08, -0.0700000003, 0.0199999996 ]
+		},
+		{
+			"name": "LandingZone",
+			"translation": [ -2.4414062e-06, -0.885673821, -1.1468209 ],
+			"mesh": 1
+		},
+		{
+			"name": "DeactivateZone",
+			"translation": [ -0.462549418, 1.0002197, -4.2097168 ]
+		},
+		{
+			"name": "BP_GrapplePoint5",
+			"translation": [ -0.091091685, 28.4407692, -47.6105881 ],
+			"rotation": [ -0, -1, 0, 1.86421278e-06 ],
+			"children": [ 34, 35, 36 ]
+		},
+		{
+			"name": "Widget",
+			"translation": [ 1.72543879e-09, -0.0700000003, 0.0199999996 ]
+		},
+		{
+			"name": "LandingZone",
+			"translation": [ 3.37720851e-09, -0.885673821, -1.14682126 ],
+			"mesh": 1
+		},
+		{
+			"name": "DeactivateZone",
+			"translation": [ -0.462523341, 1.00022209, -10.6472712 ]
+		},
+		{
+			"name": "SkyLight",
+			"translation": [ 22.4432907, 21.9529667, -79.2209091 ]
+		},
+		{
+			"name": "DefaultPhysicsVolume0"
+		},
+		{
+			"name": "AbstractNavData-Default"
+		}
+	],
+	"samplers": [
+		{
+			"minFilter": 9987,
+			"magFilter": 9729
+		}
+	],
+	"scenes": [
+		{
+			"name": "Sekiro",
+			"nodes": [ 0, 1, 2, 3, 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 29, 33, 37, 38, 39 ]
+		}
+	],
+	"textures": [
+		{
+			"name": "MID_M_Sky_Panning_Clouds2_0_SkySphereMesh_BaseColor",
+			"sampler": 0,
+			"source": 0
+		}
+	],
+	"extensions":
+	{
+		"KHR_lights_punctual":
+		{
+			"lights": [
+				{
+					"name": "Light Source",
+					"type": "directional",
+					"intensity": 2.75
+				}
+			]
+		}
+	},
+	"extensionsUsed": [
+		"KHR_materials_unlit",
+		"KHR_lights_punctual"
+	]
+}
