@@ -155,9 +155,10 @@ public:
 
 	/* ═══════════ Damage helpers (used internally; also reusable from BP) ═══════════ */
 
-	/** Damage every valid target whose horizontal distance to Center is under Radius. */
+	/** Damage every valid target whose horizontal distance to Center is under Radius.
+	 *  MinSafeAltitude > 0 makes only targets flying that high (an air zone) safe — a plain jump won't clear it. */
 	UFUNCTION(BlueprintCallable, Category = "Golem|Damage")
-	int32 ApplyRadialBurst(FVector Center, float Radius, float Damage, bool bAirborneIsSafe, float Knockback, FName AttackId);
+	int32 ApplyRadialBurst(FVector Center, float Radius, float Damage, bool bAirborneIsSafe, float Knockback, FName AttackId, float MinSafeAltitude = 0.f);
 
 	/** Damage every valid target whose horizontal distance to Center is within the annulus [InnerRadius, OuterRadius] (a shockwave wavefront). */
 	UFUNCTION(BlueprintCallable, Category = "Golem|Damage")

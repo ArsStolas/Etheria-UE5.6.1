@@ -76,7 +76,7 @@ void AGolemBossCharacter::BuildDefaultAttacks()
 		A.WindupDuration = 1.2f; A.ActiveDuration = 1.4f; A.RecoveryDuration = 0.9f; A.Cooldown = 8.f;
 		A.Damage = 28.f; A.SweepThickness = 300.f; A.SweepLength = 3000.f; A.DamageInterval = 0.1f;
 		A.bRequiresAirZoneEscape = true; // auto-forces a rock-throw first
-		A.MinSafeAltitude = 800.f;       // a jump won't clear the wall — must FLY the air zone
+		A.MinSafeAltitude = 450.f;       // above a jump (~340) yet reachable by the wind column — must FLY to clear it
 		A.SelectionWeight = 1.0f;
 		Atk.Add(A);
 	}

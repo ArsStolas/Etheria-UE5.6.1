@@ -301,6 +301,11 @@ void UGolemBossComponent::BeginAttack(int32 Index)
 	OnGolemAttackBegin.Broadcast(Cfg.AttackId, Cfg.Shape);
 	OnGolemTelegraph.Broadcast(CurrentTelegraph);
 
+	// Arm the wind-up timer FIRST so the rock-release path can read the time remaining until the strike.
+	if (Cfg.WindupDuration > 0.f)
+		if (UWorld* W = GetWorld())
+			W->GetTimerManager().SetTimer(WindupTimerHandle, this, &UGolemBossComponent::OnWindupElapsed, Cfg.WindupDuration, false);
+
 	// Thrown rock leaves the HAND at the release moment (RockReleaseTime, or an AnimNotify calling LaunchRockNow),
 	// then flies to the impact — landing exactly when the strike fires.
 	bRockLaunched = false;
@@ -334,15 +339,7 @@ void UGolemBossComponent::BeginAttack(int32 Index)
 
 	if (bDrawDebugHazards) DrawTelegraphDebug(CurrentTelegraph, FMath::Max(Cfg.WindupDuration, 0.05f));
 
-	if (Cfg.WindupDuration > 0.f)
-	{
-		if (UWorld* W = GetWorld())
-			W->GetTimerManager().SetTimer(WindupTimerHandle, this, &UGolemBossComponent::OnWindupElapsed, Cfg.WindupDuration, false);
-	}
-	else
-	{
-		OnWindupElapsed();
-	}
+	if (Cfg.WindupDuration <= 0.f) OnWindupElapsed(); // zero wind-up: strike now, after the rock was set up above
 }
 
 void UGolemBossComponent::OnWindupElapsed()
@@ -575,7 +572,8 @@ int32 UGolemBossComponent::SelectNextAttack()
 			PendingForcedAttack = Chosen;
 			return Opener;
 		}
-		return WeightedPick(true);
+		const int32 ZoneFree = WeightedPick(true);
+		return ZoneFree >= 0 ? ZoneFree : Chosen; // no opener & nothing zone-free -> fire the gated move (anti-softlock)
 	}
 
 	return Chosen;
@@ -689,7 +687,7 @@ void UGolemBossComponent::DoStrike()
 	}
 	case EGolemHazardShape::GroundFissures:
 	{
-		ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId);
+		ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 		for (int32 i = 0; i < CurrentTelegraph.ImpactPoints.Num(); ++i)
 			Broadcast(CurrentTelegraph.ImpactPoints[i], Cfg.ImpactRadius, i, CurrentTelegraph.ImpactPoints.Num());
 		break;
@@ -762,7 +760,7 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	case EGolemHazardShape::GroundFissures:
 	{
 		if (bDamageTick)
-			ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId);
+			ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 #if ENABLE_DRAW_DEBUG
 		if (bDrawDebugHazards) DrawFlatCircle(GetWorld(), ResolveArenaCentre(), GetArenaRadius(), FColor::Red, -1.f, 8.f);
 #endif
@@ -1064,15 +1062,19 @@ void UGolemBossComponent::DealDamage(AActor* Victim, float Damage, FVector FromL
 	OnGolemDamageDealt.Broadcast(Victim, Final, AttackId, Victim->GetActorLocation());
 }
 
-int32 UGolemBossComponent::ApplyRadialBurst(FVector Center, float Radius, float Damage, bool bAirborneIsSafe, float Knockback, FName AttackId)
+int32 UGolemBossComponent::ApplyRadialBurst(FVector Center, float Radius, float Damage, bool bAirborneIsSafe, float Knockback, FName AttackId, float MinSafeAltitude)
 {
 	TArray<AActor*> Targets;
 	GatherTargets(Center, Radius, Targets);
+	const float FloorZ = GetArenaCentre().Z;
 	int32 Hits = 0;
 	for (AActor* A : Targets)
 	{
 		if (FVector::DistSquared2D(A->GetActorLocation(), Center) > Radius * Radius) continue;
-		if (bAirborneIsSafe && IsActorAirborne(A)) continue;
+		const bool bSafe = (MinSafeAltitude > 0.f)
+			? ((A->GetActorLocation().Z - FloorZ) >= MinSafeAltitude) // must FLY this high (air zone), not just jump
+			: (bAirborneIsSafe && IsActorAirborne(A));
+		if (bSafe) continue;
 		DealDamage(A, Damage, Center, Knockback, AttackId);
 		++Hits;
 	}
@@ -1149,30 +1151,33 @@ void UGolemBossComponent::OpenAirZone(FVector Location, float Radius, float Life
 
 void UGolemBossComponent::ClearAirZones()
 {
+	// Drain first, broadcast after — a bound BP handler could re-enter and mutate ActiveAirZones mid-loop.
+	TArray<TPair<int32, FVector>> Closed;
 	for (int32 i = ActiveAirZones.Num() - 1; i >= 0; --i)
 	{
-		const int32 Id = ActiveAirZones[i].ZoneId;
-		const FVector Loc = ActiveAirZones[i].Location;
+		Closed.Emplace(ActiveAirZones[i].ZoneId, ActiveAirZones[i].Location);
 		if (IsValid(ActiveAirZones[i].SpawnedActor)) ActiveAirZones[i].SpawnedActor->Destroy();
 		ActiveAirZones.RemoveAt(i);
-		OnGolemAirZoneClosed.Broadcast(Id, Loc);
 	}
+	for (const TPair<int32, FVector>& C : Closed)
+		OnGolemAirZoneClosed.Broadcast(C.Key, C.Value);
 }
 
 void UGolemBossComponent::TickAirZones(float DeltaTime)
 {
+	TArray<TPair<int32, FVector>> Closed;
 	for (int32 i = ActiveAirZones.Num() - 1; i >= 0; --i)
 	{
 		ActiveAirZones[i].TimeRemaining -= DeltaTime;
 		if (ActiveAirZones[i].TimeRemaining <= 0.f)
 		{
-			const int32 Id = ActiveAirZones[i].ZoneId;
-			const FVector Loc = ActiveAirZones[i].Location;
+			Closed.Emplace(ActiveAirZones[i].ZoneId, ActiveAirZones[i].Location);
 			if (IsValid(ActiveAirZones[i].SpawnedActor)) ActiveAirZones[i].SpawnedActor->Destroy();
 			ActiveAirZones.RemoveAt(i);
-			OnGolemAirZoneClosed.Broadcast(Id, Loc);
 		}
 	}
+	for (const TPair<int32, FVector>& C : Closed)
+		OnGolemAirZoneClosed.Broadcast(C.Key, C.Value);
 }
 
 bool UGolemBossComponent::IsLocationInAirZone(FVector Location) const
@@ -1468,5 +1473,11 @@ void UGolemBossComponent::HandleOwnerDied()
 	if (State != EGolemAttackState::Idle) FinishAttack(true);
 	ClearAirZones();
 	bActivated = false;
+	bToppled = false; // no recover-from-topple should fire on the corpse
+	if (UWorld* W = GetWorld())
+	{
+		W->GetTimerManager().ClearTimer(ToppleTimerHandle);
+		W->GetTimerManager().ClearTimer(ExposeLingerTimerHandle);
+	}
 	OnGolemDefeated.Broadcast();
 }
