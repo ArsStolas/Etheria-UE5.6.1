@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: "0nnen"
+ * Last Updated by: "ArsStolas"
  * Class: HealthComponent - Source
 */
 
@@ -53,9 +53,9 @@ void UHealthComponent::ResetHealth()
 */
 void UHealthComponent::TakeDamage(float DamageAmount)
 {
-	UE_LOG(LogTemp, Warning, TEXT("[HealthComponent] TakeDamage — Amount: %f | IsDead: %s"), 
+	UE_LOG(LogTemp, Verbose, TEXT("[HealthComponent] TakeDamage — Amount: %f | IsDead: %s"),
 		DamageAmount, IsDead() ? TEXT("true") : TEXT("false"));
-	if (DamageAmount <= 0.f || IsDead()) return;
+	if (DamageAmount <= 0.f || IsDead() || bInvulnerable) return;
 
 	TriggerDamageOverlay();
 
@@ -241,6 +241,6 @@ bool UHealthComponent::IsDead() const
 void UHealthComponent::HandleTakeAnyDamage(AActor* DamagedActor, const float Damage, const UDamageType* DamageType,
 	AController* InstigatedBy, AActor* DamageCauser)
 {
-	UE_LOG(LogTemp, Warning, TEXT("[HealthComponent] HandleTakeAnyDamage called — Damage: %f"), Damage);
+	UE_LOG(LogTemp, Verbose, TEXT("[HealthComponent] HandleTakeAnyDamage called — Damage: %f"), Damage);
 	TakeDamage(Damage);
 }

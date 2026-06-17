@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: "0nnen"
+ * Last Updated by: "ArsStolas"
  * Class: HealthComponent - Header
 */
 
@@ -65,6 +65,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Health")
 	bool IsDead() const;
 
+	UFUNCTION(BlueprintCallable, Category="Health")
+	void SetInvulnerable(bool bNewInvulnerable) { bInvulnerable = bNewInvulnerable; }
+
+	UFUNCTION(BlueprintPure, Category="Health")
+	bool IsInvulnerable() const { return bInvulnerable; }
+
 	UPROPERTY(BlueprintAssignable, Category="Health")
 	FOnHealthChangedSignature OnHealthChanged;
 
@@ -80,6 +86,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health", meta=(ClampMin="1.0"))
 	float MaxHealth = 100.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health")
+	bool bInvulnerable = false;
 
 	UPROPERTY(EditAnywhere, Category="State Timing")
 	float DamageStateDuration = 0.6f;

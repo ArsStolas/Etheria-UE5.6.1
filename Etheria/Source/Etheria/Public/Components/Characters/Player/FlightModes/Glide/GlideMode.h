@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: ArsStolas
  * Class: GlideMode - Header
 */
 
@@ -28,6 +28,9 @@ public:
 		float InMinimumHeight);
 
 	bool CanStartGliding() const;
+
+	/** True while the player overlaps a wind column / wind stream — lets gliding start at any height. */
+	bool IsInWindZone() const;
 
 protected:
 	// ===== VITESSE ET MOUVEMENT =====
