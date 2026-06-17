@@ -85,6 +85,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGolemRecoverFromTopple);
 /** A head-crystal critical landed (player Damage * HeadCritMultiplier applied to the boss). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemCriticalHit, float, Damage, FName, Id);
 
+/** A montage hit a designer-placed cue marker (anim start, anticipation, enrage roar, footstep…). Tag says which one. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGolemAnimCue, FName, Tag);
+
 UCLASS(ClassGroup = (AI), Blueprintable, meta = (BlueprintSpawnableComponent))
 class ETHERIA_API UGolemBossComponent : public UActorComponent
 {
@@ -119,6 +122,9 @@ public:
 	/** Launch the thrown rock from the hand NOW — call from an AnimNotify at the throw-release frame. It leaves the
 	 *  ThrowSocketName socket and flies to the impact, landing on the strike. No-op outside a rock-throw wind-up. */
 	UFUNCTION(BlueprintCallable, Category = "Golem") void LaunchRockNow();
+
+	/** Broadcast a named animation cue (used by the Golem Cue AnimNotify for anim-start/anticipation/enrage/etc markers). Bind OnGolemAnimCue in BP. */
+	UFUNCTION(BlueprintCallable, Category = "Golem") void FireAnimCue(FName Tag) { OnGolemAnimCue.Broadcast(Tag); }
 
 	/** Interrupt the current attack (stagger/break/scripted). Fires OnGolemAttackEnd(interrupted = true). */
 	UFUNCTION(BlueprintCallable, Category = "Golem") void InterruptAttack();
@@ -210,6 +216,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemToppled OnGolemToppled;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemRecoverFromTopple OnGolemRecoverFromTopple;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemCriticalHit OnGolemCriticalHit;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemAnimCue OnGolemAnimCue;
 
 	/* ═══════════ Config ═══════════ */
 
