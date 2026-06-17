@@ -1,0 +1,84 @@
+Begin Object Class=/Script/Engine.Skeleton Name="UE4_Mannequin_Skeleton" ExportPath="/Script/Engine.Skeleton'/Game/Sekiro/Character/UE4_Mannequin_Skeleton.UE4_Mannequin_Skeleton'"
+   Begin Object Class=/Script/Engine.SkeletalMeshSocket Name="SkeletalMeshSocket_0" ExportPath="/Script/Engine.SkeletalMeshSocket'/Game/Sekiro/Character/UE4_Mannequin_Skeleton.UE4_Mannequin_Skeleton:SkeletalMeshSocket_0'"
+   End Object
+   Begin Object Class=/Script/Engine.AnimCurveMetaData Name="AnimCurveMetaData_0" ExportPath="/Script/Engine.AnimCurveMetaData'/Game/Sekiro/Character/UE4_Mannequin_Skeleton.UE4_Mannequin_Skeleton:AnimCurveMetaData_0'"
+   End Object
+   Begin Object Name="SkeletalMeshSocket_0" ExportPath="/Script/Engine.SkeletalMeshSocket'/Game/Sekiro/Character/UE4_Mannequin_Skeleton.UE4_Mannequin_Skeleton:SkeletalMeshSocket_0'"
+      SocketName="Hair"
+      BoneName="head"
+      RelativeLocation=(X=16.095316,Y=-0.000006,Z=-0.000045)
+   End Object
+   Begin Object Name="AnimCurveMetaData_0" ExportPath="/Script/Engine.AnimCurveMetaData'/Game/Sekiro/Character/UE4_Mannequin_Skeleton.UE4_Mannequin_Skeleton:AnimCurveMetaData_0'"
+      CurveMetaData=(("blendOrient1", ()),("blendParent1", ()),("thigh_r", ()),("calf_r", ()),("foot_r", ()),("spine_02", ()),("upperarm_l", ()),("spine_01", ()),("lowerarm_l", ()),("head", ()),("hand_l", ()),("pelvis", ()),("calf_l", ()),("thigh_l", ()),("foot_l", ()),("upperarm_r", ()),("lowerarm_r", ()),("hand_r", ()))
+   End Object
+   BoneTree(2)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(3)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(4)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(5)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(6)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(7)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(8)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(9)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(10)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(11)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(12)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(13)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(14)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(15)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(16)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(17)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(18)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(19)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(20)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(21)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(22)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(23)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(24)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(25)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(26)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(27)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(28)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(29)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(30)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(31)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(32)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(33)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(34)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(35)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(36)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(37)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(38)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(39)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(40)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(41)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(42)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(43)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(44)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(45)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(46)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(47)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(48)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(49)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(50)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(51)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(52)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(53)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(54)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(55)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(56)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(57)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(58)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(59)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(60)=(TranslationRetargetingMode=Skeleton)
+   BoneTree(67)=()
+   Sockets(0)="/Script/Engine.SkeletalMeshSocket'SkeletalMeshSocket_0'"
+   SlotGroups(0)=(SlotNames=("DefaultSlot"))
+   PreviewSkeletalMesh="/Game/Sekiro/Character/SK_Mannequin.SK_Mannequin"
+   AnimationNotifies(0)="ThrowRope"
+   AnimationNotifies(1)="PullRope"
+   AnimationNotifies(2)="Rope Appears"
+   AnimationNotifies(3)="StartMovement"
+   AnimationNotifies(4)="RopeDissapear"
+   AnimationNotifies(5)="AnimEnd"
+   AssetUserData(0)="/Script/Engine.AnimCurveMetaData'AnimCurveMetaData_0'"
+End Object
