@@ -400,10 +400,10 @@ void AWindColumn::ApplyLift(APlayerCharacter* Player)
 
 	FVector Vel = MoveComp->Velocity;
 
-	// At the top: stop lifting and cap to a gentle exit speed so the player pops out without being flung too high.
+	// At the top: stop lifting and give a small controlled pop (a few metres up), not a catapult.
 	if (DistanceFromTop >= -ExitTopMargin)
 	{
-		Vel.Z = FMath::Min(Vel.Z, ExitBoostForce);
+		Vel.Z = ExitBoostForce;
 		MoveComp->Velocity = Vel;
 		return;
 	}

@@ -26,7 +26,16 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Golem") UGolemBossComponent* GetGolemBoss() const { return GolemBossComponent; }
 
+	/** Anchored giant: it can never be knocked back or shoved out of place by the player, yet stays fully hittable.
+	 *  The body is frozen in world space (it only yaws to face the target). Turn OFF for a pushable Golem. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Contact") bool bImmovable = true;
+
+	/** While bImmovable, swallow every launch (player combat-impulse notify, AoE knockback) so the body never moves. */
+	virtual void LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride) override;
+
 protected:
+	virtual void BeginPlay() override;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components") TObjectPtr<UGolemBossComponent> GolemBossComponent;
 
 private:

@@ -127,6 +127,7 @@ void UGolemBossComponent::BrainTick()
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
 
 	TickAirZones(BrainInterval);
+	TickContactRepulsion();
 
 	if (!bActivated)
 	{
@@ -232,15 +233,18 @@ void UGolemBossComponent::LaunchRockNow()
 	L.Origin = Origin; L.Target = Target; L.TravelTime = Travel; L.Index = 0; L.Count = 1;
 	OnGolemProjectileLaunch.Broadcast(L);
 
+	AGolemFallingRock* Rock = nullptr;
 	if (HeldRock)
 	{
-		HeldRock->Launch(Origin, Target, Travel, RockThrowArcHeight); // detach from the hand and throw it
+		Rock = HeldRock;
 		HeldRock = nullptr;
+		Rock->Launch(Origin, Target, Travel, RockThrowArcHeight); // detach from the hand and throw it
 	}
 	else
 	{
-		SpawnFallingRock(Origin, Target, Travel, RockThrowArcHeight); // BP-rock path / no held mesh
+		Rock = SpawnFallingRock(Origin, Target, Travel, RockThrowArcHeight); // BP-rock path / no held mesh
 	}
+	ApplyRockImpactDecal(Rock, Target, Cfg.ImpactRadius, Travel + 0.4f);
 }
 
 void UGolemBossComponent::InterruptAttack()
@@ -278,6 +282,28 @@ void UGolemBossComponent::TickFacing(float DeltaTime)
 	const FRotator Cur = OwnerCharacter->GetActorRotation();
 	const float NewYaw = FMath::FixedTurn(Cur.Yaw, DesiredYaw, FaceTurnSpeed * DeltaTime);
 	OwnerCharacter->SetActorRotation(FRotator(Cur.Pitch, NewYaw, Cur.Roll));
+}
+
+void UGolemBossComponent::TickContactRepulsion()
+{
+	if (!bRepelOnContact || !OwnerCharacter || OwnerCharacter->IsDead()) return;
+
+	ACharacter* Player = Cast<ACharacter>(OwnerCharacter->GetCurrentTarget());
+	if (!Player) return;
+
+	FVector Out = Player->GetActorLocation() - OwnerCharacter->GetActorLocation();
+	Out.Z = 0.f;
+	const float Dist = Out.Size();
+	if (Dist <= 1.f || Dist >= RepulsionRadius) return; // not touching the body
+
+	const UWorld* W = GetWorld();
+	const float Now = W ? W->GetTimeSeconds() : 0.f;
+	if (Now < NextRepulsionTime) return; // brief cooldown so the player isn't pinned
+	NextRepulsionTime = Now + RepulsionInterval;
+
+	const FVector Dir = Out / Dist;
+	Player->LaunchCharacter(Dir * RepulsionForce + FVector(0.f, 0.f, RepulsionForce * 0.25f), true, false);
+	OnGolemRepelledPlayer.Broadcast(Player, Dir);
 }
 
 void UGolemBossComponent::BeginAttack(int32 Index)
@@ -323,10 +349,11 @@ void UGolemBossComponent::BeginAttack(int32 Index)
 		}
 	}
 
-	// Ground warning decals so players can read where attacks land before the final VFX exist.
+	// Ground warning decals. The thrown rock & avalanche boulders grow their OWN decal as they approach
+	// (ApplyRockImpactDecal); here we only handle the rock-less attacks.
 	if (bSpawnTelegraphDecals)
 	{
-		if (Cfg.Shape == EGolemHazardShape::RadialSlam || Cfg.Shape == EGolemHazardShape::ProjectileImpact)
+		if (Cfg.Shape == EGolemHazardShape::RadialSlam)
 		{
 			if (CurrentTelegraph.ImpactPoints.Num() > 0)
 				SpawnTelegraphDecal(CurrentTelegraph.ImpactPoints[0], Cfg.ImpactRadius, Cfg.WindupDuration + 0.4f);
@@ -614,13 +641,16 @@ void UGolemBossComponent::BuildTelegraph(const FGolemAttackConfig& Cfg, FGolemTe
 	}
 	case EGolemHazardShape::SweepLine:
 	{
-		FVector TravelDir = ResolveTargetLocation() - Centre;
-		TravelDir.Z = 0.f;
-		TravelDir = TravelDir.GetSafeNormal();
-		if (TravelDir.IsNearlyZero()) TravelDir = YawRotate(FVector::ForwardVector, FMath::FRandRange(0.f, 360.f));
+		// Sideways arm sweep only: travel along the Golem's RIGHT axis (left<->right), never behind its back
+		// or straight front-to-back — the arms can't reach there.
+		FVector Side = OwnerCharacter ? OwnerCharacter->GetActorRightVector() : FVector::RightVector;
+		Side.Z = 0.f;
+		Side = Side.GetSafeNormal();
+		if (Side.IsNearlyZero()) Side = FVector::RightVector;
+		if (FMath::RandBool()) Side = -Side; // left->right or right->left
 
-		Out.LineDirection = TravelDir;
-		Out.LineCentre = Centre - TravelDir * Radius;
+		Out.LineDirection = Side;
+		Out.LineCentre = Centre - Side * Radius;
 		Out.LineLength = Cfg.SweepLength;
 		Out.LineThickness = Cfg.SweepThickness;
 		break;
@@ -817,9 +847,8 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 				L.TravelTime = FMath::Max(Lead, 0.05f);
 				L.Index = i; L.Count = Num;
 				OnGolemProjectileLaunch.Broadcast(L);
-				SpawnFallingRock(L.Origin, L.Target, L.TravelTime, 0.f); // straight fall
-
-				if (bSpawnTelegraphDecals) SpawnTelegraphDecal(P, Cfg.ImpactRadius, FMath::Max(Lead, 0.1f) + 0.3f);
+				AGolemFallingRock* Rock = SpawnFallingRock(L.Origin, L.Target, L.TravelTime, 0.f); // straight fall
+				ApplyRockImpactDecal(Rock, P, Cfg.ImpactRadius, FMath::Max(Lead, 0.1f) + 0.3f);
 			}
 
 			// Impact.
@@ -878,11 +907,11 @@ void UGolemBossComponent::SpawnTelegraphDecal(const FVector& Location, float Rad
 	UGameplayStatics::SpawnDecalAtLocation(W, TelegraphDecalMaterial, DecalSize, Location, FRotator(-90.f, 0.f, 0.f), FMath::Max(LifeSpan, 0.1f));
 }
 
-void UGolemBossComponent::SpawnFallingRock(const FVector& Origin, const FVector& Target, float TravelTime, float ArcHeight)
+AGolemFallingRock* UGolemBossComponent::SpawnFallingRock(const FVector& Origin, const FVector& Target, float TravelTime, float ArcHeight)
 {
-	if (!bSpawnRockMeshes) return;
+	if (!bSpawnRockMeshes) return nullptr;
 	UWorld* W = GetWorld();
-	if (!W) return;
+	if (!W) return nullptr;
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -891,18 +920,27 @@ void UGolemBossComponent::SpawnFallingRock(const FVector& Origin, const FVector&
 	if (RockActorClass) // advanced: designer's own rock actor handles its own movement
 	{
 		W->SpawnActor<AActor>(RockActorClass, Origin, (Target - Origin).Rotation(), SpawnParams);
-		return;
+		return nullptr; // not our built-in rock, so no growing-decal control
 	}
 
-	if (RockMeshes.Num() == 0) return;
+	if (RockMeshes.Num() == 0) return nullptr;
 	UStaticMesh* Mesh = RockMeshes[FMath::RandRange(0, RockMeshes.Num() - 1)]; // each rock picks one at random
-	if (!Mesh) return;
+	if (!Mesh) return nullptr;
 
-	if (AGolemFallingRock* Rock = W->SpawnActor<AGolemFallingRock>(AGolemFallingRock::StaticClass(), Origin, FRotator::ZeroRotator, SpawnParams))
+	AGolemFallingRock* Rock = W->SpawnActor<AGolemFallingRock>(AGolemFallingRock::StaticClass(), Origin, FRotator::ZeroRotator, SpawnParams);
+	if (Rock)
 	{
 		Rock->Configure(Mesh, RockMeshScale, RockSpinSpeed);
 		Rock->Launch(Origin, Target, TravelTime, ArcHeight);
 	}
+	return Rock;
+}
+
+void UGolemBossComponent::ApplyRockImpactDecal(AGolemFallingRock* Rock, const FVector& Target, float Radius, float StaticLifeSpan)
+{
+	if (!bSpawnTelegraphDecals || !TelegraphDecalMaterial || Radius <= 0.f) return;
+	if (Rock) Rock->SetImpactDecal(TelegraphDecalMaterial, Radius, DecalProjectionDepth); // grows as the rock approaches
+	else SpawnTelegraphDecal(Target, Radius, StaticLifeSpan); // BP-rock / no-mesh fallback: a static warning
 }
 
 void UGolemBossComponent::SpawnHeldRock()

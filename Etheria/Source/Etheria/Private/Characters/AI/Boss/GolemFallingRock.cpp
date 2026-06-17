@@ -8,7 +8,10 @@
 #include "Characters/AI/Boss/GolemFallingRock.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Components/DecalComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "Kismet/GameplayStatics.h"
 
 AGolemFallingRock::AGolemFallingRock()
 {
@@ -50,6 +53,21 @@ void AGolemFallingRock::Launch(FVector Start, FVector End, float InDuration, flo
 	SetActorTickEnabled(true);
 }
 
+void AGolemFallingRock::SetImpactDecal(UMaterialInterface* Material, float Radius, float ProjectionDepth)
+{
+	if (!Material || Radius <= 0.f) return;
+	UWorld* W = GetWorld();
+	if (!W) return;
+
+	DecalFullRadius = Radius;
+	DecalDepth = FMath::Max(ProjectionDepth, 1.f);
+
+	// Spawn at the impact point, small at first; Tick grows it toward full radius as the rock nears. Lingers briefly after impact.
+	const float StartR = Radius * 0.25f;
+	ImpactDecal = UGameplayStatics::SpawnDecalAtLocation(W, Material, FVector(DecalDepth, StartR, StartR),
+		EndLoc, FRotator(-90.f, 0.f, 0.f), Duration + 0.5f);
+}
+
 void AGolemFallingRock::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -64,6 +82,13 @@ void AGolemFallingRock::Tick(float DeltaTime)
 	FVector Loc = FMath::Lerp(StartLoc, EndLoc, Alpha);
 	Loc.Z += Arc * FMath::Sin(Alpha * PI); // parabolic lift; Arc = 0 gives a straight fall
 	SetActorLocation(Loc);
+
+	if (ImpactDecal) // grow the ground warning as the rock approaches
+	{
+		const float R = FMath::Lerp(DecalFullRadius * 0.25f, DecalFullRadius, Alpha);
+		ImpactDecal->DecalSize = FVector(DecalDepth, R, R);
+		ImpactDecal->MarkRenderStateDirty();
+	}
 
 	if (Alpha >= 1.f) Destroy();
 }

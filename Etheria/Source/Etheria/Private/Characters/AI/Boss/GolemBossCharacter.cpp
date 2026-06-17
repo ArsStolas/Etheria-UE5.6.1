@@ -9,6 +9,7 @@
 
 #include "Characters/AI/Boss/GolemBossComponent.h"
 #include "Characters/AI/Boss/GolemBossController.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 AGolemBossCharacter::AGolemBossCharacter()
@@ -24,10 +25,32 @@ AGolemBossCharacter::AGolemBossCharacter()
 	if (UCharacterMovementComponent* MC = GetCharacterMovement())
 		MC->bOrientRotationToMovement = false;
 
+	// Big-boss footprint by default (the root capsule must stay the root on a Character — tune to your mesh in BP).
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+		Capsule->InitCapsuleSize(120.f, 300.f);
+
 	// Stationary arena boss: don't drop aggro at the default 2000cm leash (sight is arena-wide).
 	LeashRange = 100000.f;
 
 	BuildDefaultAttacks();
+}
+
+void AGolemBossCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Anchored giant: freeze the movement component so contact / depenetration can never drift the body off its mark.
+	// Collision stays untouched (the capsule still blocks the player and receives hits); facing yaw uses SetActorRotation.
+	if (bImmovable)
+		if (UCharacterMovementComponent* MC = GetCharacterMovement())
+			MC->DisableMovement();
+}
+
+void AGolemBossCharacter::LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride)
+{
+	// The arena Golem absorbs hits without being knocked back — you can damage it, but you can't shove it.
+	if (bImmovable) return;
+	Super::LaunchCharacter(LaunchVelocity, bXYOverride, bZOverride);
 }
 
 void AGolemBossCharacter::BuildDefaultAttacks()

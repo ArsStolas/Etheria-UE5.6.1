@@ -88,6 +88,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemCriticalHit, float, Damage,
 /** A montage hit a designer-placed cue marker (anim start, anticipation, enrage roar, footstep…). Tag says which one. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGolemAnimCue, FName, Tag);
 
+/** The boss shoved the player back on contact. Bind for a "thud" SFX / knockback VFX / camera shake. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemRepelledPlayer, AActor*, Player, FVector, Direction);
+
 UCLASS(ClassGroup = (AI), Blueprintable, meta = (BlueprintSpawnableComponent))
 class ETHERIA_API UGolemBossComponent : public UActorComponent
 {
@@ -217,6 +220,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemRecoverFromTopple OnGolemRecoverFromTopple;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemCriticalHit OnGolemCriticalHit;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemAnimCue OnGolemAnimCue;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemRepelledPlayer OnGolemRepelledPlayer;
 
 	/* ═══════════ Config ═══════════ */
 
@@ -287,6 +291,20 @@ public:
 	/** Yaw turn speed (deg/sec) when facing the target. Giants should turn slowly. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Facing", meta = (ClampMin = "1", EditCondition = "bFaceTarget")) float FaceTurnSpeed = 60.f;
 
+	/* ── Contact repulsion ── */
+
+	/** Shove the player back when they touch the Golem's body — you can't walk into a giant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Contact") bool bRepelOnContact = true;
+
+	/** Distance (cm) from the Golem within which the player is pushed out. Set to roughly the Golem's body radius. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Contact", meta = (ClampMin = "0", EditCondition = "bRepelOnContact")) float RepulsionRadius = 500.f;
+
+	/** Outward launch speed (cm/s) applied to the player on contact. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Contact", meta = (ClampMin = "0", EditCondition = "bRepelOnContact")) float RepulsionForce = 1200.f;
+
+	/** Minimum delay between two shoves so the player isn't pinned in place. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Contact", meta = (ClampMin = "0", EditCondition = "bRepelOnContact")) float RepulsionInterval = 0.6f;
+
 	/* ── Sockets ── */
 
 	/** Eye sockets/bones the laser originates from. If unset/missing, the laser falls back to the actor location + a forward offset. */
@@ -318,8 +336,8 @@ public:
 	/** Rock meshes to choose from — every rock picks ONE of these at random. Assign 3 (or any number) for variety. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Rocks") TArray<TObjectPtr<UStaticMesh>> RockMeshes;
 
-	/** Uniform scale applied to each spawned rock mesh. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Rocks", meta = (ClampMin = "0.01")) float RockMeshScale = 1.f;
+	/** Uniform world scale applied to each spawned rock mesh. Bump it up for a giant Golem (rocks should look heavy). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Rocks", meta = (ClampMin = "0.01")) float RockMeshScale = 3.f;
 
 	/** Arc height (cm) of the THROWN rock's flight. Avalanche boulders always fall straight. 0 = straight line. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Rocks", meta = (ClampMin = "0")) float RockThrowArcHeight = 500.f;
@@ -356,6 +374,7 @@ private:
 	void OnRecoveryElapsed();// one-shot timer -> FinishAttack
 	void TickActive(float DeltaTime);
 	void TickFacing(float DeltaTime);
+	void TickContactRepulsion();
 
 	void BeginAttack(int32 Index);
 	void EnterActive();
@@ -376,8 +395,9 @@ private:
 	void GetEyeOrigins(TArray<FVector>& Out) const;
 	FVector GetThrowOrigin() const;
 	void SpawnTelegraphDecal(const FVector& Location, float RadiusXY, float LifeSpan) const;
-	void SpawnFallingRock(const FVector& Origin, const FVector& Target, float TravelTime, float ArcHeight);
+	AGolemFallingRock* SpawnFallingRock(const FVector& Origin, const FVector& Target, float TravelTime, float ArcHeight);
 	void SpawnHeldRock();
+	void ApplyRockImpactDecal(AGolemFallingRock* Rock, const FVector& Target, float Radius, float StaticLifeSpan);
 	void BuildBeams(const FGolemAttackConfig& Cfg, float RotateDeg, TArray<FGolemBeamSegment>& Out) const;
 	FVector ResolveArenaCentre() const;
 	FVector ClampToArena(const FVector& P, float Margin = 0.f) const;
@@ -428,6 +448,7 @@ private:
 	float ActiveDurationCache = 0.f;  // the attack's full active duration (for Alpha)
 	float DamageTickAccum = 0.f;
 	float NextAttackReadyTime = 0.f;  // world time the global cooldown lets the next attack start
+	float NextRepulsionTime = 0.f;    // world time the next contact shove is allowed
 	TArray<float> AttackReadyTimes;   // per-attack world time it comes off cooldown (parallel to Attacks)
 
 	// Resolved geometry for the in-flight attack (filled at BeginAttack, reused through Active).
