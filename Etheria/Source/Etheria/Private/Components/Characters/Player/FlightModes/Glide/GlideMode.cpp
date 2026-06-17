@@ -1,13 +1,15 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: ArsStolas
  * Class: GlideMode - Source
 */
 
 #include "Components/Characters/Player/FlightModes/Glide/GlideMode.h"
 #include "Characters/Players/PlayerCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "World/Environment/WindColumn.h"
+#include "World/Environment/WindStreamZone.h"
 
 void UGlideMode::ConfigureGlideTuning(
 	float InGlideSpeed,
@@ -50,20 +52,34 @@ void UGlideMode::Exit()
 
 bool UGlideMode::CanStartGliding() const
 {
-	if (!Owner) return false;
+	if (!Owner || !Owner->GetCharacterMovement()->IsFalling()) return false;
+
+	// In a wind column / stream, gliding is allowed at any height — skip the ground-clearance check.
+	if (IsInWindZone()) return true;
 
 	FHitResult Hit;
-	FVector TraceStart = Owner->GetActorLocation();
-	FVector TraceEnd = TraceStart - Owner->GetActorUpVector() * MinimumHeight;
+	const FVector TraceStart = Owner->GetActorLocation();
+	const FVector TraceEnd = TraceStart - Owner->GetActorUpVector() * MinimumHeight;
 
 	FCollisionQueryParams QueryParams;
 	QueryParams.AddIgnoredActor(Owner);
 
-	bool bHit = Owner->GetWorld()->LineTraceSingleByChannel(
-		Hit, TraceStart, TraceEnd, ECC_Visibility, QueryParams
-	);
+	const bool bGroundClose = Owner->GetWorld()->LineTraceSingleByChannel(
+		Hit, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
 
-	return (!bHit && Owner->GetCharacterMovement()->IsFalling());
+	return !bGroundClose;
+}
+
+bool UGlideMode::IsInWindZone() const
+{
+	if (!Owner) return false;
+
+	TArray<AActor*> Overlapping;
+	Owner->GetOverlappingActors(Overlapping, AWindColumn::StaticClass());
+	if (Overlapping.Num() > 0) return true;
+
+	Owner->GetOverlappingActors(Overlapping, AWindStreamZone::StaticClass());
+	return Overlapping.Num() > 0;
 }
 
 void UGlideMode::TickMode(float DeltaTime)

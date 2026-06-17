@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: ArsStolas
  * Class: WindColumn - Header
 */
 
@@ -53,12 +53,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind|Settings")
 	bool bAffectOnlyGliding = true; // If true, only gliding/diving players are lifted.
 
-	// === EXIT BOOST ===
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind|Boost", meta=(ClampMin="0.0", UIMin="0.0", UIMax="15000.0"))
-	float ExitBoostForce = 10000.f; // Extra vertical speed added when the player exits through the top.
+	// === EXIT ===
+	// Gentle upward speed (cm/s) the player is capped to at the top, so they pop out without flying too high.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind|Boost", meta=(ClampMin="0.0", UIMin="0.0", UIMax="3000.0"))
+	float ExitBoostForce = 700.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind|Boost", meta=(ClampMin="0.0", UIMin="0.0", UIMax="300.0"))
-	float ExitTopMargin = 100.f; // Distance tolerance around the column top used to trigger the exit boost.
+	float ExitTopMargin = 100.f; // Distance below the top within which the gentle exit cap kicks in.
 
 	// === VISUALS ===
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind|Visual")
@@ -129,7 +130,4 @@ private:
 
 	UPROPERTY()
 	TMap<APlayerCharacter*, FTimerHandle> ActiveTimers;
-
-	UPROPERTY()
-	TSet<APlayerCharacter*> BoostedThisStay;
 };

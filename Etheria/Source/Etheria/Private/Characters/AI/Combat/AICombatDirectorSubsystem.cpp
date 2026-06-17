@@ -22,10 +22,22 @@ void UAICombatDirectorSubsystem::PruneLeases(TArray<FAttackLease>& Leases, float
 	});
 }
 
+void UAICombatDirectorSubsystem::SweepStaleEntries()
+{
+	const float Now = NowSeconds();
+	if (Now - LastSweepTime < 5.f) return; // amortized cleanup, every ~5s
+	LastSweepTime = Now;
+	for (auto It = TokensByTarget.CreateIterator(); It; ++It)
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+	for (auto It = LastAttackStartByTarget.CreateIterator(); It; ++It)
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+}
+
 bool UAICombatDirectorSubsystem::RequestAttackToken(AActor* Target, AActor* Attacker, int32 MaxAttackers, float LeaseDuration)
 {
 	if (!Target || !Attacker) return false;
 
+	SweepStaleEntries();
 	const float Now = NowSeconds();
 	const float Lease = FMath::Max(LeaseDuration, 0.1f);
 
@@ -94,6 +106,21 @@ bool UAICombatDirectorSubsystem::HasAttackToken(AActor* Target, AActor* Attacker
 				return true;
 
 	return false;
+}
+
+bool UAICombatDirectorSubsystem::IsAttackWindowOpen(AActor* Target, float MinInterval) const
+{
+	if (!Target || MinInterval <= 0.f) return true;
+	const float Now = NowSeconds();
+	if (const float* Last = LastAttackStartByTarget.Find(Target))
+		if ((Now - *Last) < MinInterval)
+			return false;
+	return true;
+}
+
+void UAICombatDirectorSubsystem::NotifyAttackStarted(AActor* Target)
+{
+	if (Target) LastAttackStartByTarget.Add(Target, NowSeconds());
 }
 
 int32 UAICombatDirectorSubsystem::GetAttackerCount(AActor* Target) const

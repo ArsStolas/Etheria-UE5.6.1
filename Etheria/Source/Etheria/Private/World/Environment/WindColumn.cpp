@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: ArsStolas
  * Class: WindColumn - Source
 */
 
@@ -112,7 +112,6 @@ void AWindColumn::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	ActiveTimers.Empty();
-	BoostedThisStay.Empty();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -297,7 +296,7 @@ void AWindColumn::DrawWindDebug() const
 		false);
 
 	const FString DebugText = FString::Printf(
-		TEXT("WindColumn\nNiagara:%s Ring:%s\nPlayers:%d Lift:%.0f Damping:%.2f\nBoost:%.0f Margin:%.0f Interval:%.3f"),
+		TEXT("WindColumn\nNiagara:%s Ring:%s\nPlayers:%d Lift:%.0f Damping:%.2f\nExitSpeed:%.0f Margin:%.0f Interval:%.3f"),
 		ColumnNiagaraSystem ? TEXT("OK") : TEXT("NONE"),
 		ExitRingNiagaraSystem ? TEXT("OK") : TEXT("NONE"),
 		ActiveTimers.Num(),
@@ -336,7 +335,6 @@ void AWindColumn::OnBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 					GetWorldTimerManager().ClearTimer(*Handle);
 				}
 				ActiveTimers.Remove(Player);
-				BoostedThisStay.Remove(Player);
 				return;
 			}
 
@@ -364,29 +362,6 @@ void AWindColumn::OnEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor*
 		GetWorldTimerManager().ClearTimer(*Handle);
 		ActiveTimers.Remove(Player);
 	}
-
-	const FVector PlayerLoc = Player->GetActorLocation();
-	const float DistanceFromTop = FVector::DotProduct(PlayerLoc - GetColumnWorldTop(), WindArea->GetUpVector());
-
-	if (DistanceFromTop > -ExitTopMargin && DistanceFromTop < ExitTopMargin)
-	{
-		UCharacterMovementComponent* MoveComp = Player->GetCharacterMovement();
-		if (MoveComp)
-		{
-			FVector Vel = MoveComp->Velocity;
-			Vel.Z += ExitBoostForce;
-			MoveComp->Velocity = Vel;
-
-			WIND_COLUMN_LOG(Log, TEXT("[WindColumn] EXIT BOOST %s | VelZ=%.1f"), *Player->GetName(), Vel.Z);
-
-			if (bWindDebugMode)
-			{
-				DrawDebugString(GetWorld(), PlayerLoc + FVector(0.f, 0.f, 100.f), TEXT("Exit Boost!"), nullptr, FColor::Cyan, 2.f);
-			}
-		}
-	}
-
-	BoostedThisStay.Remove(Player);
 }
 
 void AWindColumn::ApplyLift(APlayerCharacter* Player)
@@ -420,8 +395,20 @@ void AWindColumn::ApplyLift(APlayerCharacter* Player)
 		return;
 	}
 
+	const FVector PlayerLoc = Player->GetActorLocation();
+	const float DistanceFromTop = FVector::DotProduct(PlayerLoc - GetColumnWorldTop(), WindArea->GetUpVector());
+
 	FVector Vel = MoveComp->Velocity;
 
+	// At the top: stop lifting and cap to a gentle exit speed so the player pops out without being flung too high.
+	if (DistanceFromTop >= -ExitTopMargin)
+	{
+		Vel.Z = FMath::Min(Vel.Z, ExitBoostForce);
+		MoveComp->Velocity = Vel;
+		return;
+	}
+
+	// Below the top: steady lift.
 	if (Vel.Z < 0.f)
 	{
 		Vel.Z *= (1.f - VerticalDamping);
@@ -431,29 +418,6 @@ void AWindColumn::ApplyLift(APlayerCharacter* Player)
 	Vel.Z = FMath::Clamp(Vel.Z, -500.f, 2500.f);
 
 	MoveComp->Velocity = Vel;
-
-	const FVector PlayerLoc = Player->GetActorLocation();
-	const float DistanceFromTop = FVector::DotProduct(PlayerLoc - GetColumnWorldTop(), WindArea->GetUpVector());
-
-	if (DistanceFromTop >= -ExitTopMargin && !BoostedThisStay.Contains(Player))
-	{
-		Vel = MoveComp->Velocity;
-		Vel.Z += ExitBoostForce;
-		MoveComp->Velocity = Vel;
-
-		BoostedThisStay.Add(Player);
-
-		WIND_COLUMN_LOG(Log, TEXT("[WindColumn] TOP BOOST %s | VelZ=%.1f"), *Player->GetName(), Vel.Z);
-
-		if (bWindDebugMode)
-		{
-			DrawDebugString(GetWorld(), PlayerLoc + FVector(0.f, 0.f, 100.f), TEXT("Top Boost!"), nullptr, FColor::Cyan, 1.f);
-		}
-	}
-	else if (DistanceFromTop < -ExitTopMargin && BoostedThisStay.Contains(Player))
-	{
-		BoostedThisStay.Remove(Player);
-	}
 }
 
 float AWindColumn::GetSafeApplyInterval() const

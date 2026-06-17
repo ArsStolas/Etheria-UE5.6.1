@@ -78,8 +78,27 @@ void UAIAnimationComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		}
 
 		if (!bLocomotionPaused && !bIsPlayingIdleVariation)
+		{
 			UpdateLocomotionDirect();
+			ApplyLocomotionSpeedMatch();
+		}
 	}
+}
+
+void UAIAnimationComponent::ApplyLocomotionSpeedMatch()
+{
+	if (!OwnerCharacter) return;
+	USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+	const UCharacterMovementComponent* MC = OwnerCharacter->GetCharacterMovement();
+	if (!Mesh || !MC) return;
+
+	const float Speed = MC->Velocity.Size2D();
+	if (Speed < IdleSpeedThreshold) return; // idle clip plays at its own rate
+
+	const bool bRunning = (CurrentLocomotionState == EAILocomotionState::RunForward || CurrentLocomotionState == EAILocomotionState::RunBackward);
+	const float Ref = bRunning ? RunRefSpeed : WalkRefSpeed;
+	// Match the clip's play rate to actual capsule speed so feet don't slide between the coarse walk/run buckets.
+	Mesh->SetPlayRate(FMath::Clamp(Speed / FMath::Max(Ref, 1.f), 0.6f, 1.6f));
 }
 
 /* ═══════════ ABP Variable Feeding ═══════════ */
@@ -146,11 +165,19 @@ void UAIAnimationComponent::UpdateLocomotionDirect()
 	const float Speed = Vel.Size2D();
 	if (Speed < IdleSpeedThreshold) { SetLocomotionState(EAILocomotionState::Idle); return; }
 
-	const bool bFwd = FVector::DotProduct(OwnerCharacter->GetActorForwardVector(), Vel.GetSafeNormal2D()) >= 0.f;
+	const FVector Dir2D = Vel.GetSafeNormal2D();
+	const float FwdDot = FVector::DotProduct(OwnerCharacter->GetActorForwardVector(), Dir2D);
 	if (Speed >= RunSpeedThreshold)
-		SetLocomotionState(bFwd ? EAILocomotionState::RunForward : EAILocomotionState::RunBackward);
+	{
+		SetLocomotionState(FwdDot >= 0.f ? EAILocomotionState::RunForward : EAILocomotionState::RunBackward);
+		return;
+	}
+	// Walking: pick a lateral strafe state when moving more sideways than forward/back (combat orbit while facing target).
+	const float RightDot = FVector::DotProduct(OwnerCharacter->GetActorRightVector(), Dir2D);
+	if (FMath::Abs(RightDot) > FMath::Abs(FwdDot))
+		SetLocomotionState(RightDot >= 0.f ? EAILocomotionState::WalkRight : EAILocomotionState::WalkLeft);
 	else
-		SetLocomotionState(bFwd ? EAILocomotionState::WalkForward : EAILocomotionState::WalkBackward);
+		SetLocomotionState(FwdDot >= 0.f ? EAILocomotionState::WalkForward : EAILocomotionState::WalkBackward);
 }
 
 void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
@@ -168,6 +195,8 @@ void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
 	case EAILocomotionState::WalkBackward: T = WalkBackwardMontage ? WalkBackwardMontage.Get() : WalkForwardMontage.Get(); break;
 	case EAILocomotionState::RunForward:   T = RunForwardMontage; break;
 	case EAILocomotionState::RunBackward:  T = RunBackwardMontage ? RunBackwardMontage.Get() : RunForwardMontage.Get(); break;
+	case EAILocomotionState::WalkLeft:     T = WalkLeftMontage  ? WalkLeftMontage.Get()  : WalkForwardMontage.Get(); break;
+	case EAILocomotionState::WalkRight:    T = WalkRightMontage ? WalkRightMontage.Get() : WalkForwardMontage.Get(); break;
 	case EAILocomotionState::Falling:      T = FallingMontage; break;
 	case EAILocomotionState::Landing:      T = LandingMontage; break;
 	}
@@ -181,8 +210,22 @@ void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
 UAnimMontage* UAIAnimationComponent::PlayRandomIdle()
 {
 	if (IdleVariations.Num() == 0) return nullptr;
-	UAnimMontage* R = PlayActionMontage(IdleVariations[FMath::RandRange(0, IdleVariations.Num() - 1)], IdlePlayRate);
+	int32 Idx = FMath::RandRange(0, IdleVariations.Num() - 1);
+	if (IdleVariations.Num() > 1 && Idx == LastIdleIndex) Idx = (Idx + 1) % IdleVariations.Num(); // no immediate repeat
+	LastIdleIndex = Idx;
+	UAnimMontage* R = PlayActionMontage(IdleVariations[Idx], IdlePlayRate);
 	if (R) bIsPlayingIdleVariation = true;
+	return R;
+}
+
+UAnimMontage* UAIAnimationComponent::PlayRandomActivity()
+{
+	if (ActivityMontages.Num() == 0) return nullptr;
+	int32 Idx = FMath::RandRange(0, ActivityMontages.Num() - 1);
+	if (ActivityMontages.Num() > 1 && Idx == LastActivityIndex) Idx = (Idx + 1) % ActivityMontages.Num(); // no immediate repeat
+	LastActivityIndex = Idx;
+	UAnimMontage* R = PlayActionMontage(ActivityMontages[Idx], IdlePlayRate);
+	if (R) bIsPlayingIdleVariation = true; // plays to completion like an idle variation
 	return R;
 }
 
@@ -215,6 +258,34 @@ UAnimMontage* UAIAnimationComponent::PlayRandomHitReaction()
 	if (HitReactionMontages.Num() == 0) return nullptr;
 	StopCurrentAction(); // Hit interrupts everything
 	return PlayActionMontage(HitReactionMontages[FMath::RandRange(0, HitReactionMontages.Num() - 1)]);
+}
+
+UAnimMontage* UAIAnimationComponent::PlayDirectionalHitReaction(const FVector& WorldHitDir)
+{
+	if (!OwnerCharacter || WorldHitDir.IsNearlyZero()) return PlayRandomHitReaction();
+
+	// WorldHitDir is the direction the hit TRAVELLED (attacker→us); flip it to point toward the attacker, then
+	// express it in local space: +X front, +Y right.
+	const FVector Local = OwnerCharacter->GetActorTransform().InverseTransformVectorNoScale((-WorldHitDir).GetSafeNormal2D());
+
+	const TArray<TObjectPtr<UAnimMontage>>* Pool;
+	if (FMath::Abs(Local.X) >= FMath::Abs(Local.Y)) Pool = (Local.X >= 0.f) ? &HitReactFront : &HitReactBack;
+	else                                            Pool = (Local.Y >= 0.f) ? &HitReactRight : &HitReactLeft;
+
+	if (Pool && Pool->Num() > 0)
+	{
+		StopCurrentAction(); // a hit interrupts everything
+		return PlayActionMontage((*Pool)[FMath::RandRange(0, Pool->Num() - 1)]);
+	}
+	return PlayRandomHitReaction(); // no directional clips authored → generic pool
+}
+
+UAnimMontage* UAIAnimationComponent::PlayStartle()
+{
+	// DirectPlayback creatures express startle through their flee locomotion; a montage here would pause locomotion
+	// and make them slide. Startle is an ABP (humanoid) feature where montages layer over the locomotion graph.
+	if (AnimationMode == EAIAnimationMode::DirectPlayback) return nullptr;
+	return StartleMontage ? PlayActionMontage(StartleMontage) : nullptr;
 }
 
 UAnimMontage* UAIAnimationComponent::PlayDeath() { return PlayRandomDeath(); }

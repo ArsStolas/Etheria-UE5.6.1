@@ -14,11 +14,13 @@
 #include "Characters/AI/Animations/AIAnimationComponent.h"
 #include "Characters/AI/Combat/AICombatComponent.h"
 #include "Characters/AI/Controller/BaseAIController.h"
+#include "Characters/AI/AIPackRegistrySubsystem.h"
 #include "Components/Characters/HealthComponent.h"
 #include "Components/SplineComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/OverlapResult.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -78,6 +80,14 @@ void ABaseAICharacter::BeginPlay()
 	if (UCharacterMovementComponent* MC = GetCharacterMovement())
 		MC->RotationRate = FRotator(0.f, AIMovementComponent->MovementRotationRate, 0.f);
 
+	// Animation URO — cheap CPU win for crowds (animate less often when far/small on screen).
+	if (bEnableAnimURO && GetMesh())
+		GetMesh()->bEnableUpdateRateOptimizations = true;
+
+	// Non-combat NPCs (passive, or neutral that won't fight back) never attack — skip the combat tick entirely.
+	if (AICombatComponent && !ShouldEngageTargets())
+		AICombatComponent->SetComponentTickEnabled(false);
+
 	if (AIMovementComponent && PatrolSpline)
 		AIMovementComponent->SetPatrolSpline(PatrolSpline);
 
@@ -112,10 +122,21 @@ void ABaseAICharacter::BeginPlay()
 
 	if (bStartDormant)
 		SetDormant(true);
+
+	// Register in the pack registry for O(1) pack lookups (instead of TActorIterator on hot paths).
+	if (PackID != NAME_None)
+		if (UWorld* W = GetWorld())
+			if (UAIPackRegistrySubsystem* Reg = W->GetSubsystem<UAIPackRegistrySubsystem>())
+				Reg->Register(this, PackID);
 }
 
 void ABaseAICharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (PackID != NAME_None)
+		if (UWorld* W = GetWorld())
+			if (UAIPackRegistrySubsystem* Reg = W->GetSubsystem<UAIPackRegistrySubsystem>())
+				Reg->Unregister(this, PackID);
+
 	if (UWorld* W = GetWorld())
 	{
 		W->GetTimerManager().ClearTimer(DormancyCheckTimerHandle);
@@ -138,8 +159,16 @@ void ABaseAICharacter::Tick(float DeltaTime)
 
 	if (bIsDormant) return;
 
-	if (PackID != NAME_None && !IsPackLeader() && CurrentState == EAIState::Patrolling)
-		UpdatePackFollow(DeltaTime);
+	TickThreatDecay(DeltaTime);
+
+	if (PackID != NAME_None && CurrentState == EAIState::Patrolling)
+	{
+		if (!IsPackLeader())
+			UpdatePackFollow(DeltaTime);
+		else if (AIMovementComponent && !AIMovementComponent->IsPatrolling()
+			&& AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
+			AIMovementComponent->StartPatrol(); // just promoted (old leader died) → resume own patrol
+	}
 
 #if ENABLE_DRAW_DEBUG
 	if (bShowDebugDormancy) DrawDebugDormancy();
@@ -165,6 +194,15 @@ float ABaseAICharacter::TakeDamage(float DamageAmount, const FDamageEvent& Damag
 	// during its death fade-out window before the actor is hidden.
 	if (CurrentState == EAIState::Dead) return 0.f;
 
+	// Capture the hit direction here — the OnTakeAnyDamage broadcast (fired by Super) carries no direction,
+	// so this is the only place to read it for a directional hit reaction.
+	if (DamageEvent.GetTypeID() == FPointDamageEvent::ClassID)
+		LastHitDirection = static_cast<const FPointDamageEvent&>(DamageEvent).ShotDirection;
+	else if (DamageCauser)
+		LastHitDirection = (GetActorLocation() - DamageCauser->GetActorLocation()).GetSafeNormal();
+	else
+		LastHitDirection = FVector::ZeroVector; // no direction → directional reaction falls back to random
+
 	return Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 }
 
@@ -189,6 +227,8 @@ void ABaseAICharacter::HandleHealthChanged(float NewHealth, float MaxHealth)
 		return;
 	}
 
+	LastHealthFraction = (MaxHealth > 0.f) ? (NewHealth / MaxHealth) : 1.f;
+
 	if (AICombatComponent && MaxHealth > 0.f)
 		AICombatComponent->EvaluatePhaseFromHP(NewHealth / MaxHealth);
 }
@@ -202,6 +242,13 @@ void ABaseAICharacter::SetAIState(EAIState NewState)
 	const EAIState OldState = CurrentState;
 	CurrentState = NewState;
 	OnAIStateChanged.Broadcast(OldState, NewState);
+
+	// Leaving an idle/patrol dwell for an active state: cancel any idle/activity montage so DirectPlayback
+	// locomotion isn't gated (the creature would otherwise slide while frozen in a graze/idle pose).
+	if ((OldState == EAIState::Idle || OldState == EAIState::Patrolling)
+		&& NewState != EAIState::Idle && NewState != EAIState::Patrolling
+		&& AIAnimationComponent && AIAnimationComponent->IsPlayingIdleVariation())
+		AIAnimationComponent->StopCurrentAction();
 
 	if (AICombatComponent)
 	{
@@ -228,6 +275,17 @@ void ABaseAICharacter::ClearTarget()
 	OnTargetLost.Broadcast();
 }
 
+void ABaseAICharacter::SetHostilityType(EAIHostilityType NewType)
+{
+	HostilityType = NewType;
+	// Combat tick follows whether this AI can now engage (so a runtime turn-hostile gets its combat back).
+	if (AICombatComponent)
+		AICombatComponent->SetComponentTickEnabled(ShouldEngageTargets());
+	// Re-arm/disable senses for the new hostility and disengage if it can no longer fight.
+	if (ABaseAIController* AIC = Cast<ABaseAIController>(GetController()))
+		AIC->ReconcileHostility();
+}
+
 void ABaseAICharacter::SetAwarenessLevel(EAIAwarenessLevel NewLevel)
 {
 	if (AwarenessLevel == NewLevel) return;
@@ -244,16 +302,108 @@ bool ABaseAICharacter::ShouldEngageTargets() const
 		|| (HostilityType == EAIHostilityType::Neutral && bFightBackWhenAttacked);
 }
 
+bool ABaseAICharacter::CanReactToPerception() const
+{
+	// Aggressive engage on sight; others keep perception if they can flee OR react with a look-at (notice).
+	if (HostilityType == EAIHostilityType::Aggressive) return true;
+	return bCanFlee || bNoticeReactions; // set both false on a truly inert NPC to disable its senses for perf
+}
+
+bool ABaseAICharacter::MatchesFleeTag(const AActor* Other) const
+{
+	if (!Other || FleeFromTags.Num() == 0) return false;
+	for (const FName& Tag : FleeFromTags)
+		if (Other->ActorHasTag(Tag)) return true;
+	return false;
+}
+
+bool ABaseAICharacter::IsValidTargetCandidate(AActor* Candidate) const
+{
+	if (!Candidate || Candidate == this) return false;
+	if (Cast<ABaseAICharacter>(Candidate))
+		return MatchesFleeTag(Candidate); // other AI allowed only if it's a tagged predator we flee
+	if (bOnlyDetectPlayers)
+	{
+		const APawn* P = Cast<APawn>(Candidate);
+		if (!P || !P->IsPlayerControlled())
+			return MatchesFleeTag(Candidate); // non-players allowed only if tagged predator
+	}
+	return true;
+}
+
+bool ABaseAICharacter::IsTargetDeadOrInvalid(const AActor* Target) const
+{
+	if (!IsValid(Target)) return true;
+	if (const ABaseAICharacter* AI = Cast<ABaseAICharacter>(Target)) return AI->IsDead();
+	if (const UHealthComponent* HC = Target->FindComponentByClass<UHealthComponent>()) return HC->IsDead();
+	return false;
+}
+
+/* ═══════════ Threat / Aggro ═══════════ */
+
+void ABaseAICharacter::AddThreat(AActor* Source, float Amount)
+{
+	// Only accumulate threat for things we could actually target (player/predator), never dead/invalid actors.
+	if (!bUseThreatSystem || Amount <= 0.f || !IsValidTargetCandidate(Source) || IsTargetDeadOrInvalid(Source)) return;
+	ThreatTable.FindOrAdd(Source) += Amount;
+}
+
+void ABaseAICharacter::EvaluateThreatSwitch()
+{
+	// Only REDIRECT an existing target; initial acquisition stays with perception/ReactToThreat.
+	if (!bUseThreatSystem || !CurrentTarget) return;
+
+	const ABaseAIController* AIC = Cast<ABaseAIController>(GetController());
+	const float CurThreat = ThreatTable.FindRef(CurrentTarget.Get());
+	AActor* Best = CurrentTarget;
+	float BestThreat = CurThreat;
+	for (const TPair<TWeakObjectPtr<AActor>, float>& Pair : ThreatTable)
+	{
+		AActor* A = Pair.Key.Get();
+		if (!A || A == CurrentTarget) continue;
+		// Never switch to a dead/invalid/out-of-territory actor — that would thrash (switch then bail next tick).
+		if (IsTargetDeadOrInvalid(A) || !IsValidTargetCandidate(A)) continue;
+		if (AIC && !AIC->IsThreatInTerritory(A)) continue;
+		if (Pair.Value > BestThreat) { BestThreat = Pair.Value; Best = A; }
+	}
+
+	if (Best && Best != CurrentTarget && BestThreat > CurThreat * ThreatSwitchMargin)
+		SetTarget(Best);
+}
+
+void ABaseAICharacter::TickThreatDecay(float DeltaTime)
+{
+	if (!bUseThreatSystem || ThreatTable.Num() == 0) return;
+	const float Decay = ThreatDecayPerSecond * DeltaTime;
+	for (auto It = ThreatTable.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid()) { It.RemoveCurrent(); continue; }
+		if (ThreatDecayPerSecond > 0.f)
+		{
+			It.Value() -= Decay;
+			if (It.Value() <= 0.f) It.RemoveCurrent();
+		}
+	}
+}
+
 bool ABaseAICharacter::ReactToThreat(AActor* Threat, bool bFromDamage)
 {
 	if (!Threat || CurrentState == EAIState::Dead || bIsDormant) return false;
+	if (CurrentState == EAIState::Interacting)
+	{
+		if (!bFromDamage) return false; // sight won't pull an NPC out of dialogue
+		EndInteraction();               // damage does: clear partner + close the UI before re-targeting
+	}
+
+	// Morale-break window: a just-routed AI keeps fleeing instead of instantly turning back to fight when hit.
+	const bool bMoraleBroken = (GetWorld() && GetWorld()->GetTimeSeconds() < MoraleBreakUntil);
 
 	const bool bAlreadyEngaging = (CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking);
 	const bool bAlreadyFleeing  = (CurrentState == EAIState::Fleeing);
 
-	const bool bWantsFight =
+	const bool bWantsFight = !bMoraleBroken && (
 		(HostilityType == EAIHostilityType::Aggressive) ||
-		(bFromDamage && HostilityType == EAIHostilityType::Neutral && bFightBackWhenAttacked);
+		(bFromDamage && HostilityType == EAIHostilityType::Neutral && bFightBackWhenAttacked));
 
 	bool bWantsFlee = false;
 	if (!bWantsFight && bCanFlee &&
@@ -293,9 +443,19 @@ bool ABaseAICharacter::ReactToThreat(AActor* Threat, bool bFromDamage)
 		SetAwarenessLevel(EAIAwarenessLevel::Alert);
 		SetTarget(Threat);
 		SetAIState(EAIState::Fleeing);
+		if (AIAnimationComponent) AIAnimationComponent->PlayStartle();
 		if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(Threat); }
 		if (PackID != NAME_None) AlertPack(Threat);
+		AlarmNearbyAllies(Threat); // scatter the herd
 		return true;
+	}
+
+	// Notice: an NPC that won't fight or flee still acknowledges the threat (turn-to-look) when calm.
+	if (bNoticeReactions && !bFromDamage && (CurrentState == EAIState::Idle || CurrentState == EAIState::Patrolling))
+	{
+		SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+		if (ABaseAIController* AIC = Cast<ABaseAIController>(GetController()))
+			AIC->NoticeActor(Threat);
 	}
 
 	return false;
@@ -304,13 +464,7 @@ bool ABaseAICharacter::ReactToThreat(AActor* Threat, bool bFromDamage)
 void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 {
 	if (!PerceivedActor || CurrentState == EAIState::Dead || bIsDormant) return;
-
-	if (bOnlyDetectPlayers)
-	{
-		APawn* P = Cast<APawn>(PerceivedActor);
-		if (!P || !P->IsPlayerControlled()) return;
-	}
-
+	if (!IsValidTargetCandidate(PerceivedActor)) return; // players + tagged predators only (per config)
 	ReactToThreat(PerceivedActor, false);
 }
 
@@ -319,9 +473,10 @@ void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmo
 	if (CurrentState == EAIState::Dead || bIsDormant) return;
 
 	OnAIDamaged.Broadcast(DamageInstigator);
+	AddThreat(DamageInstigator, DamageAmount * ThreatPerDamage);
 
 	bool bStaggering = false;
-	if (AICombatComponent)
+	if (ShouldEngageTargets() && AICombatComponent && !AICombatComponent->IsStaggerImmune())
 	{
 		AICombatComponent->CurrentHitCount++;
 		if (AICombatComponent->CurrentHitCount >= AICombatComponent->StaggerThreshold)
@@ -337,14 +492,74 @@ void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmo
 		const bool bInterrupted = AICombatComponent ? AICombatComponent->TryInterruptCurrentAttack() : false;
 		const bool bUnderHyperArmor = AICombatComponent && AICombatComponent->IsAttacking() && !bInterrupted;
 		if (!bUnderHyperArmor)
-			AIAnimationComponent->PlayHitReaction();
+			AIAnimationComponent->PlayDirectionalHitReaction(LastHitDirection); // octant-based; falls back to random
 	}
 
 	if (!DamageInstigator) return;
+
+	// Morale break: low HP + can flee → run, overriding fight-back. (Skipped while staggering — stagger-exit handles it.)
+	if (!bStaggering && bCanFlee && FleeHealthThreshold > 0.f && LastHealthFraction <= FleeHealthThreshold
+		&& CurrentState != EAIState::Fleeing)
+	{
+		SetAwarenessLevel(EAIAwarenessLevel::Alert);
+		SetTarget(DamageInstigator);
+		SetAIState(EAIState::Fleeing); // leaving a combat state auto-calls ExitCombat
+		if (GetWorld()) MoraleBreakUntil = GetWorld()->GetTimeSeconds() + MoraleBreakCooldown; // don't re-aggro on the next hit
+		if (AIAnimationComponent) AIAnimationComponent->PlayStartle();
+		if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(DamageInstigator); }
+		return;
+	}
+
 	if (bStaggering)
 		SetTarget(DamageInstigator);
 	else
 		ReactToThreat(DamageInstigator, true);
+
+	EvaluateThreatSwitch(); // a higher-threat attacker can now steal aggro
+}
+
+/* ═══════════ Interaction ═══════════ */
+
+void ABaseAICharacter::Interact_Implementation(AActor* Target)
+{
+	BeginInteraction(Target);
+}
+
+void ABaseAICharacter::CanReceiveTrace_Implementation()
+{
+	// Highlight eligibility hook — extend in BP if needed. Nothing required in C++.
+}
+
+void ABaseAICharacter::BeginInteraction(AActor* Interactor)
+{
+	if (!bIsInteractable || CurrentState == EAIState::Dead || bIsDormant) return;
+	if (CurrentState == EAIState::Interacting) return;
+
+	PreInteractionState = CurrentState;
+	InteractionPartner = Interactor;
+
+	if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->StopMovement(); }
+	SetAIState(EAIState::Interacting);               // controller faces the partner & holds
+	if (AIAnimationComponent) AIAnimationComponent->PlayInteraction();
+
+	OnInteractionStarted.Broadcast(Interactor, NPCRole, DialogueID); // BP: open dialogue/shop/quest UI
+}
+
+void ABaseAICharacter::EndInteraction()
+{
+	if (CurrentState != EAIState::Interacting) return;
+	InteractionPartner = nullptr;
+	OnInteractionEnded.Broadcast();
+
+	if (AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
+	{
+		SetAIState(EAIState::Patrolling);
+		AIMovementComponent->StartPatrol();
+	}
+	else
+	{
+		SetAIState(EAIState::Idle);
+	}
 }
 
 /* ═══════════ Pack ═══════════ */
@@ -361,11 +576,49 @@ void ABaseAICharacter::AlertPack(AActor* Threat)
 #endif
 }
 
+void ABaseAICharacter::AlarmNearbyAllies(AActor* Threat)
+{
+	// Don't re-broadcast while we ourselves are reacting to someone else's alarm (prevents an O(N^2) cascade).
+	if (!bAlarmsNearbyAllies || AlarmRadius <= 0.f || !Threat || bSuppressAlarmBroadcast) return;
+	UWorld* W = GetWorld();
+	if (!W) return;
+
+	// Bounded overlap instead of a full-level TActorIterator.
+	TArray<FOverlapResult> Overlaps;
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this);
+	W->OverlapMultiByObjectType(Overlaps, GetActorLocation(), FQuat::Identity,
+		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn),
+		FCollisionShape::MakeSphere(AlarmRadius), Params);
+
+	for (const FOverlapResult& Ov : Overlaps)
+	{
+		ABaseAICharacter* O = Cast<ABaseAICharacter>(Ov.GetActor());
+		if (!O || O == this || O->IsDead() || O->HostilityType != HostilityType) continue;
+		O->bSuppressAlarmBroadcast = true;   // alerted ally flees but doesn't re-broadcast → single-hop spread
+		O->OnPerceiveTarget(Threat);         // nearby same-type NPCs react (flee) too — the herd scatters
+		O->bSuppressAlarmBroadcast = false;
+	}
+}
+
 void ABaseAICharacter::OnPackAlert(ABaseAICharacter* Alerter, AActor* Threat)
 {
 	if (!Threat || CurrentState == EAIState::Dead || bIsDormant) return;
 	if (CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking || CurrentState == EAIState::Fleeing) return;
 	OnPackAlerted.Broadcast(Alerter, Threat);
+
+	// Aggressive packmates go INVESTIGATE the threat's location instead of telepathically hard-aggroing
+	// through walls — they only commit once their own perception confirms it.
+	if (HostilityType == EAIHostilityType::Aggressive)
+	{
+		if (ABaseAIController* AIC = Cast<ABaseAIController>(GetController()))
+		{
+			AIC->InvestigateThreat(Threat);
+			return;
+		}
+	}
+
+	// Passive/neutral react per their own rules (flee if configured, respecting the player filter).
 	OnPerceiveTarget(Threat);
 }
 
@@ -373,22 +626,37 @@ TArray<ABaseAICharacter*> ABaseAICharacter::GetPackMembers() const
 {
 	TArray<ABaseAICharacter*> Members;
 	if (PackID == NAME_None) return Members;
+
+	UWorld* W = GetWorld();
+	UAIPackRegistrySubsystem* Reg = W ? W->GetSubsystem<UAIPackRegistrySubsystem>() : nullptr;
+	if (!Reg) return Members;
+
+	TArray<ABaseAICharacter*> All;
+	Reg->GetPackMembers(PackID, All); // O(pack size), not O(all actors)
 	const FVector MyLoc = GetActorLocation();
 	const float RadiusSq = PackAlertRadius * PackAlertRadius;
-	for (TActorIterator<ABaseAICharacter> It(GetWorld()); It; ++It)
+	for (ABaseAICharacter* O : All)
 	{
-		ABaseAICharacter* O = *It;
-		if (O == this || O->GetPackID() != PackID || O->IsDead()) continue;
+		if (!O || O == this || O->IsDead()) continue;
 		if (FVector::DistSquared(MyLoc, O->GetActorLocation()) <= RadiusSq) Members.Add(O);
 	}
 	return Members;
+}
+
+void ABaseAICharacter::AlertPackSearch(const FVector& Location)
+{
+	if (PackID == NAME_None) return;
+	for (ABaseAICharacter* Member : GetPackMembers())
+		if (Member && Member != this)
+			if (ABaseAIController* AIC = Cast<ABaseAIController>(Member->GetController()))
+				AIC->Investigate(Location); // idle members converge on the last-known spot
 }
 
 ABaseAICharacter* ABaseAICharacter::GetPackLeader() const
 {
 	if (PackID == NAME_None) return nullptr;
 
-	const UWorld* W = GetWorld();
+	UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
 	if (CachedPackLeader.IsValid() && !CachedPackLeader->IsDead()
 		&& CachedPackLeader->GetPackID() == PackID
@@ -398,11 +666,15 @@ ABaseAICharacter* ABaseAICharacter::GetPackLeader() const
 	}
 
 	ABaseAICharacter* Leader = nullptr;
-	for (TActorIterator<ABaseAICharacter> It(GetWorld()); It; ++It)
+	if (UAIPackRegistrySubsystem* Reg = W ? W->GetSubsystem<UAIPackRegistrySubsystem>() : nullptr)
 	{
-		ABaseAICharacter* O = *It;
-		if (O->GetPackID() != PackID || O->IsDead()) continue;
-		if (!Leader || O->GetUniqueID() < Leader->GetUniqueID()) Leader = O;
+		TArray<ABaseAICharacter*> All;
+		Reg->GetPackMembers(PackID, All);
+		for (ABaseAICharacter* O : All)
+		{
+			if (!O || O->IsDead()) continue;
+			if (!Leader || O->GetUniqueID() < Leader->GetUniqueID()) Leader = O; // deterministic leader = lowest id
+		}
 	}
 
 	CachedPackLeader = Leader;
@@ -415,29 +687,53 @@ bool ABaseAICharacter::IsPackLeader() const { return GetPackLeader() == this; }
 void ABaseAICharacter::UpdatePackFollow(float DeltaTime)
 {
 	ABaseAICharacter* Leader = GetPackLeader();
-	if (!Leader || Leader == this) return;
+	if (!Leader || Leader == this || !AIMovementComponent) return;
 
 	const float FollowThreshold = PackFollowDistance + PackSpreadRadius;
-	if (FVector::DistSquared(GetActorLocation(), Leader->GetActorLocation()) > FollowThreshold * FollowThreshold && AIMovementComponent)
+	const float DistSq = FVector::DistSquared(GetActorLocation(), Leader->GetActorLocation());
+	if (FollowReevalTimer > 0.f) FollowReevalTimer -= DeltaTime;
+
+	if (DistSq > FollowThreshold * FollowThreshold)
 	{
+		// Cache the spread offset so we don't re-roll a wandering goal every frame (which defeats the repath gate
+		// and triggers a near-per-frame pathfind). Re-roll only on a timer or when freshly falling behind.
+		if (!bHasFollowOffset || FollowReevalTimer <= 0.f)
+		{
+			const FVector2D R = FMath::RandPointInCircle(PackSpreadRadius);
+			CachedFollowOffset = FVector(R.X, R.Y, 0.f);
+			bHasFollowOffset = true;
+			FollowReevalTimer = 1.5f;
+		}
+		// Clear any dwell idle/activity first so DirectPlayback locomotion isn't gated (would slide otherwise).
+		if (AIAnimationComponent && AIAnimationComponent->IsPlayingIdleVariation())
+			AIAnimationComponent->StopCurrentAction();
+
 		const FVector DirToLeader = (Leader->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-		const FVector RandOffset = FMath::VRand().GetSafeNormal2D() * FMath::FRandRange(0.f, PackSpreadRadius);
-		const FVector Target = Leader->GetActorLocation() - DirToLeader * PackFollowDistance + FVector(RandOffset.X, RandOffset.Y, 0.f);
-		AIMovementComponent->SetDesiredSpeed(AIMovementComponent->PatrolSpeed * 1.2f);
-		AIMovementComponent->MoveToLocation(Target);
+		const FVector Goal = Leader->GetActorLocation() - DirToLeader * PackFollowDistance + CachedFollowOffset;
+		// Catch up faster the further behind we are, but only mildly (no leader-overtaking sprint). Detour handles separation.
+		const float SpeedScale = FMath::GetMappedRangeValueClamped(
+			FVector2D(FollowThreshold, FollowThreshold * 3.f), FVector2D(1.f, 1.4f), FMath::Sqrt(DistSq));
+		AIMovementComponent->SetDesiredSpeed(AIMovementComponent->PatrolSpeed * SpeedScale);
+		AIMovementComponent->MoveToLocation(Goal);
+	}
+	else
+	{
+		bHasFollowOffset = false; // back in formation → fresh offset next time we fall behind
 	}
 }
 
 /* ═══════════ Leash ═══════════ */
 
-void ABaseAICharacter::TeleportToSpawn()
+void ABaseAICharacter::TeleportToSpawn(FVector OverrideLocation)
 {
 	ClearTarget();
 	if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->StopMovement(); }
 	if (AICombatComponent) { AICombatComponent->InterruptAttack(); AICombatComponent->ExitCombat(); }
 
+	// Prefer the caller's reachable (nav-projected) point; fall back to the raw spawn.
+	const FVector Dest = OverrideLocation.IsNearlyZero() ? SpawnLocation : OverrideLocation;
 	SetActorHiddenInGame(true);
-	SetActorLocation(SpawnLocation);
+	SetActorLocation(Dest);
 	SetActorRotation(SpawnRotation);
 	SetActorHiddenInGame(false);
 
@@ -456,6 +752,13 @@ void ABaseAICharacter::TeleportToSpawn()
 void ABaseAICharacter::Die()
 {
 	if (CurrentState == EAIState::Dead) return;
+
+	// Close any open dialogue cleanly so the BP UI isn't orphaned.
+	if (CurrentState == EAIState::Interacting && InteractionPartner)
+	{
+		InteractionPartner = nullptr;
+		OnInteractionEnded.Broadcast();
+	}
 
 	const EAIState OldState = CurrentState;
 	CurrentState = EAIState::Dead;
@@ -573,6 +876,17 @@ void ABaseAICharacter::FinishDeathFade()
 		SpawnedDeathVFX->Deactivate();
 
 	OnAIDeathFadeCompleted.Broadcast();
+
+	// Cleanup: a never-respawning corpse shouldn't linger as a hidden actor forever. Defer the Destroy to next
+	// tick — this can run synchronously inside a damage broadcast, and destroying mid-broadcast is a use-after-free.
+	if (bDestroyCorpseIfNoRespawn && RespawnCondition == EAIRespawnCondition::Never)
+		if (UWorld* W = GetWorld())
+			W->GetTimerManager().SetTimerForNextTick(this, &ABaseAICharacter::DestroyCorpse);
+}
+
+void ABaseAICharacter::DestroyCorpse()
+{
+	Destroy();
 }
 
 void ABaseAICharacter::CacheMeshMaterials()
@@ -689,6 +1003,9 @@ void ABaseAICharacter::SetDormant(bool bNewDormant)
 	SetActorHiddenInGame(bNewDormant);
 	SetActorTickEnabled(!bNewDormant);
 
+	// Thaw any active hit-stop before freezing the combat tick, else GlobalAnimRateScale is stranded at 0.01x.
+	if (bNewDormant && AICombatComponent) AICombatComponent->EndHitStop();
+
 	if (AIMovementComponent)  AIMovementComponent->SetComponentTickEnabled(!bNewDormant);
 	if (AIAnimationComponent) AIAnimationComponent->SetComponentTickEnabled(!bNewDormant);
 	if (AICombatComponent)    AICombatComponent->SetComponentTickEnabled(!bNewDormant);
@@ -706,8 +1023,9 @@ void ABaseAICharacter::SetDormant(bool bNewDormant)
 
 void ABaseAICharacter::UpdateDormancy()
 {
-	// Dead AIs don't need dormancy management — they're either fading or already hidden
-	if (CurrentState == EAIState::Dead) return;
+	// Dead AIs don't need dormancy management — they're either fading or already hidden.
+	// Never sleep mid-conversation either (player could be standing right there).
+	if (CurrentState == EAIState::Dead || CurrentState == EAIState::Interacting) return;
 
 	const APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PC || !PC->GetPawn()) return;

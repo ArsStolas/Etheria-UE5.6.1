@@ -7,6 +7,7 @@
 
 #include "Characters/Players/PlayerCharacter.h"
 
+#include "Interfaces/Interaction.h"
 #include "CableComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -987,13 +988,22 @@ void APlayerCharacter::Input_DropItem() { if (InventoryComponent) { InventoryCom
 // INTERACTION INPUT
 void APlayerCharacter::Input_Interact()
 {
-    //UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
-    //if (!InteractionComponent)
-    //{
-    //    UE_LOG(LogTemp, Error, TEXT("InteractionComponent is null"));
-    //    return;
-    //}
-    //InteractionComponent->Interact();
+    UWorld* W = GetWorld();
+    if (!W) return;
+
+    // Trace from the pawn along the camera's view direction; interact with the first IInteraction actor hit.
+    const float Reach = 300.f;
+    const FVector Start = GetActorLocation() + FVector(0.f, 0.f, 40.f);
+    const FVector End = Start + GetControlRotation().Vector() * Reach;
+
+    FCollisionQueryParams Params(TEXT("PlayerInteract"), false, this);
+    FHitResult Hit;
+    if (W->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+    {
+        AActor* HitActor = Hit.GetActor();
+        if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteraction::StaticClass()))
+            IInteraction::Execute_Interact(HitActor, this);
+    }
 }
 
 #pragma endregion
