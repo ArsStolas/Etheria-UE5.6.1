@@ -55,6 +55,18 @@ public:
 	static class UDialogBuilderNode_DialogLine* GetCurrentLine(const UObject* WorldContextObject);
 
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "OrionLibrary|Dialog", meta = (WorldContext = "WorldContextObject"))
+	static bool IsChoiceSelectionActive(const UObject* WorldContextObject);
+
+
+	/**
+	* Get the current dialog line.
+	*
+	* @return The Dialog Line.
+	*/
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "OrionLibrary|Dialog", meta = (WorldContext = "WorldContextObject"))
+	static FOrionDialogLine GetCurrentDialogLine(const UObject* WorldContextObject);
+
 	/**
 	* Advance the dialog line
 	*
@@ -67,7 +79,7 @@ public:
 	*
 	*/
 	UFUNCTION(BlueprintCallable, Category = "OrionLibrary|Dialog", meta = (WorldContext = "WorldContextObject"))
-	static void SelectDialogChoice(const UObject* WorldContextObject, class UDialogBuilderNode_PlayerChoice* InOption);
+	static void SelectDialogChoice(const UObject* WorldContextObject, class UDialogBuilderNode_PlayerChoice* PlayerChoice, int32 ChoiceIndex);
 
 
 	/**

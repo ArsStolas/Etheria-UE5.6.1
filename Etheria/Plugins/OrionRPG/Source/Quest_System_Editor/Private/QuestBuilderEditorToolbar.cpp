@@ -40,8 +40,8 @@ void FQuestBuilderEditorToolbar::FillQuestSystemToolbar(FToolBarBuilder& Toolbar
 
 	ToolbarBuilder.BeginSection("Quest System");
 	{
-		const FText NewDecoratorLabel = LOCTEXT("NewOrionDecorator_Label", "New Orion Decorator");
-		const FText NewDecoratorTooltip = LOCTEXT("NewOrionDecorator_ToolTip", "Create new Decorator Blueprint from a base class");
+		const FText NewDecoratorLabel = LOCTEXT("NewOrionDecorator_Label", "New Orion Condition");
+		const FText NewDecoratorTooltip = LOCTEXT("NewOrionDecorator_ToolTip", "Create new Condition Blueprint from a base class");
 		const FSlateIcon NewDecoratorIcon = FSlateIcon(FAppStyle::GetAppStyleSetName(), "BTEditor.Graph.BTNode.Decorator.Conditional.Icon");
 
 

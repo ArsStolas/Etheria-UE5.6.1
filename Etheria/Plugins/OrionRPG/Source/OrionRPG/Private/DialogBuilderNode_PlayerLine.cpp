@@ -20,6 +20,7 @@ void UDialogBuilderNode_PlayerLine::BeginNode()
 	ParticipantInfo.DefaultShot = GetOwningDialogGraph()->DefaultPlayerShot;
 	ParticipantInfo.ParticipantImage = GetOwningDialogGraph()->DefaultPlayerImage;
 	GetOwningDialogGraph()->BeginDialogLine(this);
+	GetDialogComponent()->OnDialogLineBegin.Broadcast(GetDialogLine());
 	GetDialogComponent()->OnDialogUpdated.Broadcast(this);
 }
 

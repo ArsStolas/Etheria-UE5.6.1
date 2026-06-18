@@ -49,27 +49,12 @@ public:
 	UPROPERTY()
 		bool bIsPlayerLine = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog", meta = (EditCondition = "bIsPlayerLine == false", HideEditConditionToggle, EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog", meta = (EditCondition = "bIsPlayerLine == false", HideEditConditionToggle, EditConditionHides, DisplayAfter = "TimeLimit"))
 		FParticipantInfo ParticipantInfo;
 
 	UPROPERTY()
 		FString SharedParticipantName;
 	
-	UPROPERTY()
-		bool bIsSelector = false;
-
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category = "Choice Selection", meta = (EditCondition = "bIsSelector == true", HideEditConditionToggle, EditConditionHides))
-	TObjectPtr<UDialogCameraShot> SelectingChoiceShotOverride;
-	/**
-	* Entering selection mode will have it's time limit setting.
-	* Selection will have no time limit by default
-	**/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice Selection", meta = (EditCondition = "bIsSelector == true", HideEditConditionToggle, EditConditionHides))
-		ESelectionTimeLimit SelectionTimeLimit;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice Selection", meta = (EditCondition = "bIsSelector == true && SelectionTimeLimit == ESelectionTimeLimit::E_HasTimeLimit", HideEditConditionToggle, EditConditionHides))
-		float TimeLimit;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detail", meta = (ShowOnlyInnerProperties))
 		FDialogLineData DialogLineData;
@@ -103,9 +88,6 @@ public:
 
 	virtual void EvaluateNextNode() override;
 
-	UFUNCTION()
-	bool EvaluateAnyPlayerOptions();
-
 
 	UFUNCTION(BlueprintPure, Category="DialogLine")
 	UObject* GetParticipantImage();
@@ -115,6 +97,10 @@ public:
 
 public:
 	virtual void Serialize(FArchive& Ar) override;
+
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialog")
+	FOrionDialogLine GetDialogLine();
 
 	//Participant Sharing
 	void MakeParticipantShareable(FString ShareName);

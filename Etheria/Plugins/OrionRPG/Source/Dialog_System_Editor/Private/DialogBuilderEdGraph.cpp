@@ -1,9 +1,9 @@
 // Copyright 2025 Ivan Chandra. All Rights Reserved.
 
-
 #include "DialogBuilderEdGraph.h"
 #include "NativeGameplayTags.h"
 #include "DialogData.h"
+#include "DialogStage.h"
 #include "DialogBuilderEdNode_Edge.h"
 #include "DialogBuilderEdNode_Root.h"
 #include "DialogBuilderEdNode.h"
@@ -13,6 +13,8 @@
 #include "DialogBuilderNode.h"
 #include "DialogBuilderNode_DialogLine.h"
 #include "DialogBuilderNode_PlayerLine.h"
+#include "DialogBuilderNode_DialogSequence.h"
+#include "DialogBuilderNode_PlayerChoice.h"
 #include "DialogBuilderEditorUtils.h"
 #include "Decorator/OrionDecorator.h"
 #include "Event/OrionEvent.h"
@@ -66,6 +68,7 @@ void UDialogBuilderEdGraph::UpdateAsset(bool bForce)
 	DialogGraph->ID = FDialogBuilderEditorUtils::FindUniqueDialogGraphName("DialogAsset_");
 	Clear();
 
+	SynchronizePlayerChoicePins();
 	UpdateAllSubnodeDependencies();
 
 
@@ -108,46 +111,99 @@ void UDialogBuilderEdGraph::UpdateAsset(bool bForce)
 					PlayerLineNode->ParticipantInfo.ParticipantName = OwningDialog->PlayerName;
 					OwningDialog->ParticipantInfoMap.Emplace(PlayerLineNode->ParticipantInfo.ParticipantTag, PlayerLineNode->ParticipantInfo);
 				}
-				if(UDialogBuilderNode_DialogLine* DialogLineNode = Cast<UDialogBuilderNode_DialogLine>(DialogNode))
+				if (UDialogBuilderNode_DialogLine* DialogLineNode = Cast<UDialogBuilderNode_DialogLine>(DialogNode))
 				{
 					OwningDialog->ParticipantInfoMap.Emplace(DialogLineNode->ParticipantInfo.ParticipantTag, DialogLineNode->ParticipantInfo);
 				}
-				
 
-				//link child and parent nodes
+
+				// link child and parent nodes
+				UDialogBuilderNode_PlayerChoice* PlayerChoiceNode = Cast<UDialogBuilderNode_PlayerChoice>(DialogNode);
+				UDialogBuilderEdNode_PlayerChoice* PlayerChoiceEdNode = Cast<UDialogBuilderEdNode_PlayerChoice>(DialogEdNode);
+
+				if (PlayerChoiceNode)
+				{
+					int32 OutputPinCount = 0;
+					for (UEdGraphPin* NodePin : DialogEdNode->Pins)
+					{
+						if (NodePin && NodePin->Direction == EEdGraphPinDirection::EGPD_Output)
+						{
+							++OutputPinCount;
+						}
+					}
+
+					const int32 BranchCount = FMath::Max(1, OutputPinCount);
+					PlayerChoiceNode->ChoiceBranches.SetNum(BranchCount);
+
+					for (int32 BranchIdx = 0; BranchIdx < BranchCount; ++BranchIdx)
+					{
+						FDialogChoiceBranch& Branch = PlayerChoiceNode->ChoiceBranches[BranchIdx];
+						Branch.ChildrenNodes.Reset();
+
+						if (PlayerChoiceNode->ChoiceList.IsValidIndex(BranchIdx))
+						{
+							Branch.ChoiceText = PlayerChoiceNode->ChoiceList[BranchIdx];
+						}
+						else
+						{
+							Branch.ChoiceText = FText::GetEmpty();
+						}
+					}
+				}
+
+				int32 OutputPinOrder = -1;
 				for (int PinIdx = 0; PinIdx < DialogEdNode->Pins.Num(); ++PinIdx)
 				{
 					UEdGraphPin* Pin = DialogEdNode->Pins[PinIdx];
-
-					if (Pin->Direction != EEdGraphPinDirection::EGPD_Output)
+					if (!Pin || Pin->Direction != EEdGraphPinDirection::EGPD_Output)
+					{
 						continue;
+					}
+
+					++OutputPinOrder;
+
+					int32 ChoiceBranchIndex = INDEX_NONE;
+					if (PlayerChoiceNode)
+					{
+						ChoiceBranchIndex = PlayerChoiceEdNode
+							? UDialogBuilderEdNode_PlayerChoice::GetChoiceIndexFromPin(Pin)
+							: INDEX_NONE;
+
+						if (!PlayerChoiceNode->ChoiceBranches.IsValidIndex(ChoiceBranchIndex))
+						{
+							ChoiceBranchIndex = OutputPinOrder;
+						}
+					}
 
 					for (int LinkToIdx = 0; LinkToIdx < Pin->LinkedTo.Num(); ++LinkToIdx)
 					{
 						UDialogBuilderNode* ChildNode = nullptr;
+
 						if (UDialogBuilderEdNode* EdNode_Child = Cast<UDialogBuilderEdNode>(Pin->LinkedTo[LinkToIdx]->GetOwningNode()))
 						{
-							ChildNode = EdNode_Child ? Cast<UDialogBuilderNode>(EdNode_Child->NodeInstance) : nullptr;
+							ChildNode = EdNode_Child->NodeInstance ? Cast<UDialogBuilderNode>(EdNode_Child->NodeInstance) : nullptr;
 						}
 						else if (UDialogBuilderEdNode_Edge* EdNode_Edge = Cast<UDialogBuilderEdNode_Edge>(Pin->LinkedTo[LinkToIdx]->GetOwningNode()))
 						{
-							UDialogBuilderEdNode* Child = EdNode_Edge->GetEndNode();
-							if (Child != nullptr)
+							if (UDialogBuilderEdNode* Child = EdNode_Edge->GetEndNode())
 							{
-								ChildNode = Child ? Cast<UDialogBuilderNode>(Child->NodeInstance) : nullptr;
+								ChildNode = Child->NodeInstance ? Cast<UDialogBuilderNode>(Child->NodeInstance) : nullptr;
 							}
 						}
 
 						if (ChildNode != nullptr)
 						{
-							DialogNode->ChildrenNodes.Add(ChildNode);
+							DialogNode->ChildrenNodes.AddUnique(ChildNode);
+							ChildNode->ParentNodes.AddUnique(DialogNode);
 
-							ChildNode->ParentNodes.Add(DialogNode);
+							if (PlayerChoiceNode && PlayerChoiceNode->ChoiceBranches.IsValidIndex(ChoiceBranchIndex))
+							{
+								PlayerChoiceNode->ChoiceBranches[ChoiceBranchIndex].ChildrenNodes.AddUnique(ChildNode);
+							}
 						}
 					}
 				}
 			}
-			
 		}
 		else if (UDialogBuilderEdNode_Edge* EdgeNode = Cast<UDialogBuilderEdNode_Edge>(Nodes[i]))
 		{
@@ -313,7 +369,7 @@ void UDialogBuilderEdGraph::UpdateDeprecatedClasses()
 		{
 			UpdateDialogGraphNodeErrorMessage(*Node);
 
-			for (int32 SubIdx = 0, SubIdxNum = Node->SubNodes.Num(); SubIdx < SubIdxNum; ++SubIdx)
+			for (int32 SubIdx = 0; SubIdx < Node->SubNodes.Num(); ++SubIdx)
 			{
 				if (Node->SubNodes[SubIdx] != nullptr)
 				{
@@ -404,22 +460,47 @@ void UDialogBuilderEdGraph::RebuildChildOrder(UEdGraphNode* ParentNode)
 {
 	UDialogBuilderEdNode* DialogParentEdNode = Cast<UDialogBuilderEdNode>(ParentNode);
 	UDialogBuilderNode* DialogParentNode = DialogParentEdNode ? Cast<UDialogBuilderNode>(DialogParentEdNode->NodeInstance) : nullptr;
-	if (DialogParentNode)
+	if (DialogParentNode == nullptr)
 	{
-		DialogParentNode->ChildrenNodes.Sort([&](const UDialogBuilderNode& B, const UDialogBuilderNode& T)
-		{
-			UDialogBuilderEdNode* EdNode_BNode = NodeMap.FindRef(&B);
-			UDialogBuilderEdNode* EdNode_TNode = NodeMap.FindRef(&T);
-			if (EdNode_BNode && EdNode_TNode)
-			{
-				return EdNode_TNode->NodePosY > EdNode_BNode->NodePosY;
-			}
-			else
-			{
-				return false;
-			}
-		});
+		return;
 	}
+
+	// For player-choice nodes, sort children inside each choice branch
+	if (UDialogBuilderNode_PlayerChoice* PlayerChoiceNode = Cast<UDialogBuilderNode_PlayerChoice>(DialogParentNode))
+	{
+		auto CompareChildNodeByPosY = [this](const UDialogBuilderNode& L, const UDialogBuilderNode& R)
+		{
+			UDialogBuilderEdNode* EdNode_LNode = NodeMap.FindRef(&L);
+			UDialogBuilderEdNode* EdNode_RNode = NodeMap.FindRef(&R);
+			if (EdNode_LNode && EdNode_RNode)
+			{
+				return EdNode_LNode->NodePosY < EdNode_RNode->NodePosY;
+			}
+			return false;
+		};
+
+		for (FDialogChoiceBranch& Branch : PlayerChoiceNode->ChoiceBranches)
+		{
+			Branch.ChildrenNodes.Sort(CompareChildNodeByPosY);
+		}
+
+		return;
+	}
+
+
+	DialogParentNode->ChildrenNodes.Sort([&](const UDialogBuilderNode& B, const UDialogBuilderNode& T)
+	{
+		UDialogBuilderEdNode* EdNode_BNode = NodeMap.FindRef(&B);
+		UDialogBuilderEdNode* EdNode_TNode = NodeMap.FindRef(&T);
+		if (EdNode_BNode && EdNode_TNode)
+		{
+			return EdNode_TNode->NodePosY > EdNode_BNode->NodePosY;
+		}
+		else
+		{
+			return false;
+		}
+	});
 }
 
 UDialogBuilderGraph* UDialogBuilderEdGraph::GetDialogBuilderGraph() const
@@ -557,4 +638,38 @@ void UDialogBuilderEdGraph::SortNodes(UDialogBuilderNode* RootNode)
 		NextLevelNodes.Reset();
 		++Level;
 	}
+}
+
+bool UDialogBuilderEdGraph::SynchronizePlayerChoicePins()
+{
+	bool bAnyChanged = false;
+
+	for (UEdGraphNode* Node : Nodes)
+	{
+		UDialogBuilderEdNode_PlayerChoice* PlayerChoiceEdNode = Cast<UDialogBuilderEdNode_PlayerChoice>(Node);
+		if (!PlayerChoiceEdNode)
+		{
+			continue;
+		}
+
+		const UDialogBuilderNode_PlayerChoice* PlayerChoiceNode = Cast<UDialogBuilderNode_PlayerChoice>(PlayerChoiceEdNode->NodeInstance);
+		const int32 DesiredOutputPins = PlayerChoiceNode ? FMath::Max(1, PlayerChoiceNode->ChoiceList.Num()) : 1;
+
+		int32 ExistingOutputPins = 0;
+		for (UEdGraphPin* Pin : PlayerChoiceEdNode->Pins)
+		{
+			if (Pin && Pin->Direction == EGPD_Output)
+			{
+				++ExistingOutputPins;
+			}
+		}
+
+		if (ExistingOutputPins != DesiredOutputPins)
+		{
+			PlayerChoiceEdNode->ReconstructNode();
+			bAnyChanged = true;
+		}
+	}
+
+	return bAnyChanged;
 }

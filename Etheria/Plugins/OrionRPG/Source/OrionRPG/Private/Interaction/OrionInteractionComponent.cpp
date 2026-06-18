@@ -390,7 +390,7 @@ UOrionInteractionTargetComponent* UOrionInteractionComponent::GetInteractionTrac
 
 					bool bAllowInteractable = TargetInteractable->bFacingTarget
 						? (bPawnFacingInteractable && bInteractableFacingPawn)
-						: bPawnFacingInteractable;
+						: true;
 
 					if (bAllowInteractable && bInteractableIsNotSelf)
 					{

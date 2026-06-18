@@ -25,6 +25,7 @@ protected:
 };
 
 class UQuestBuilderEdNode;
+enum class EEventLaunchType : uint8;
 class QUEST_SYSTEM_EDITOR_API SGraphNode_QuestBuilderNode : public SGraphNode
 {
 public:
@@ -64,6 +65,10 @@ public:
 	virtual EVisibility GetDescriptionVisibility() const;
 	virtual EVisibility GetNodeTagVisibility() const;
 	virtual EVisibility GetEventsVisibility() const;
+	virtual EVisibility GetLaunchTypeEventsVisibility(EEventLaunchType LaunchType) const;
+	virtual EVisibility GetStartEventsVisibility() const;
+	virtual EVisibility GetEndEventsVisibility() const;
+	virtual EVisibility GetBothEventsVisibility() const;
 	virtual EVisibility GetDecoratorVisibility() const;
 
 	/**
@@ -80,6 +85,7 @@ public:
 
 	/** adds event widget inside current node */
 	void AddEvent(TSharedPtr<SGraphNode> EventWidget);
+	void AddEvent(TSharedPtr<SGraphNode> EventWidget, EEventLaunchType EventLaunchType);
 
 
 	/** handle mouse down on the node */
@@ -130,6 +136,9 @@ protected:
 	TArray< TSharedPtr<SGraphNode> > EventsWidgets;
 	TSharedPtr<SVerticalBox> DecoratorsBox;
 	TSharedPtr<SVerticalBox> EventsBox;
+	TSharedPtr<SVerticalBox> StartEventsBox;
+	TSharedPtr<SVerticalBox> EndEventsBox;
+	TSharedPtr<SVerticalBox> BothEventsBox;
 	TSharedPtr<SHorizontalBox> OutputPinBox;
 	TSharedPtr<SWidget> QuestNodeWidgetRef;
 
@@ -137,6 +146,8 @@ protected:
 	TSharedPtr<SWidget> IndexOverlay;
 
 	EVisibility GetBlueprintIconVisibility() const;
+	EEventLaunchType GetEventLaunchTypeForDrop(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) const;
+	void SetEventLaunchType(UQuestBuilderEdNode* EventNode, EEventLaunchType EventLaunchType);
 
 	//Quest Node Index
 

@@ -17,6 +17,7 @@ class UDialogCameraShot;
 //Gameplay Tags
 ORIONRPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Dialog);
 ORIONRPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Dialog_Participant);
+ORIONRPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Dialog_Prop);
 ORIONRPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Dialog_Participant_Player);
 
 UENUM(BlueprintType)
@@ -24,6 +25,31 @@ enum class ESelectionTimeLimit : uint8
 {
 	E_NoTimeLimit		UMETA(DisplayName = "No Time Limit"),
 	E_HasTimeLimit		UMETA(DisplayName = "Has Time Limit")
+};
+
+UENUM(BlueprintType)
+enum class EDialogType : uint8
+{
+	/**
+	* Cinematic dialog with camera cuts
+	*/
+	E_CinematicDialog		UMETA(DisplayName = "Cinematic Dialog"),
+	/**
+	* Free movement dialog.
+	* player can move during the dialog.
+	* Note:
+	* - the dialog will be auto advance while in progress.
+	* - will disable camera cuts on post edit
+	*/
+	E_FreeMovementDialog	UMETA(DisplayName = "Free Movement Dialog")
+};
+
+
+UENUM(BlueprintType)
+enum class EDialogSelectionType : uint8
+{
+	E_Sequence			UMETA(DisplayName = "Sequence"),
+	E_CameraShot		UMETA(DisplayName = "Camera Shot")
 };
 
 UENUM(BlueprintType)
@@ -55,6 +81,42 @@ enum class EDialogCameraMode : uint8
 };
 
 USTRUCT(BlueprintType)
+struct FOrionDialogLine
+{
+	GENERATED_BODY()
+
+public:
+
+	UPROPERTY(EditAnywhere, meta = (AllowPrivateAccess = "true", Category = "Dialog", DisplayThumbnail = "true", AllowedClasses = "/Script/Engine.Texture,/Script/Engine.MaterialInterface,/Script/Engine.SlateTextureAtlasInterface", DisallowedClasses = "/Script/MediaAssets.MediaTexture"))
+	TObjectPtr<UObject> SpeakerImageOverride;
+
+	UPROPERTY(BlueprintReadWrite, meta = (AllowPrivateAccess = "true", Category = "Dialog", DisplayThumbnail = "true", AllowedClasses = "/Script/Engine.Texture,/Script/Engine.MaterialInterface,/Script/Engine.SlateTextureAtlasInterface", DisallowedClasses = "/Script/MediaAssets.MediaTexture"))
+	TObjectPtr<UObject> SpeakerImage;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Dialog")
+	FText SpeakerName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MultiLine = true, NoResetToDefault, DisplayPriority = -1), Category = "Dialog")
+	FText Line;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog")
+	class USoundBase* DialogSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog")
+	TObjectPtr<class UAnimSequence> FacialAnimation;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialog")
+	bool bCanSkipDialogLine;
+
+	FOrionDialogLine()
+	{
+		Line = FText::FromString("");
+		DialogSound = nullptr;
+		bCanSkipDialogLine = true;
+	}
+};
+
+USTRUCT(BlueprintType)
 struct FDialogLineData
 {
 	GENERATED_BODY()
@@ -69,6 +131,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "Animation"), Category = "Default")
 	class UAnimMontage* DialogMontage = nullptr;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default")
+	TObjectPtr<class UAnimSequence> FacialAnimation;
 
 
 	/**
@@ -90,7 +154,7 @@ public:
 	/**Participant image override, will use this instead of default participant image.
 	* Useful if you want to have different expression for your participant.
 	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true", Category = "Override", DisplayThumbnail = "true", AllowedClasses = "/Script/Engine.Texture,/Script/Engine.MaterialInterface,/Script/Engine.SlateTextureAtlasInterface", DisallowedClasses = "/Script/MediaAssets.MediaTexture"))
+	UPROPERTY(BlueprintReadWrite, meta = (AllowPrivateAccess = "true", Category = "Override", DisplayThumbnail = "true", AllowedClasses = "/Script/Engine.Texture,/Script/Engine.MaterialInterface,/Script/Engine.SlateTextureAtlasInterface", DisallowedClasses = "/Script/MediaAssets.MediaTexture"))
 	TObjectPtr<UObject> ParticipantImageOverride;
 
 	FDialogLineData()
@@ -124,8 +188,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Dialog")
 	EParticipantSetup ParticipantSetup = EParticipantSetup::E_LinkedToWorld;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialog Definition", meta = (DisplayName = "Participant To Spawn", EditCondition = "ParticipantSetup == EParticipantSetup::E_SpawnParticipant", HideEditConditionToggle, EditConditionHides))
+	TSoftClassPtr<class AActor> ParticipantToSpawnSoft;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialog",  meta = (EditCondition = "ParticipantSetup == EParticipantSetup::E_SpawnParticipant", HideEditConditionToggle, EditConditionHides))
+	UPROPERTY(Transient)
 	TSubclassOf<class AActor> ParticipantToSpawn;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialog", meta = (EditCondition = "ParticipantSetup == EParticipantSetup::E_SpawnParticipant", HideEditConditionToggle, EditConditionHides))
@@ -133,18 +199,57 @@ public:
 
 	/**Participant image to be shown while participant line in progress. 
 	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog", meta = (AllowPrivateAccess = "true", DisplayThumbnail = "true", DisplayName = "Participant Image", AllowedClasses = "/Script/Engine.Texture,/Script/Engine.MaterialInterface,/Script/Engine.SlateTextureAtlasInterface", DisallowedClasses = "/Script/MediaAssets.MediaTexture"))
+	UPROPERTY(BlueprintReadWrite, Category = "Dialog", meta = (AllowPrivateAccess = "true", DisplayThumbnail = "true", DisplayName = "Participant Image", AllowedClasses = "/Script/Engine.Texture,/Script/Engine.MaterialInterface,/Script/Engine.SlateTextureAtlasInterface", DisallowedClasses = "/Script/MediaAssets.MediaTexture"))
 	TObjectPtr<UObject> ParticipantImage;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category = "Dialog", meta = (NoResetToDefault))
 	TObjectPtr<UDialogCameraShot> DefaultShot;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialog", meta = (NoResetToDefault))
-	FLinearColor NodeColor = FLinearColor(0.3f, 0.3f, 0.3f);
+	FLinearColor NodeColor;
 
 	/**participant initial transforms, used to get participant back in this transfrom when dialog ended*/
 	UPROPERTY(BlueprintReadWrite, Category = "Dialog")
 	FTransform InitialTransform;
 
+public:
+	FName GetID()
+	{
+		return ParticipantTag.GetTagName();
+	}
+public:
+	FParticipantInfo()
+	{
+		ParticipantToSpawn = nullptr;
+		ParticipantName = FText::FromString("Participant");
+		NodeColor = FLinearColor(0.3f, 0.3f, 0.3f);
+	}
 };
+
+
+USTRUCT(BlueprintType)
+struct FPropInfo
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog")
+	FGameplayTag Tag;
+
+	/** Your Participant Name*/
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Dialog")
+	FText DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialog")
+	TSubclassOf<class AActor> ActorClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialog")
+	FTransform Transform;
+
+	FPropInfo()
+	{
+		DisplayName = FText::FromString("Prop");
+	}
+};
+
 

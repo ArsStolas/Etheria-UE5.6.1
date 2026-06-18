@@ -733,8 +733,8 @@ void UQuestBuilderEdNode::AddContextMenuActionsDecorators(UToolMenu* Menu, const
 	FToolMenuSection& Section = Menu->FindOrAddSection(SectionName);
 	Section.AddSubMenu(
 		"AddDecorator",
-		LOCTEXT("AddDecorator", "Add Decorator..."),
-		LOCTEXT("AddDecoratorTooltip", "Adds new decorator as a subnode"),
+		LOCTEXT("AddDecorator", "Add Enter Condition..."),
+		LOCTEXT("AddDecoratorTooltip", "Adds new condition as a subnode"),
 		FNewToolMenuDelegate::CreateUObject(this, &UQuestBuilderEdNode::CreateAddDecoratorSubMenu, (UEdGraph*)Context->Graph));
 
 }

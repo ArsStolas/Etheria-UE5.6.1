@@ -38,30 +38,44 @@ public class Dialog_System_Editor : ModuleRules
                 "Slate",
                 "AssetDefinition",
 				"GameplayTags",
+				"CinematicCamera",
+				"LevelEditor",
+                "AssetRegistry"
             }
 			);
 		
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
    {
-				"AssetTools", 
-				"GraphEditor", 
-				"PropertyEditor", 
-				"EditorStyle", 
-				"Kismet", 
-				"KismetWidgets", 
-				"ApplicationCore", 
-				"ToolMenus", 
-				"Projects", 
-				"InputCore", 
-				"UnrealEd", 
-				"ToolMenus", 
-				"CoreUObject", 
-				"Engine", 
-				"Slate", 
-				"SlateCore", 
+				"AssetTools",
+				"GraphEditor",
+				"PropertyEditor",
+				"EditorStyle",
+				"Kismet",
+				"KismetWidgets",
+				"ApplicationCore",
+				"ToolMenus",
+				"Projects",
+				"InputCore",
+				"UnrealEd",
+				"ToolMenus",
+				"CoreUObject",
+				"Engine",
+				"TypedElementFramework",
+				"TypedElementRuntime",
+				"Slate",
+				"SlateCore",
 				"AIGraph",
 				"UMG",
+				"Sequencer",
+				"SequencerCore",
+                "MovieScene",
+				"MovieSceneTools",
+				"MovieSceneTracks",
+				"LevelSequence",
+				"LevelSequenceEditor",
+				"AdvancedPreviewScene",
+				"EditorWidgets"
    }
 			);
 		
