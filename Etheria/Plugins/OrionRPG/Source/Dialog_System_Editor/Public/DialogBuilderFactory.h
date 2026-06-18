@@ -74,7 +74,7 @@ protected:
 		// Extract the name of the graph from DocumentID (replace with your logic)
 		FString GraphName = DocumentID->GetName();
 		// Create FText with the extracted name
-		FText TabName = FText::FromString(GraphName);
+		FText TabName = FText::FromString("Dialog Graph");
 
 		// Return TAttribute containing the constructed FText
 		return TAttribute<FText>(TabName);

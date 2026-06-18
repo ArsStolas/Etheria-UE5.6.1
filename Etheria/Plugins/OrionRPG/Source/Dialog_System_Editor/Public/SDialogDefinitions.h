@@ -14,12 +14,12 @@ class SKismetInspector;
 class SSearchBox;
 struct FGraphActionSort;
 
-class FMyDialogCommands : public TCommands<FMyDialogCommands>
+class FDialogDefinitionsCommands : public TCommands<FDialogDefinitionsCommands>
 {
 public:
 	/** Constructor */
-	FMyDialogCommands()
-		: TCommands<FMyDialogCommands>(TEXT("MyDialog"), NSLOCTEXT("Contexts", "My Dialog", "My Dialog"), NAME_None, FAppStyle::GetAppStyleSetName())
+	FDialogDefinitionsCommands()
+		: TCommands<FDialogDefinitionsCommands>(TEXT("DialogDefinitions"), NSLOCTEXT("Contexts", "My Dialog", "My Dialog"), NAME_None, FAppStyle::GetAppStyleSetName())
 	{
 	}
 
@@ -36,23 +36,27 @@ public:
 };
 
 
-class DIALOG_SYSTEM_EDITOR_API SMyDialog : public SCompoundWidget
+class DIALOG_SYSTEM_EDITOR_API SDialogDefinitions : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SMyDialog)
+	SLATE_BEGIN_ARGS(SDialogDefinitions)
 	{}
 	SLATE_END_ARGS()
 
 	/** Constructs this widget with InArgs */
 	void Construct(const FArguments& InArgs, TWeakPtr<FDialogBuilderEditor> InDialogEditor, const UDialogBuilderGraph* InDialogSystemGraph = nullptr);
-	~SMyDialog();
+	~SDialogDefinitions();
 
 	/* SWidget interface */
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime);
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent);
 
-	/** Accessor for getting the current selection as a Dialog graph */
-	FAssetSchemaAction_DialogSystemGraph* SelectionAsGraph() const;
+	/** Accessor for getting the current selection as a participant */
+	FAssetSchemaAction_Participant* SelectionAsParticipant() const;
+
+	/** Accessor for getting the current selection as a prop */
+	FAssetSchemaAction_Prop* SelectionAsProp() const;
+
 
 	/** Accessor the blueprint object from the main editor */
 	UDialogBuilderGraph* GetDialogBuilderGraph() const { return DialogBuilderGraph; }
@@ -132,6 +136,13 @@ private:
 	bool CanCopy() const;
 	void OnCut();
 	bool CanCut() const;
+
+	//Create new participant definition
+	void CreateNewParticipant();
+
+	//Create new prop definition
+	void CreateNewProp();
+
 
 	/** Helper function to delete a graph in the MyBlueprint window */
 	void OnDeleteGraph(UEdGraph* InGraph);

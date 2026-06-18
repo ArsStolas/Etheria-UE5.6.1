@@ -42,13 +42,14 @@ void UOrionSaveGame::HandlePreSave()
 	bIsSaving = true;
 	Super::HandlePreSave();
 	UWorld* World = OwningPlayer->GetWorld();
-	check(World);
+	
+	if (!World) return;
 
 	APlayerController* PC = World->GetFirstPlayerController<APlayerController>();
-	check(PC);
+	
+	if (!PC) return;
 
 	APawn* PlayerChar = PC->GetPawn<APawn>();
-	check(PlayerChar);
 
 	// Play info data
 	{
@@ -73,8 +74,11 @@ void UOrionSaveGame::HandlePreSave()
 
 	// Player data
 	{
-		PlayerData.Location = PlayerChar->GetActorLocation();
-		PlayerData.Rotation = PlayerChar->GetActorRotation();
+		if (PlayerChar)
+		{
+			PlayerData.Location = PlayerChar->GetActorLocation();
+			PlayerData.Rotation = PlayerChar->GetActorRotation();
+		}
 	}
 
 	//Quest Data
@@ -142,12 +146,12 @@ void UOrionSaveGame::HandlePostSave(bool bSuccess)
 
 void UOrionSaveGame::HandleLoadGame(UWorld* World, bool bFromLoadGame)
 {
-
-	check(World);
+	if (!World) return;
 	UE_LOG(LogTemp, Log, TEXT("Handle load game (bFromLoadGame: %d)"), bFromLoadGame);
 
 	APlayerController* PC = World->GetFirstPlayerController<APlayerController>();
-	check(PC);
+	
+	if (!PC) return;
 
 	UOrionSetting* OrionSetting = GetMutableDefault<UOrionSetting>();
 
@@ -155,12 +159,11 @@ void UOrionSaveGame::HandleLoadGame(UWorld* World, bool bFromLoadGame)
 	if (bFromLoadGame)
 	{
 		UGameInstance* GI = World->GetGameInstance<UGameInstance>();
-		check(GI);
+		if (!GI) return;
 
 		// PLAYER
 		{
 			APawn* PlayerChar = PC->GetPawn<APawn>();
-			check(PlayerChar);
 
 			FString CurrentMapURL = GetCurrentMapURL();
 
@@ -172,7 +175,10 @@ void UOrionSaveGame::HandleLoadGame(UWorld* World, bool bFromLoadGame)
 			if (bIsSameMap)
 			{
 				FHitResult HitResult;
-				PlayerChar->SetActorTransform(FTransform(PlayerData.Rotation, PlayerData.Location), false, &HitResult, ETeleportType::TeleportPhysics);
+				if (PlayerChar)
+				{
+					PlayerChar->SetActorTransform(FTransform(PlayerData.Rotation, PlayerData.Location), false, &HitResult, ETeleportType::TeleportPhysics);
+				}
 			}
 			
 		}
@@ -188,7 +194,8 @@ void UOrionSaveGame::HandleLoadGame(UWorld* World, bool bFromLoadGame)
 				for (const FName& DataLayerName : PlayInfoData.DataLayerNames)
 				{
 					const UDataLayerInstance* DataLayerInstance = DataLayerManager->GetDataLayerInstanceFromName(DataLayerName);
-					check(DataLayerInstance);
+					
+					if (!DataLayerInstance) return;
 					DataLayerManager->SetDataLayerInstanceRuntimeState(DataLayerInstance, EDataLayerRuntimeState::Activated);
 				}
 			}

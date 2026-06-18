@@ -54,7 +54,7 @@ private:
 	 * @return A new slate widget to be used as the tool tip for this item's text element.
 	 */
 	TSharedPtr<SToolTip> ConstructToolTipWidget() const;
-
+	const FSlateBrush* GetPaletteIconBrushForAction(const TSharedPtr<FEdGraphSchemaAction>& Action);
 	/** Returns the up-to-date tooltip for the item */
 	FText GetToolTipText() const;
 private:

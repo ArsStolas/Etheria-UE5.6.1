@@ -56,6 +56,8 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "DialogBuilderNode")
 		bool bVisited;
 
+	
+
 	UPROPERTY(BlueprintReadWrite, Category = "DialogBuilderNode")
 	TObjectPtr<APlayerController> OwningController;
 
@@ -83,6 +85,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "DialogBuilderNode")
 	virtual void EvaluateNextNode();
+
+	UFUNCTION(BlueprintCallable, Category = "DialogBuilderNode")
+	virtual void DetermineNextNode();
 
 	UFUNCTION(BlueprintCallable, Category = "DialogBuilderNode")
 	bool DecoratorConditionMet();

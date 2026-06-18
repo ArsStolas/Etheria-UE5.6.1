@@ -13,6 +13,7 @@ TSharedPtr<FSlateStyleSet> FDialogBuilder_EditorStyle::StyleInstance = nullptr;
 
 const FVector2D Icon16x16(16.0f, 16.0f);
 const FVector2D Icon20x20(20.0f, 20.0f);
+const FVector2D Icon24x24(24.0f, 24.0f);
 const FVector2D Icon32x32(32.0f, 32.0f);
 const FVector2D Icon40x40(40.0f, 40.0f);
 const FVector2D Icon64x64(64.0f, 64.0f);
@@ -48,6 +49,8 @@ TSharedRef< FSlateStyleSet > FDialogBuilder_EditorStyle::Create()
 	//Thumbnails and icons
 	Style->Set(FName(TEXT("ClassThumbnail.Dialog")), new IMAGE_BRUSH("Dialog", Icon64x64));
 	Style->Set(FName(TEXT("ClassIcon.Dialog")), new IMAGE_BRUSH("Dialog", Icon40x40));
+	Style->Set(FName(TEXT("ClassIcon.Dialog.Participant")), new IMAGE_BRUSH("ParticipantIcon", Icon24x24));
+	Style->Set(FName(TEXT("ClassIcon.Dialog.Prop")), new IMAGE_BRUSH("PropIcon", Icon24x24));
 	Style->Set(FName(TEXT("ClassIcon.DialogNode")), new IMAGE_BRUSH("DialogNode", Icon20x20));
 	return Style;
 }
