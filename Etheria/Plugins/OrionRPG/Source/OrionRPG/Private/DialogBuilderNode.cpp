@@ -119,20 +119,12 @@ void UDialogBuilderNode::EvaluateNextNode()
 	NextNode = nullptr;
 	
 
-	//Will execute children from top to bottom, and will stop executing until first child succeeds.
-	//if none of the children succeeds, stop evaluate until the next dialog update
-	for (auto& ChildNode : ChildrenNodes)
-	{
-		if (ChildNode->DecoratorConditionMet())
-		{
-			NextNode = ChildNode;
-			break;
-		}
-	}
+	DetermineNextNode();
 
 
 	if (NextNode)
 	{
+		
 		Deinitialize();
 	}
 	else
@@ -144,6 +136,20 @@ void UDialogBuilderNode::EvaluateNextNode()
 
 
 	//Going to next node will begin when all End Events are finished
+}
+
+void UDialogBuilderNode::DetermineNextNode()
+{
+	//Will execute children from top to bottom, and will stop executing until first child succeeds.
+	//if none of the children succeeds, stop evaluate until the next dialog update
+	for (auto& ChildNode : ChildrenNodes)
+	{
+		if (ChildNode->DecoratorConditionMet())
+		{
+			NextNode = ChildNode;
+			break;
+		}
+	}
 }
 
 bool UDialogBuilderNode::DecoratorConditionMet()

@@ -2,6 +2,7 @@
 
 // === Movement ===
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement, "State.Movement");
+UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_IsGrappling, "State.Movement.IsGrappling");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded, "State.Movement.Grounded");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded_Idle, "State.Movement.Grounded.Idle");
 UE_DEFINE_GAMEPLAY_TAG(EtheriaTags::State_Movement_Grounded_Walking, "State.Movement.Grounded.Walking");

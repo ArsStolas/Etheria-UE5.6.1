@@ -27,6 +27,10 @@
 #include "QuestBuilderNode_Objective.h"
 #include "Decorator/OrionDecorator.h"
 #include "Event/OrionEvent.h"
+#include "OrionSetting.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "HAL/PlatformProcess.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 
 #define LOCTEXT_NAMESPACE "EdGraphSchema_QuestBuilder"
@@ -35,6 +39,82 @@ namespace
 {
 	// Maximum distance a drag can be off a node edge to require 'push off' from node
 	const int32 NodeDistance = 60;
+
+	int32 CountQuestTrialNodes(const UQuestBuilderEdNode* Node)
+	{
+		if (!Node || Node->IsA(UQuestBuilderEdNode_Root::StaticClass()) || Node->IsA(UQuestBuilderEdNode_Edge::StaticClass()))
+		{
+			return 0;
+		}
+
+		int32 NodeCount = 1;
+		for (const UQuestBuilderEdNode* SubNode : Node->SubNodes)
+		{
+			NodeCount += CountQuestTrialNodes(SubNode);
+		}
+
+		return NodeCount;
+	}
+
+	int32 CountQuestTrialNodes(const UEdGraph* Graph)
+	{
+		int32 NodeCount = 0;
+		if (!Graph)
+		{
+			return NodeCount;
+		}
+
+		for (const UEdGraphNode* GraphNode : Graph->Nodes)
+		{
+			NodeCount += CountQuestTrialNodes(Cast<UQuestBuilderEdNode>(GraphNode));
+		}
+
+		return NodeCount;
+	}
+
+	void ShowQuestTrialLimitNotification(const UOrionSetting* Settings)
+	{
+		const int32 NodeLimit = Settings ? Settings->NodeLimit : 0;
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("NodeLimit"), NodeLimit);
+
+		FNotificationInfo Info(FText::Format(LOCTEXT("QuestTrialNodeLimitWarning", "Trial Version only allows up to {NodeLimit} nodes."), Args));
+		Info.ExpireDuration = 5.0f;
+		Info.bUseLargeFont = false;
+
+		const FString PurchaseURL = Settings ? Settings->TrialPurchaseURL : FString();
+		if (!PurchaseURL.IsEmpty())
+		{
+			Info.HyperlinkText = LOCTEXT("QuestTrialNodeLimitPurchaseLink", "Purchase full product");
+			Info.Hyperlink = FSimpleDelegate::CreateLambda([PurchaseURL]()
+			{
+				FPlatformProcess::LaunchURL(*PurchaseURL, nullptr, nullptr);
+			});
+		}
+
+		TSharedPtr<SNotificationItem> Notification = FSlateNotificationManager::Get().AddNotification(Info);
+		if (Notification.IsValid())
+		{
+			Notification->SetCompletionState(SNotificationItem::CS_Fail);
+		}
+	}
+
+	bool CanAddQuestTrialNode(const UEdGraph* Graph)
+	{
+		const UOrionSetting* Settings = GetDefault<UOrionSetting>();
+		if (!Settings || !Settings->bTrialVersion)
+		{
+			return true;
+		}
+
+		if (CountQuestTrialNodes(Graph) < FMath::Max(0, Settings->NodeLimit))
+		{
+			return true;
+		}
+
+		ShowQuestTrialLimitNotification(Settings);
+		return false;
+	}
 }
 
 int32 UEdGraphSchema_QuestBuilder::CurrentCacheRefreshID = 0;
@@ -95,6 +175,11 @@ UEdGraphNode* FAssetSchemaAction_QuestSystem_NewNode::PerformAction(UEdGraph* Pa
 	//// If there is a template, we actually use it
 	if (NodeTemplate != NULL)
 	{
+		if (!CanAddQuestTrialNode(ParentGraph))
+		{
+			return nullptr;
+		}
+
 		const FScopedTransaction Transaction(LOCTEXT("AddNode", "Add Node"));
 		ParentGraph->Modify();
 		if (FromPin)
@@ -712,6 +797,11 @@ TSharedPtr<FAssetSchemaAction_QuestSystem_NewSubNode> UEdGraphSchema_QuestBuilde
 #if (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6)
 UEdGraphNode* FAssetSchemaAction_QuestSystem_NewSubNode::PerformAction(UEdGraph* ParentGraph, UEdGraphPin* FromPin, const FVector2f& Location, bool bSelectNewNode)
 {
+	if (!CanAddQuestTrialNode(ParentGraph))
+	{
+		return nullptr;
+	}
+
 	ParentNode->AddSubNode(NodeTemplate, ParentGraph);
 	return NULL;
 }
@@ -723,6 +813,11 @@ UEdGraphNode* FAssetSchemaAction_QuestSystem_NewSubNode::PerformAction(UEdGraph*
 #elif (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION <= 5)
 UEdGraphNode* FAssetSchemaAction_QuestSystem_NewSubNode::PerformAction(UEdGraph* ParentGraph, UEdGraphPin* FromPin, const FVector2D Location, bool bSelectNewNode)
 {
+	if (!CanAddQuestTrialNode(ParentGraph))
+	{
+		return nullptr;
+	}
+
 	ParentNode->AddSubNode(NodeTemplate, ParentGraph);
 	return NULL;
 }

@@ -8,10 +8,68 @@
 #include "Quest.h"
 #include "QuestBuilderEditorUtils.h"
 #include "QuestBuilderEdGraph.h"
+#include "OrionSetting.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/SClassPickerDialog.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "Quest_Editor"
+
+namespace
+{
+	constexpr int32 TrialGraphAssetLimit = 1;
+
+	int32 CountQuestGraphAssets()
+	{
+		TArray<FAssetData> QuestGraphAssets;
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		AssetRegistryModule.Get().GetAssetsByClass(FTopLevelAssetPath(UQuestBuilderGraph::StaticClass()), QuestGraphAssets, true);
+		return QuestGraphAssets.Num();
+	}
+
+	void ShowQuestGraphTrialLimitNotification(const UOrionSetting* Settings)
+	{
+		FNotificationInfo Info(LOCTEXT("QuestGraphTrialLimitWarning", "Trial Version only allows 1 quest graph asset."));
+		Info.ExpireDuration = 5.0f;
+		Info.bUseLargeFont = false;
+
+		const FString PurchaseURL = Settings ? Settings->TrialPurchaseURL : FString();
+		if (!PurchaseURL.IsEmpty())
+		{
+			Info.HyperlinkText = LOCTEXT("QuestGraphTrialLimitPurchaseLink", "Purchase full product");
+			Info.Hyperlink = FSimpleDelegate::CreateLambda([PurchaseURL]()
+			{
+				FPlatformProcess::LaunchURL(*PurchaseURL, nullptr, nullptr);
+			});
+		}
+
+		TSharedPtr<SNotificationItem> Notification = FSlateNotificationManager::Get().AddNotification(Info);
+		if (Notification.IsValid())
+		{
+			Notification->SetCompletionState(SNotificationItem::CS_Fail);
+		}
+	}
+
+	bool CanCreateQuestGraphAsset()
+	{
+		const UOrionSetting* Settings = GetDefault<UOrionSetting>();
+		if (!Settings || !Settings->bTrialVersion)
+		{
+			return true;
+		}
+
+		if (CountQuestGraphAssets() < TrialGraphAssetLimit)
+		{
+			return true;
+		}
+
+		ShowQuestGraphTrialLimitNotification(Settings);
+		return false;
+	}
+}
 
 class FAssetClassParentFilter : public IClassViewerFilter
 {
@@ -74,6 +132,12 @@ bool UQuestBuilderFactory::ConfigureProperties()
 UObject* UQuestBuilderFactory::FactoryCreateNew(UClass* Class, UObject* InParent, FName Name, EObjectFlags Flags, UObject* Context, FFeedbackContext* Warn)
 {
 	check(Class->IsChildOf(UQuestBuilderGraph::StaticClass()));
+
+	if (!CanCreateQuestGraphAsset())
+	{
+		return nullptr;
+	}
+
 	UQuestBuilderGraph* QuestGraph = nullptr;
 	if (QuestSystemGraphClass)
 	{

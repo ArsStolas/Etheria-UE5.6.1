@@ -77,12 +77,32 @@ UDialogBuilderNode* UDialogBuilderFunctionLibrary::GetCurrentDialogNode(const UO
 UDialogBuilderNode_DialogLine* UDialogBuilderFunctionLibrary::GetCurrentLine(const UObject* WorldContextObject)
 {
     UDialogBuilderGraph* CurrentDialogGraph = GetCurrentActiveDialog(WorldContextObject);
-    if (CurrentDialogGraph && CurrentDialogGraph->CurrentNode)
+    if (CurrentDialogGraph && CurrentDialogGraph->CurrentLine)
     {
         return CurrentDialogGraph->CurrentLine;
     }
 
     return nullptr;
+}
+
+bool UDialogBuilderFunctionLibrary::IsChoiceSelectionActive(const UObject* WorldContextObject)
+{
+    UDialogBuilderGraph* CurrentDialogGraph = GetCurrentActiveDialog(WorldContextObject);
+    if (CurrentDialogGraph && CurrentDialogGraph->CurrentLine)
+    {
+        return CurrentDialogGraph->IsChoiceSelectionActive();
+    }
+	return false;
+}
+
+FOrionDialogLine UDialogBuilderFunctionLibrary::GetCurrentDialogLine(const UObject* WorldContextObject)
+{
+    UDialogBuilderGraph* CurrentDialogGraph = GetCurrentActiveDialog(WorldContextObject);
+    if (CurrentDialogGraph && CurrentDialogGraph->CurrentLine)
+    {
+        return CurrentDialogGraph->CurrentDialogLine;
+    }
+	return FOrionDialogLine();
 }
 
 void UDialogBuilderFunctionLibrary::AdvanceDialogLine(const UObject* WorldContextObject)
@@ -94,11 +114,11 @@ void UDialogBuilderFunctionLibrary::AdvanceDialogLine(const UObject* WorldContex
     }
 }
 
-void UDialogBuilderFunctionLibrary::SelectDialogChoice(const UObject* WorldContextObject, UDialogBuilderNode_PlayerChoice* InOption)
+void UDialogBuilderFunctionLibrary::SelectDialogChoice(const UObject* WorldContextObject, UDialogBuilderNode_PlayerChoice* PlayerChoice, int32 ChoiceIndex)
 {
     if (UDialogComponent* DialogComp = GetDialogComponentFromTarget(UGameplayStatics::GetPlayerController(WorldContextObject, 0)))
     {
-        DialogComp->SelectDialogChoice(InOption);
+        DialogComp->SelectDialogChoice(PlayerChoice, ChoiceIndex);
     }
 
 }

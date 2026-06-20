@@ -104,31 +104,93 @@ public:
 	TObjectPtr <UDialogBuilderEdNode_Edge> NodeTemplate;
 };
 
-/** Reference to a  event graph (only used in 'docked' palette) */
+/** Reference to a  dialog participant (only used in 'docked' palette) */
 USTRUCT()
-struct DIALOG_SYSTEM_EDITOR_API FAssetSchemaAction_DialogSystemGraph : public FEdGraphSchemaAction
+struct DIALOG_SYSTEM_EDITOR_API FAssetSchemaAction_Participant : public FEdGraphSchemaAction
 {
 	GENERATED_USTRUCT_BODY()
 
 	// Simple type info
-	static FName StaticGetTypeId() { static FName Type("FAssetSchemaAction_DialogSystemGraph"); return Type; }
+	static FName StaticGetTypeId() { static FName Type("FAssetSchemaAction_Participant"); return Type; }
 	virtual FName GetTypeId() const override { return StaticGetTypeId(); }
 
 	/** Name of function or class */
 	FName FuncName;
 
 
-	/** The associated editor graph for this schema */
-	UEdGraph* EdGraph;
+	/** The associated participant for this chema action*/
+	class UDialogParticipant* Participant;
 
-	FAssetSchemaAction_DialogSystemGraph()
+
+
+	FAssetSchemaAction_Participant()
 		: FEdGraphSchemaAction()
 	{}
 
-	FAssetSchemaAction_DialogSystemGraph(FText InNodeCategory, FText InMenuDesc, FText InToolTip, const int32 InGrouping, const int32 InSectionID = 0)
+	FAssetSchemaAction_Participant(FText InNodeCategory, FText InMenuDesc, FText InToolTip, const int32 InGrouping, const int32 InSectionID = 0)
 		: FEdGraphSchemaAction(MoveTemp(InNodeCategory), MoveTemp(InMenuDesc), MoveTemp(InToolTip), InGrouping, FText(), InSectionID)
-		, EdGraph(nullptr)
+		, Participant(nullptr)
 	{}
+};
+
+/** Reference to a  dialog prop (only used in 'docked' palette) */
+USTRUCT()
+struct DIALOG_SYSTEM_EDITOR_API FAssetSchemaAction_Prop : public FEdGraphSchemaAction
+{
+	GENERATED_USTRUCT_BODY()
+
+	// Simple type info
+	static FName StaticGetTypeId() { static FName Type("FAssetSchemaAction_Prop"); return Type; }
+	virtual FName GetTypeId() const override { return StaticGetTypeId(); }
+
+	/** Name of function or class */
+	FName FuncName;
+
+
+	/** The associated participant for this chema action*/
+	class UDialogProp* Prop;
+
+
+
+	FAssetSchemaAction_Prop()
+		: FEdGraphSchemaAction()
+	{
+	}
+
+	FAssetSchemaAction_Prop(FText InNodeCategory, FText InMenuDesc, FText InToolTip, const int32 InGrouping, const int32 InSectionID = 0)
+		: FEdGraphSchemaAction(MoveTemp(InNodeCategory), MoveTemp(InMenuDesc), MoveTemp(InToolTip), InGrouping, FText(), InSectionID)
+		, Prop(nullptr)
+	{
+	}
+};
+
+/** Reference to a dialog light (only used in 'docked' palette) */
+USTRUCT()
+struct DIALOG_SYSTEM_EDITOR_API FAssetSchemaAction_Light : public FEdGraphSchemaAction
+{
+	GENERATED_USTRUCT_BODY()
+
+	// Simple type info
+	static FName StaticGetTypeId() { static FName Type("FAssetSchemaAction_Light"); return Type; }
+	virtual FName GetTypeId() const override { return StaticGetTypeId(); }
+
+	/** Name of function or class */
+	FName FuncName;
+
+	/** The associated light for this schema action */
+	class UDialogLight* Light;
+
+	FAssetSchemaAction_Light()
+		: FEdGraphSchemaAction()
+		, Light(nullptr)
+	{
+	}
+
+	FAssetSchemaAction_Light(FText InNodeCategory, FText InMenuDesc, FText InToolTip, const int32 InGrouping, const int32 InSectionID = 0)
+		: FEdGraphSchemaAction(MoveTemp(InNodeCategory), MoveTemp(InMenuDesc), MoveTemp(InToolTip), InGrouping, FText(), InSectionID)
+		, Light(nullptr)
+	{
+	}
 };
 
 /** Action to add a subnode to the selected node */
@@ -191,3 +253,5 @@ struct DIALOG_SYSTEM_EDITOR_API FDialogSchemaAction_AddComment : public FEdGraph
 #endif
 	// End of FEdGraphSchemaAction interface
 };
+
+

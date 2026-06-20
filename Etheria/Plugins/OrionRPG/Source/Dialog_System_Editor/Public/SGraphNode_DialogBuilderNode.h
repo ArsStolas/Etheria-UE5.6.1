@@ -25,6 +25,7 @@ protected:
 };
 
 class UDialogBuilderEdNode;
+enum class EEventLaunchType : uint8;
 class DIALOG_SYSTEM_EDITOR_API SGraphNode_DialogBuilderNode : public SGraphNode
 {
 public:
@@ -47,6 +48,7 @@ public:
 	virtual void CreatePinWidgets() override;
 	virtual TSharedPtr<SToolTip> GetComplexTooltip() override;
 	virtual void AddPin(const TSharedRef<SGraphPin>& PinToAdd) override;
+	virtual int32 OnPaint( const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled ) const override;
 #if (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6)
 	virtual void MoveTo(const FVector2f& NewPosition, FNodeSet& NodeFilter, bool bMarkDirty = true) override;
 	virtual TArray<FOverlayWidgetInfo> GetOverlayWidgets(bool bSelected, const FVector2f& WidgetSize) const override;
@@ -62,6 +64,10 @@ public:
 	virtual FText GetDescription() const;
 	virtual EVisibility GetDescriptionVisibility() const;
 	virtual EVisibility GetEventsVisibility() const;
+	virtual EVisibility GetLaunchTypeEventsVisibility(EEventLaunchType LaunchType) const;
+	virtual EVisibility GetStartEventsVisibility() const;
+	virtual EVisibility GetEndEventsVisibility() const;
+	virtual EVisibility GetBothEventsVisibility() const;
 	virtual EVisibility GetDecoratorVisibility() const;
 
 	/**
@@ -78,6 +84,7 @@ public:
 
 	/** adds event widget inside current node */
 	void AddEvent(TSharedPtr<SGraphNode> EventWidget);
+	void AddEvent(TSharedPtr<SGraphNode> EventWidget, EEventLaunchType EventLaunchType);
 
 
 	/** handle mouse down on the node */
@@ -109,10 +116,12 @@ public:
 	virtual EVisibility GetNodeIDVisibility() const;
 	virtual EVisibility GetTitleVisibility() const;
 	virtual EVisibility GetParentNodeVisibility() const;
-	virtual EVisibility GetSelectorVisibility() const;
+	virtual EVisibility GetNodeHeaderTitleVisibility() const;
 	virtual EVisibility GetSubNodeVisibility() const;
 	virtual EVisibility GetDragOverMarkerVisibility() const;
 
+	bool IsCurrentEditingSequenceNode() const;
+	
 	/** shows red marker when search failed*/
 	EVisibility GetDebuggerSearchFailedMarkerVisibility() const;
 
@@ -120,7 +129,17 @@ public:
 
 	/** sets drag marker visible or collapsed on this node */
 	void SetDragMarker(bool bEnabled);
+public:
+	void OnSequencerButtonHovered();
+	void OnSequencerButtonUnhovered();
+	FSlateColor GetSequencerButtonColor() const;
+	const FSlateBrush* GetDialogSequenceThumbnail() const;
+
 protected:
+	mutable FSlateBrush SequenceThumbnailBrush;
+	mutable FSlateBrush SequenceThumbnailFallbackBrush;
+
+	uint32 bSequencerButtonHovered : 1;
 	/** The node body widget, cached here so we can determine its size when we want ot position our overlays */
 	TSharedPtr<SBorder> NodeBody;
 
@@ -128,11 +147,13 @@ protected:
 
 	uint32 bDragMarkerVisible : 1;
 
-
 	TArray< TSharedPtr<SGraphNode> > DecoratorWidgets;
 	TArray< TSharedPtr<SGraphNode> > EventsWidgets;
 	TSharedPtr<SVerticalBox> DecoratorsBox;
 	TSharedPtr<SVerticalBox> EventsBox;
+	TSharedPtr<SVerticalBox> StartEventsBox;
+	TSharedPtr<SVerticalBox> EndEventsBox;
+	TSharedPtr<SVerticalBox> BothEventsBox;
 	TSharedPtr<SHorizontalBox> OutputPinBox;
 	TSharedPtr<SWidget> DialogNodeWidgetRef;
 
@@ -140,6 +161,14 @@ protected:
 	TSharedPtr<SWidget> IndexOverlay;
 
 	EVisibility GetBlueprintIconVisibility() const;
+	EEventLaunchType GetEventLaunchTypeForDrop(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) const;
+	void SetEventLaunchType(UDialogBuilderEdNode* EventNode, EEventLaunchType EventLaunchType);
+
+	/** Sequencer quick-open icon visibility */
+	EVisibility GetSequencerIconVisibility() const;
+
+	/** Open sequence asset in Sequencer */
+	FReply OnOpenSequencerClicked();
 
 	//Dialog Node Index
 
@@ -148,6 +177,9 @@ protected:
 
 	/** Get the text to display in the index overlay */
 	FText GetIndexText() const;
+
+	/** Get the text to display top of node title */
+	FText GetNodeHeaderTitleText() const;
 
 	/** Get the tooltip for the index overlay */
 	FText GetIndexTooltipText() const;

@@ -13,6 +13,8 @@ class UDialogBuilderEdNode;
 class UDialogBuilderEdNode_Edge;
 class UDialogBuilderEdNode_Edge;
 
+class FDialogBuilderEditor;
+
 UCLASS()
 class DIALOG_SYSTEM_EDITOR_API UDialogBuilderEdGraph : public UEdGraph
 {
@@ -55,11 +57,16 @@ public:
 	void Clear();
 
 	void OnPackageMarkedDirty(UPackage* ModifiedPackage, bool bWasDirty);
+public:
+
+	TWeakPtr<FDialogBuilderEditor> DialogEditorPtr;
 protected:
 	/** if set, graph modifications won't cause updates in internal tree structure
 	 *  flag allows freezing update during heavy changes like pasting new nodes
 	 */
 	uint32 bLockUpdates : 1;
+
+	bool SynchronizePlayerChoicePins();
 
 	void SortNodes(UDialogBuilderNode* RootNode);
 	double LastRebuildTime = 0.f;
@@ -71,4 +78,5 @@ protected:
 protected:
 	virtual void CollectAllNodeInstances(TSet<UObject*>& NodeInstances);
 	void UpdateVersion_UnifiedSubNodes();
+
 };

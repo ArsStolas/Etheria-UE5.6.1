@@ -10,6 +10,8 @@
 #include "IAssetTools.h"
 #include "PropertyEditorDelegates.h"
 #include "DialogBuilderNodeFactory.h"
+#include "Templates/SharedPointer.h"
+#include "Toolkits/AssetEditorToolkit.h"
 
 class FToolBarBuilder;
 class FMenuBuilder;
@@ -17,7 +19,7 @@ class UDialog;
 
 
 
-class FDialog_System_EditorModule : public IModuleInterface
+class FDialog_System_EditorModule : public IModuleInterface, public IHasMenuExtensibility, public IHasToolBarExtensibility
 {
 public:
 
@@ -28,6 +30,10 @@ public:
 	
 	TSharedPtr<struct FGraphNodeClassHelper> GetDecoratorClassCache() { return DecoratorClassCache; }
 	TSharedPtr<struct FGraphNodeClassHelper> GetEventClassCache() { return EventClassCache; }
+
+	/** Gets the extensibility managers for outside entities to extend static mesh editor's menus and toolbars */
+	virtual TSharedPtr<FExtensibilityManager> GetMenuExtensibilityManager() override { return MenuExtensibilityManager; }
+	virtual TSharedPtr<FExtensibilityManager> GetToolBarExtensibilityManager() override { return ToolBarExtensibilityManager; }
 	
 	void CheckClassCache();
 
@@ -46,8 +52,12 @@ private:
 	void RegisterCustomClassLayout(FName ClassName, FOnGetDetailCustomizationInstance DetailLayoutDelegate);
 
 
+
 	class UDialogEditorSettings* SettingsPtr;
 private:
+	TSharedPtr<FExtensibilityManager> MenuExtensibilityManager;
+	TSharedPtr<FExtensibilityManager> ToolBarExtensibilityManager;
+
 	TSharedPtr<class FUICommandList> PluginCommands;
 	TSharedPtr<FDialogBuilderNodeFactory> GraphPanelNodeFactory_DialogEditor;
 	TSharedPtr<class IDetailsView> PropertyWidget;
@@ -60,4 +70,6 @@ private:
 
 	/** List of registered class that we must unregister when the module shuts down */
 	TSet< FName > RegisteredClassNames;
+private:
+	FDelegateHandle DialogTrackEditorHandle;
 };

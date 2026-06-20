@@ -24,8 +24,10 @@ void FQuestBuilder_ConnectionDrawingPolicy::DetermineWiringStyle(UEdGraphPin* Ou
 	Params.AssociatedPin1 = OutputPin;
 	Params.AssociatedPin2 = InputPin;
 	Params.WireThickness = 1.5f;
-
 	Params.WireColor = QuestBuilderColors::Connection::Default;
+
+	const bool bIsPreviewConnection = (OutputPin == nullptr || InputPin == nullptr);
+	ArrowImage = bIsPreviewConnection ? FAppStyle::GetBrush(TEXT("Graph.Arrow")) : nullptr;
 
 	const bool bDeemphasizeUnhoveredPins = HoveredPins.Num() > 0;
 	if (bDeemphasizeUnhoveredPins)

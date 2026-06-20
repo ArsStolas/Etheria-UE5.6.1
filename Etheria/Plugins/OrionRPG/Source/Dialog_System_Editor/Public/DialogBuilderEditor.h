@@ -4,30 +4,82 @@
 
 #include "CoreMinimal.h"
 #include "DialogBuilderSetting.h"
+#include "UObject/Package.h"
 #include "SSubobjectEditor.h"
 #include "Dialog_System_Editor.h"
 #include "WorkflowOrientedApp/WorkflowTabManager.h"
 #include "DialogBuilderGraph.h"
+#include "Tickable.h"
+#include "TickableEditorObject.h"
+#include "KeyParams.h"
+#include "Misc/ITransaction.h"
+#include "Templates/SharedPointer.h"
 
-class SMyDialog;
+#include "DialogBuilderEditor.generated.h"
+
+class FAdvancedPreviewScene;
+class SDialogPreviewViewport;
+class ISequencer;
+class ULevelSequence;
+class UDialogStage;
+class SDialogDefinitions;
+class SDialogCameraPresets;
+class UDialogParticipant;
+class UDialogSequence;
+class UDialogSequenceSlot;
+class UDialogDefinition;
+class ACineCameraActor;
+class FToolBarBuilder;
+
+enum class EMovieSceneDataChangeType;
 
 namespace DialogSectionID
 {
 	enum Type
 	{
 		NONE = 0,
-		DIALOGLIST,	// Dialog Graph
+		PARTICIPANTS,	// Participants
+		PROPS,			// Props actor 
 		//Add More to populate the section
 	};
+};
+
+enum class EDialogViewportWorldMode : uint8
+{
+	PreviewScene,
+	CurrentLevel
+};
+
+enum class EDialogViewportCameraMode : uint8
+{
+	Perspective,
+	DialogCameraLock,
+	SequencerCameraCuts
 };
 
 struct FDialogBuilderEditorTabs
 {
 	// Tab identifiers
-	static const FName MyDialogDetailID;
+	static const FName DialogDefinitionsID;
 	static const FName DialogBuilderPropertyID;
+	static const FName DialogStageSettingsID;
 	static const FName ViewportID;
 	static const FName DialogBuilderEditorSettingsID;
+	static const FName DialogSequencerTabID;
+	static const FName DialogSequencerViewportID;
+	static const FName DialogCameraPresetsID;
+	static const FName SequencerGraphEditor;
+
+};
+
+
+
+UCLASS()
+class UDialogSequenceEditorMenuContext : public UObject
+{
+	GENERATED_BODY()
+public:
+	TWeakPtr<class FDialogBuilderEditor> DialogEditor;
 };
 
 
@@ -51,7 +103,7 @@ public:
 
 	virtual void RefreshEditors() = 0;
 
-	virtual void RefreshMyDialog() = 0;
+	virtual void RefreshDialogDefinitions() = 0;
 
 	virtual void RefreshInspector() = 0;
 
@@ -80,7 +132,11 @@ public:
 };
 
 
-class DIALOG_SYSTEM_EDITOR_API FDialogBuilderEditor : public IDialogEditor, public FNotifyHook, public FGCObject, public FEditorUndoClient
+class DIALOG_SYSTEM_EDITOR_API FDialogBuilderEditor : public IDialogEditor,
+	public FTickableEditorObject,
+	public FNotifyHook,
+	public FGCObject, 
+	public FEditorUndoClient
 {
 public:
 	FDialogBuilderEditor();
@@ -94,13 +150,19 @@ public:
 	virtual void UnregisterTabSpawners(const TSharedRef<FTabManager>& TabManager) override;
 	// End of IToolkit interface
 
-
+	//~ Begin FTickableEditorObject Interface
+	virtual void Tick(float DeltaTime) override;
+	virtual ETickableTickType GetTickableTickType() const override { return ETickableTickType::Always; }
+	virtual TStatId GetStatId() const override;
+	//~ End FTickableEditorObject Interface
+	// 
 	//~ Begin FEditorUndoClient Interface
 	virtual void PostUndo(bool bSuccess) override;
 	virtual void PostRedo(bool bSuccess) override;
 	// End of FEditorUndoClient
 
 	// FAssetEditorToolkit
+	virtual const FSlateBrush* GetDefaultTabIcon() const override;
 	virtual FName GetToolkitFName() const override;
 	virtual FText GetBaseToolkitName() const override;
 	virtual FText GetToolkitName() const override;
@@ -113,7 +175,7 @@ public:
 	
 	//IDialogEditor
 	virtual void RefreshEditors() override;
-	virtual void RefreshMyDialog();
+	virtual void RefreshDialogDefinitions();
 	virtual void RefreshInspector();
 	virtual void AddToSelection(UEdGraphNode* InNode) override;
 	virtual void JumpToHyperlink(const UObject* ObjectReference, bool bRedialogRename = false) override;
@@ -123,6 +185,35 @@ public:
 	virtual TSharedPtr<SGraphEditor> OpenGraphAndBringToFront(UEdGraph* Graph, bool bSetFocus = true) override;
 	// End of IDialogEditor
 
+	void BindDelegates();
+	void UnbindDelegates();
+
+
+	void OnPieEvent(bool);
+	void OnMapChange(uint32);
+	void OnWorldAdded(UWorld*);
+	void OnWorldDestroyed(UWorld*);
+	void OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
+	void OnTransactionStateChanged(const FTransactionContext& TransactionContext, ETransactionStateEventType TransactionState);
+
+	//Tabs
+	/** Spawns the detail property tab */
+	TSharedRef<SWidget> SpawnProperties();
+
+	/** Spawns the dialog set settings tab */
+	TSharedRef<SWidget> SpawnDialogStageSettings();
+
+	/** Spawns the dialog definitions tab*/
+	TSharedRef<SWidget> SpawnDialogDefinitions();
+
+	/** Spawns the dialog sequencer tab*/
+	TSharedRef<SWidget> SpawnDialogSequencerTab();
+	
+	/** Spawns the dialog viewport tab*/
+	TSharedRef<SWidget> SpawnDialogSequencerViewportTab();
+
+	/** Spawns the dialog camera presets tab*/
+	TSharedRef<SWidget> SpawnDialogCameraPresetsTab();
 
 	//Toolbar
 	void UpdateToolbar();
@@ -137,6 +228,12 @@ public:
 
 	/** Returns a pointer to the Dialog graph object we are currently editing, as long as we are editing exactly one */
 	virtual UDialogBuilderGraph* GetDialogBuilderGraph() const;
+
+	/** Restores the dialog graph we were editing or creates a new one if none is available */
+	void RestoreDialogEditor();
+
+	/** Save the graph state for later editing */
+	void SaveEditedObjectState();
 
 	// Type of new document/graph being created by a menu item
 	enum ECreatedDialogDocumentType
@@ -199,6 +296,19 @@ public:
 	 */
 	UEdGraph* GetFocusedGraph() const;
 
+	/** Check whether the dialog editor mode can be accessed*/
+	bool CanAccessDialogEditorMode() const;
+
+	/** Check whether the dialog sequencer mode can be accessed*/
+	bool CanAccessDialogSequencerMode() const;
+
+	/**
+	 * Get the localized text to display for the specified mode
+	 * @param	InMode	The mode to display
+	 * @return the localized text representation of the mode
+	 */
+	static FText GetLocalizedMode(FName InMode);
+
 	/** Returns the currently selected node if there is a single node selected (if there are multiple nodes selected or none selected, it will return nullptr) */
 	UEdGraphNode* GetSingleSelectedNode() const;
 
@@ -211,10 +321,87 @@ public:
 	/** Checks to see if the provided graph is contained within the current DialogBuilderGraph */
 	bool IsGraphInCurrentDialogGraph(const UEdGraph* InGraph) const;
 
+	/**
+	 * Provides access to the preview scene.
+	 */
+	FPreviewScene* GetPreviewScene()
+	{
+		return &PreviewScene;
+	}
+
+
+	//Sequencer
+	void OnOpenDialogSequenceNode(class UDialogBuilderNode_DialogSequence* InSequenceNode);
+	void OpenDialogSequence(UDialogSequence* InDialogSequence);
+	void EnsureSequencerCreated();
+	void CloseSequencerForUndoRedo();
+	void EnsureDialogCameraCutSection();
+	void UpdateTrackModelRule();
+	void UpdateSectionRule();
+	void OnSequencerSelectionChangedObjectGuids(TArray<FGuid> Guids);
+	void ApplyDefaultCameraSetting();
+
+	// Returns true when the binding exists and has at least one valid 3D transform section.
+	bool HasBindingWithValid3DTransformSection(const FGuid& InBindingId) const;
+
+	bool ApplyCameraPreset(class UDialogSequenceShot* InSequenceShot, int32 InFrameNumber = -1, bool bRandomizeAngle = false);
+	void AddKeyFromCameraPreset(int32 InFrameNumber = -1, EMovieSceneKeyInterpolation KeyInterpolationType = EMovieSceneKeyInterpolation::Constant);
+
+	/** Called whenever sequencer has received focus */
+	void OnSequencerReceivedFocus();
+
+	void OnSequencerGlobalTimeChanged();
+	void OnSequencerMovieSceneDataChanged(EMovieSceneDataChangeType ChangeType);
+	void RefreshSequencerCameraLock();
+	void UnbindSequencerDelegates();
+	void ApplyViewportCameraMode();
+
+	void SelectActor(AActor* ActorToSelect);
+
+	/** Called whenever sequencer in initializing tool menu context */
+	void OnInitToolMenuContext(FToolMenuContext& MenuContext);
+
+	UWorld* GetPreviewWorld();
+
+	//DialogDefinitions
+	void UpdateDialogStage();
+	void DestroyDialogStage();
+	UDialogSequenceSlot* GetDialogSlotKey(AActor* InActor);
+	//Get the slot which is being used as a template for the opened dialogset
+	UDialogSequenceSlot* GetTemplateSlot(AActor* InActor);
+	void RetrieveDialogSlotActor(UDialogSequenceSlot* InSlot, AActor*& OutActor, bool bIsCamera = false);
+	void RetrieveLightSlotActor(class UDialogSequenceSlot_Light* InLightSlot, AActor*& OutActor);
+	void UpdateLightSlotProperty(class UDialogSequenceSlot_Light* InLightSlot, AActor* InActor);
+	void InitializeLightActor(class AActor* InLightActor);
+	void CreateDialogTrackFromSlot(UDialogSequenceSlot* InSlot, bool bIsCamera = false);
+	TArray<AActor*> GetDialogSlotActors() const;
+
+	AActor* GetDialogDefinitionActor(UDialogDefinition* InDialogDefinition);
+	void SelectDialogDefinitionActor(UDialogDefinition* InDialogDefinition);
+	void SelectDialogDefinition(UDialogDefinition* InDialogDefinition);
+	void SelectDialogSlotActor(int32 index);
+	void SelectLightSlotActor(int32 index);
+	UDialogDefinition* FindDialogDefinitionByActor(const AActor* InActor) const;
+
+	void OnDialogDefinitionAdded(UDialogDefinition* InDialogDefinition);
+	void OnDialogDefinitionRemoved(UDialogDefinition* InDialogDefinition);
+
+	void ResolveDialogBoundObjects();
+
+	//scene viewport
+	void SetViewportWorldMode(EDialogViewportWorldMode NewMode);
+	bool IsViewportWorldMode(EDialogViewportWorldMode Mode) const { return ViewportWorldMode == Mode; }
+
+	void SetViewportCameraMode(EDialogViewportCameraMode NewMode);
+	bool IsViewportCameraMode(EDialogViewportCameraMode Mode) const { return ViewportCameraMode == Mode; }
+
+	void SetDetailsObject(UObject* InObject);
 
 	//Getter
-	TSharedPtr<SMyDialog> GetMyDialogWidget() const { return MyDialogWidget; }
-
+	TSharedPtr<SDialogDefinitions> GetDialogDefinitionsWidget() const { return DialogDefinitionsWidget; }
+	AActor* GetSequencePivot() { return SequencePivot.Get(); };
+	class UDialogStage* GetDialogStageTemplate() { return DialogStageTemplate.Get(); };
+	AActor* GetDialogCamera() { return DialogCamera.Get(); }
 
 	FGraphAppearanceInfo GetGraphAppearance() const;
 	bool InEditingMode(bool bGraphIsEditable) const;
@@ -222,6 +409,10 @@ public:
 	static bool IsPIESimulating();
 	static bool IsPIENotSimulating();
 
+
+	//New class Functions
+	void HandleNewClassPicked(UClass* InClass) const;
+	void CreateNewDialogStageTemplate(UDialogStage* InDialogStage);
 private:
 	/** Helper to move focused graph when clicking on graph breadcrumb */
 	void OnChangeBreadCrumbGraph(class UEdGraph* InGraph);
@@ -229,11 +420,23 @@ private:
 	/** A callback every time graph changed */
 	void OnGraphChanged(const FEdGraphEditAction& Action);
 
+private:
+	//Sequencer toolbar
+	void ExtendSequencerToolbar(FToolBarBuilder& InToolbarBuilder);
+	void OpenGenerateSequenceCameraDialog();
+	void GenerateSequenceCameraFromDialogSections(const class UDialogGenerateCameraSettings* InSettings);
+	bool CanGenerateSequenceCameraFromDialogSections() const;
+
 protected:
 	TSharedRef<SDockTab> SpawnTab_Viewport(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnTab_Details(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_DialogStageSettings(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnTab_EditorSettings(const FSpawnTabArgs& Args); 
-	TSharedRef<SDockTab> SpawnTab_MyDialog(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_DialogDefinitions(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_Sequencer(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_SequencerViewport(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_CameraPresets(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnTab_CurveEditor(const FSpawnTabArgs& Args);
 	
 	void CreateInternalWidgets();
 
@@ -270,8 +473,6 @@ protected:
 	void DuplicateNodes();
 	bool CanDuplicateNodes();
 
-	//New Task Functions from toolbar
-	void HandleNewNodeClassPicked(UClass* InClass) const;
 
 	void CreateNewDialogDecorator();
 	bool CanCreateDialogDecorator() const;
@@ -290,6 +491,8 @@ protected:
 
 	bool CanCreateComment() const;
 	void OnCreateComment();
+
+
 
 
 
@@ -317,6 +520,8 @@ public:
 	TSharedPtr<FDocumentTracker> DocumentManager;
 	TSharedPtr<class IDetailsView> PropertyWidget;
 
+	TSharedPtr<class IDetailsView> DialogStageWidget;
+
 	/** Currently focused Editor Graph*/
 	UEdGraph* FocusedEdGraph;
 
@@ -329,7 +534,6 @@ protected:
 	/** Factory that spawns graph editors; used to look up all tabs spawned by it. */
 	TWeakPtr<FDocumentTabFactory> DialogEditorTabFactoryPtr;
 
-
 	UDialogBuilderGraph* EditingDialogGraph;
 
 
@@ -338,13 +542,53 @@ protected:
 
 	/** Handle to the registered OnPackageSave delegate */
 	FDelegateHandle OnPackageSavedDelegateHandle;
+	FDelegateHandle TransactionStateChangedHandle;
 
 	TSharedPtr<class IDetailsView> EditorSettingsWidget;
-	TSharedPtr<class SMyDialog> MyDialogWidget;
+	TSharedPtr<class SDialogDefinitions> DialogDefinitionsWidget;
+	TSharedPtr<class SDialogStageManager> DialogStageManagerWidget;
+	TSharedPtr<class SDialogCameraPresets> DialogCameraPresetsWidget;
 
 	/** The command list for this editor */
 	TSharedPtr<FUICommandList> GraphEditorCommands;
 
+	//Viewport
+	EDialogViewportWorldMode ViewportWorldMode = EDialogViewportWorldMode::PreviewScene;
+	EDialogViewportCameraMode ViewportCameraMode = EDialogViewportCameraMode::Perspective;
 
+	FPreviewScene PreviewScene;
+	TSharedPtr<SDialogPreviewViewport> DialogViewportWidget;
+
+	
+	//sequencer
+	TWeakObjectPtr<class UDialogBuilderNode_DialogSequence> CurrentSequenceNode;
+	TWeakObjectPtr<class UDialogStage> DialogStageTemplate;
+	TSharedPtr<ISequencer> Sequencer;
+	TWeakObjectPtr<AActor> SequencePivot;
+	TMap<UDialogSequenceSlot*, TWeakObjectPtr<AActor>> DialogSlotActors;
+	TWeakObjectPtr<AActor> DialogCamera;
+
+	//sequencer
+	FDelegateHandle SequencerGlobalTimeChangedHandle;
+	FDelegateHandle SequencerMovieSceneDataChangedHandle;
+	TWeakObjectPtr<AActor> LastSequencerCameraCutActor;
+
+	bool bPendingRefreshDialogEditor = false;
+	bool bIsRefreshDialogEditorInProgress = false;
+	bool bIsClosing = false;
+
+	/** MovieScene for displaying this dialog sequence in timeline. */
+	TObjectPtr<UDialogSequence> EditingDialogSequence = nullptr;
+
+	/** Instance of a class used for managing the playback context for a level sequence. */
+	TSharedPtr<class FDialogSequencePlaybackContext> PlaybackContext;
+
+public:
+	/** Modes in mode switcher */
+	static const FName DialogEditorMode;
+	static const FName DialogSequencerMode;
+
+	static FText DialogEditorModeText;
+	static FText DialogSequencerModeText;
 
 };

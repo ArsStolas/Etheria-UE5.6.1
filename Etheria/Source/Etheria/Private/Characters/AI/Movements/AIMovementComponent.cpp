@@ -1,15 +1,14 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "AIMovementComponent - Source"
- * Notes: Spline points cached to world space at StartPatrol (fixes drift).
- *        FleeFrom uses perpendicular randomization to avoid getting stuck.
  */
 
 #include "Characters/AI/Movements/AIMovementComponent.h"
 
 #include "Characters/AI/BaseAICharacter.h"
+#include "Characters/AI/Animations/AIAnimationComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SplineComponent.h"
 #include "NavigationSystem.h"
@@ -23,6 +22,11 @@ void UAIMovementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	EnsureInitialized();
+	if (MovementComp)
+	{
+		// Smooth, non-abrupt stops (the chase→attack halt otherwise reads like hitting a wall at the 2048 default).
+		MovementComp->BrakingDecelerationWalking = BrakingDeceleration;
+	}
 }
 
 void UAIMovementComponent::EnsureInitialized()
@@ -32,6 +36,37 @@ void UAIMovementComponent::EnsureInitialized()
 		OwnerCharacter = Cast<ABaseAICharacter>(GetOwner());
 		if (OwnerCharacter) MovementComp = OwnerCharacter->GetCharacterMovement();
 	}
+
+	/* Lazy-resolve the patrol spline. ──────────────────────────────────────
+	 * Why this matters: for placed pawns, AAIController::OnPossess can fire
+	 * BEFORE the character's BeginPlay — meaning SetPatrolSpline() hasn't run
+	 * yet when the controller calls StartPatrol(). The previous code then
+	 * silently fell back to the character's own location as a "patrol point",
+	 * leaving the AI immobile.
+	 *
+	 * Resolution priority:
+	 *   1. PatrolSpline was already set explicitly (by character::BeginPlay).
+	 *   2. PatrolPathActor (an actor placed in the level) — preferred for
+	 *      level-design workflows where designers draw paths in the world.
+	 *   3. The character's built-in PatrolSpline subobject.
+	 * ──────────────────────────────────────────────────────────────────── */
+	if (!PatrolSpline && OwnerCharacter)
+	{
+		if (PatrolPathActor)
+		{
+			PatrolSpline = PatrolPathActor->FindComponentByClass<USplineComponent>();
+			if (!PatrolSpline)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("[%s] PatrolPathActor '%s' has no SplineComponent — falling back to the character's built-in PatrolSpline."),
+					*OwnerCharacter->GetName(), *PatrolPathActor->GetName());
+			}
+		}
+		if (!PatrolSpline)
+		{
+			PatrolSpline = OwnerCharacter->GetPatrolSpline();
+		}
+	}
 }
 
 void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -40,10 +75,11 @@ void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 
 	ApplySmoothAcceleration(DeltaTime);
 	if (MoveGraceTimer > 0.f) MoveGraceTimer -= DeltaTime;
+	if (RepathCooldown > 0.f) RepathCooldown -= DeltaTime;
 	if (bIsPatrolling) HandlePatrolTick(DeltaTime);
 
 #if ENABLE_DRAW_DEBUG
-	if (OwnerCharacter->ShouldShowDebugPatrol()) DrawDebugPatrol();
+	if (OwnerCharacter && OwnerCharacter->ShouldShowDebugPatrol()) DrawDebugPatrol();
 #endif
 }
 
@@ -51,8 +87,18 @@ void UAIMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 
 void UAIMovementComponent::CacheSplineWorldPositions()
 {
+	EnsureInitialized();
+
 	CachedSplineWorldPoints.Reset();
-	if (!PatrolSpline) return;
+	if (!PatrolSpline)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[%s] Path patrol mode requested but no PatrolSpline could be found. "
+			     "Either define points on the character's PatrolSpline subobject in the BP, "
+			     "or set PatrolPathActor to a spline actor in the level."),
+			OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("AIMovement"));
+		return;
+	}
 
 	const int32 Num = PatrolSpline->GetNumberOfSplinePoints();
 	CachedSplineWorldPoints.Reserve(Num);
@@ -61,6 +107,14 @@ void UAIMovementComponent::CacheSplineWorldPositions()
 	{
 		// Snapshot world position NOW — before the character moves
 		CachedSplineWorldPoints.Add(PatrolSpline->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World));
+	}
+
+	if (CachedSplineWorldPoints.Num() < 2)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[%s] PatrolSpline has only %d point(s). Path mode needs at least 2."),
+			OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("AIMovement"),
+			CachedSplineWorldPoints.Num());
 	}
 }
 
@@ -73,11 +127,28 @@ void UAIMovementComponent::StartPatrol()
 	EnsureInitialized();
 	if (!OwnerCharacter) return;
 
+	// Pack followers are driven by UpdatePackFollow (cluster on the leader), not their own patrol loop —
+	// running both would give two competing movement drivers. Only the leader patrols.
+	if (OwnerCharacter->GetPackID() != NAME_None && !OwnerCharacter->IsPackLeader()) return;
+
 	PatrolOrigin = OwnerCharacter->GetActorLocation();
 
 	// Cache spline points in world space so they don't drift with the character
 	if (PatrolMode == EPatrolMode::Path)
+	{
 		CacheSplineWorldPositions();
+
+		// Bail out cleanly if the path is unusable, instead of silently moving
+		// to the character's own location and looking frozen forever.
+		if (CachedSplineWorldPoints.Num() < 2)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("[%s] StartPatrol(Path) aborted: spline must have at least 2 points."),
+				*OwnerCharacter->GetName());
+			bIsPatrolling = false;
+			return;
+		}
+	}
 
 	bIsPatrolling = true;
 	bPatrolFinished = false;
@@ -100,10 +171,21 @@ void UAIMovementComponent::StopPatrol()
 	StopMovement();
 }
 
-bool UAIMovementComponent::MoveToLocation(const FVector& Target)
+bool UAIMovementComponent::MoveToLocation(const FVector& Target, float AcceptanceOverride)
 {
 	EnsureInitialized();
 	if (!OwnerCharacter) return false;
+
+	const float Accept = (AcceptanceOverride >= 0.f) ? AcceptanceOverride : AcceptanceRadius;
+
+	// Repath gate: don't re-pathfind every frame toward a near-identical, recently-requested goal.
+	if (bMoveRequestActive && bHasLastGoal && RepathCooldown > 0.f
+		&& FVector::DistSquared(Target, LastRequestedGoal) < FMath::Square(RepathTolerance))
+	{
+		CurrentDestination = Target;
+		OnMovementTargetUpdated.Broadcast(Target);
+		return true;
+	}
 
 	CurrentDestination = Target;
 	OnMovementTargetUpdated.Broadcast(Target);
@@ -115,7 +197,7 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 	if (AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
 	{
 		const EPathFollowingRequestResult::Type Result = AIC->MoveToLocation(
-			Target, AcceptanceRadius, true, true, true, true,
+			Target, Accept, true, true, true, true,
 			TSubclassOf<UNavigationQueryFilter>(), true);
 
 		bSuccess = (Result == EPathFollowingRequestResult::RequestSuccessful
@@ -124,6 +206,7 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 		if (Result == EPathFollowingRequestResult::AlreadyAtGoal)
 		{
 			bMoveRequestActive = false;
+			bHasLastGoal = false;
 			MoveGraceTimer = 0.f;
 			return true;
 		}
@@ -132,10 +215,14 @@ bool UAIMovementComponent::MoveToLocation(const FVector& Target)
 		{
 			bMoveRequestActive = true;
 			MoveGraceTimer = MOVE_GRACE_DURATION;
+			LastRequestedGoal = Target;
+			bHasLastGoal = true;
+			RepathCooldown = MinRepathInterval;
 		}
 		else
 		{
 			bMoveRequestActive = false;
+			bHasLastGoal = false;
 		}
 	}
 	return bSuccess;
@@ -145,50 +232,53 @@ void UAIMovementComponent::StopMovement()
 {
 	DesiredMaxSpeed = 0.f;
 	bMoveRequestActive = false;
+	bHasLastGoal = false;
+	RepathCooldown = 0.f;
 	EnsureInitialized();
 	if (OwnerCharacter)
 		if (AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
 			AIC->StopMovement();
 }
 
-void UAIMovementComponent::FleeFrom(AActor* Threat)
+bool UAIMovementComponent::FleeFrom(AActor* Threat)
 {
 	EnsureInitialized();
-	if (!OwnerCharacter || !Threat) return;
+	if (!OwnerCharacter || !Threat) return false;
 
 	const FVector MyLoc = OwnerCharacter->GetActorLocation();
 	const FVector ThreatLoc = Threat->GetActorLocation();
-	const FVector AwayDir = (MyLoc - ThreatLoc).GetSafeNormal2D();
-
-	// Add perpendicular random offset (30-60°) to avoid running straight into walls
-	const float RandomAngle = FMath::FRandRange(-60.f, 60.f);
-	const FVector FleeDir = AwayDir.RotateAngleAxis(RandomAngle, FVector::UpVector);
-	const FVector FleeTarget = MyLoc + FleeDir * FleeDistance;
+	FVector AwayDir = (MyLoc - ThreatLoc).GetSafeNormal2D();
+	if (AwayDir.IsNearlyZero()) AwayDir = OwnerCharacter->GetActorForwardVector().GetSafeNormal2D();
 
 	const UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
-	FVector FinalTarget = FleeTarget;
+	const float CurDistSq = FVector::DistSquared2D(MyLoc, ThreatLoc);
 
-	if (NavSys)
+	// Sample candidate directions in the away-hemisphere; pick the reachable one that gets us FURTHEST from the
+	// threat (so we never randomly bolt sideways into the predator or hug a wall toward it).
+	static const float Angles[] = { 0.f, -25.f, 25.f, -50.f, 50.f, -75.f, 75.f, -90.f, 90.f }; // wider fan, but stay in the away-hemisphere
+	FVector BestTarget = MyLoc + AwayDir * FleeDistance;
+	float BestScore = TNumericLimits<float>::Lowest();
+	bool bFound = false;
+	for (const float Ang : Angles)
 	{
-		FNavLocation NavResult;
-		if (NavSys->ProjectPointToNavigation(FleeTarget, NavResult, FVector(500.f, 500.f, 250.f)))
+		FVector Cand = MyLoc + AwayDir.RotateAngleAxis(Ang, FVector::UpVector) * FleeDistance;
+		if (NavSys)
 		{
-			FinalTarget = NavResult.Location;
+			FNavLocation NavRes;
+			if (!NavSys->ProjectPointToNavigation(Cand, NavRes, FVector(400.f, 400.f, 250.f))) continue;
+			Cand = NavRes.Location;
 		}
-		else
-		{
-			// Projection failed — try pure opposite direction without random angle
-			const FVector FallbackTarget = MyLoc + AwayDir * FleeDistance * 0.5f;
-			if (NavSys->ProjectPointToNavigation(FallbackTarget, NavResult, FVector(500.f, 500.f, 250.f)))
-				FinalTarget = NavResult.Location;
-			else
-				FinalTarget = MyLoc + AwayDir * 200.f; // Desperate: just move a bit away
-		}
+		const float Score = FVector::DistSquared2D(Cand, ThreatLoc);
+		if (Score > CurDistSq && Score > BestScore) { BestScore = Score; BestTarget = Cand; bFound = true; }
 	}
+
+	if (!bFound)
+		return false; // cornered — no reachable point increases distance; let the caller face/hold the threat
 
 	DesiredMaxSpeed = FleeSpeed;
 	if (MovementComp) MovementComp->MaxWalkSpeed = FleeSpeed;
-	MoveToLocation(FinalTarget);
+	MoveToLocation(BestTarget);
+	return true;
 }
 
 FVector UAIMovementComponent::GetNextPatrolPoint()
@@ -235,26 +325,53 @@ void UAIMovementComponent::HandlePatrolTick(float DeltaTime)
 	if (bIsWaiting)
 	{
 		WaitTimer -= DeltaTime;
+
+		// Dwell loop: replay an activity/idle through the wait (graze→look up→graze) instead of freezing in one pose.
+		if (ActivityChance > 0.f && OwnerCharacter)
+		{
+			ActivityRepeatTimer -= DeltaTime;
+			if (ActivityRepeatTimer <= 0.f && WaitTimer > ActivityRepeatInterval * 0.5f)
+			{
+				ActivityRepeatTimer = ActivityRepeatInterval + FMath::FRandRange(0.f, ActivityRepeatInterval * 0.5f);
+				if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+					if (!Anim->IsPlayingAction())
+						(FMath::FRand() < 0.6f) ? Anim->PlayRandomActivity() : Anim->PlayRandomIdle();
+			}
+		}
+
 		if (WaitTimer <= 0.f) ResumePatrolAfterWait();
 		return;
 	}
 
 	if (MoveGraceTimer > 0.f) return;
 
-	bool bArrived = false;
-	if (bMoveRequestActive)
+	// Real arrival = actually NEAR the point.
+	if (HasReachedDestination())
 	{
-		if (OwnerCharacter)
-			if (const AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
-				bArrived = (AIC->GetMoveStatus() != EPathFollowingStatus::Moving);
-	}
-	else
-	{
-		bArrived = true;
+		PatrolRetryCount = 0;
+		BeginWaitAtPoint();
+		return;
 	}
 
-	if (!bArrived && HasReachedDestination()) bArrived = true;
-	if (bArrived) BeginWaitAtPoint();
+	// The path-follower stopped (GetMoveStatus is Idle on FAILURE too, not just success) but we're not near →
+	// the path failed/aborted. Retry, then skip the unreachable point — never broadcast a false "reached".
+	bool bMoveStopped = !bMoveRequestActive;
+	if (bMoveRequestActive && OwnerCharacter)
+		if (const AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
+			bMoveStopped = (AIC->GetMoveStatus() != EPathFollowingStatus::Moving);
+
+	if (bMoveStopped)
+	{
+		if (++PatrolRetryCount > MaxPatrolRetries)
+		{
+			PatrolRetryCount = 0;
+			AdvancePatrolIndex();
+			if (bPatrolFinished) return;
+			CurrentDestination = GetNextPatrolPoint();
+		}
+		MoveToLocation(CurrentDestination);
+		MoveGraceTimer = MOVE_GRACE_DURATION;
+	}
 }
 
 void UAIMovementComponent::BeginWaitAtPoint()
@@ -264,6 +381,12 @@ void UAIMovementComponent::BeginWaitAtPoint()
 	DesiredMaxSpeed = 0.f;
 	bIsWaiting = true;
 	WaitTimer = WaitTimeAtPoint + FMath::FRandRange(0.f, WaitTimeRandomDeviation);
+
+	// Optionally play a dwell activity (graze/peck/sleep) while waiting at the point.
+	ActivityRepeatTimer = ActivityRepeatInterval; // schedule the next dwell beat (loop runs in HandlePatrolTick)
+	if (ActivityChance > 0.f && FMath::FRand() < ActivityChance && OwnerCharacter)
+		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+			Anim->PlayRandomActivity();
 }
 
 void UAIMovementComponent::ResumePatrolAfterWait()
@@ -271,6 +394,11 @@ void UAIMovementComponent::ResumePatrolAfterWait()
 	bIsWaiting = false;
 	AdvancePatrolIndex();
 	if (bPatrolFinished) return;
+
+	// Stop any dwell activity montage so DirectPlayback locomotion isn't gated (the AI would slide otherwise).
+	if (OwnerCharacter)
+		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+			Anim->StopCurrentAction();
 
 	CurrentDestination = GetNextPatrolPoint();
 	DesiredMaxSpeed = PatrolSpeed;
@@ -312,7 +440,17 @@ FVector UAIMovementComponent::GetRandomPointInZone() const
 	const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 	if (!Nav) return OwnerCharacter->GetActorLocation();
 
-	const FVector Center = PatrolOrigin.IsZero() ? OwnerCharacter->GetActorLocation() : PatrolOrigin;
+	FVector Center = PatrolOrigin.IsZero() ? OwnerCharacter->GetActorLocation() : PatrolOrigin;
+	// Herd: non-leaders cluster around the leader's STABLE patrol anchor (not its live position, which would
+	// make the whole herd drift). UpdatePackFollow already handles tight cohesion.
+	if (OwnerCharacter->GetPackID() != NAME_None)
+		if (ABaseAICharacter* Leader = OwnerCharacter->GetPackLeader())
+			if (Leader != OwnerCharacter && Leader->GetAIMovement())
+			{
+				const FVector LeaderOrigin = Leader->GetAIMovement()->GetPatrolOrigin();
+				Center = LeaderOrigin.IsZero() ? Leader->GetActorLocation() : LeaderOrigin;
+			}
+
 	FNavLocation Res;
 	if (Nav->GetRandomReachablePointInRadius(Center, PatrolRadius, Res)) return Res.Location;
 	return OwnerCharacter->GetActorLocation();
@@ -321,7 +459,17 @@ FVector UAIMovementComponent::GetRandomPointInZone() const
 void UAIMovementComponent::ApplySmoothAcceleration(float DeltaTime)
 {
 	if (!MovementComp) return;
-	MovementComp->MaxWalkSpeed = FMath::FInterpTo(MovementComp->MaxWalkSpeed, DesiredMaxSpeed, DeltaTime, AccelerationInterpSpeed);
+
+	// Turn rate scales with speed (locomotion only — combat facing is driven by the controller with orient-off):
+	// slow shuffles turn tightly, fast runs sweep wide instead of pivoting like a turret.
+	if (MovementComp->bOrientRotationToMovement)
+	{
+		const float SpeedFrac = FMath::Clamp(MovementComp->Velocity.Size2D() / FMath::Max(ChaseSpeed, 1.f), 0.f, 1.f);
+		MovementComp->RotationRate.Yaw = FMath::Lerp(LowSpeedRotationRate, MovementRotationRate, SpeedFrac);
+	}
+
+	if (!FMath::IsNearlyEqual(MovementComp->MaxWalkSpeed, DesiredMaxSpeed, 0.5f))
+		MovementComp->MaxWalkSpeed = FMath::FInterpTo(MovementComp->MaxWalkSpeed, DesiredMaxSpeed, DeltaTime, AccelerationInterpSpeed);
 }
 
 /* ═══════════ Debug ═══════════ */

@@ -5,6 +5,7 @@
 #include "DialogBuilderEdNode.h"
 #include "Colors_DialogBuilder.h"
 #include "DialogBuilderEdNode_Edge.h"
+#include "Styling/AppStyle.h"
 
 FDialogBuilder_ConnectionDrawingPolicy::FDialogBuilder_ConnectionDrawingPolicy(int32 InBackLayerID, int32 InFrontLayerID, float ZoomFactor, const FSlateRect& InClippingRect, FSlateWindowElementList& InDrawElements, UEdGraph* InGraphObj)
 	: FConnectionDrawingPolicy(InBackLayerID, InFrontLayerID, ZoomFactor, InClippingRect, InDrawElements)
@@ -17,8 +18,10 @@ void FDialogBuilder_ConnectionDrawingPolicy::DetermineWiringStyle(UEdGraphPin* O
 	Params.AssociatedPin1 = OutputPin;
 	Params.AssociatedPin2 = InputPin;
 	Params.WireThickness = 1.5f;
-
 	Params.WireColor = DialogBuilderColors::Connection::Default;
+
+	const bool bIsPreviewConnection = (OutputPin == nullptr || InputPin == nullptr);
+	ArrowImage = bIsPreviewConnection ? FAppStyle::GetBrush(TEXT("Graph.Arrow")) : nullptr;
 
 	const bool bDeemphasizeUnhoveredPins = HoveredPins.Num() > 0;
 	if (bDeemphasizeUnhoveredPins)
