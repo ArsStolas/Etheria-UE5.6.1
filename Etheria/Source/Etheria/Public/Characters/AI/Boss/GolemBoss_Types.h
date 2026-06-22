@@ -359,4 +359,8 @@ struct FGolemWeakPoint
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") float CurrentHealth = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") bool bBroken = false;
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") bool bVulnerable = false;
+
+	/** Arm only: player hits this arm's crystal has soaked so far. It shatters at the component's ArmCrystalHitsToBreak,
+	 *  after which hits on the arm deal the broken-crystal bonus (see UGolemBossComponent::HitArm). */
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 CrystalHits = 0;
 };

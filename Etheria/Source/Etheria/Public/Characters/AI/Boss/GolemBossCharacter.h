@@ -33,6 +33,11 @@ public:
 	/** While bImmovable, swallow every launch (player combat-impulse notify, AoE knockback) so the body never moves. */
 	virtual void LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride) override;
 
+	/** Funnel incoming damage to the Golem's weak points (arm nearest the attacker, or the head crystal while toppled)
+	 *  instead of the invulnerable body — so the existing melee, which only resolves "the boss actor", still hurts the giant. */
+	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
+
 protected:
 	virtual void BeginPlay() override;
 

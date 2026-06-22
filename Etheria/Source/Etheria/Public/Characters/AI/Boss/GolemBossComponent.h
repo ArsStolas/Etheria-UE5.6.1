@@ -151,6 +151,19 @@ public:
 	 *  deals Damage * HeadCritMultiplier to the boss. Pass the player as Instigator so the damage is credited. */
 	UFUNCTION(BlueprintCallable, Category = "Golem|WeakPoint") bool HitWeakPoint(FName Id, float Damage, AActor* Instigator);
 
+	/** The player struck an ARM (the always-hittable arm structure — the boss BODY itself takes no normal damage).
+	 *  Deals Damage straight to the boss HP (bypassing the body's invulnerability). Each hit also chips that arm's
+	 *  crystal; after ArmCrystalHitsToBreak hits the crystal shatters (OnGolemWeakPointBroken) and every later hit on
+	 *  that arm deals Damage * BrokenArmDamageMultiplier (the bonus). Breaking BOTH arm crystals still topples the boss.
+	 *  Returns false if ArmId isn't an Arm weak point or the arm isn't currently hittable. Pass the player as Instigator. */
+	UFUNCTION(BlueprintCallable, Category = "Golem|WeakPoint") bool HitArm(FName ArmId, float Damage, AActor* Instigator);
+
+	/** Route a plain hit on the boss BODY to the correct weak point: the head crystal while toppled, otherwise the arm
+	 *  nearest the attacker. The shared player melee only ever resolves "the boss actor" (a query trace fires no
+	 *  per-collider events), so AGolemBossCharacter::TakeDamage funnels every hit through here — no per-part BP colliders
+	 *  needed. Returns true if a weak point absorbed it; false (e.g. arms not currently hittable) lets the body shrug it off. */
+	UFUNCTION(BlueprintCallable, Category = "Golem|WeakPoint") bool RouteBodyHit(float Damage, AActor* Instigator);
+
 	/** Manually set a crystal vulnerable (designers usually let the slam expose the arms automatically). */
 	UFUNCTION(BlueprintCallable, Category = "Golem|WeakPoint") void SetWeakPointVulnerable(FName Id, bool bVulnerable);
 
@@ -270,6 +283,16 @@ public:
 
 	/** The Golem's crystals. Add ArmL/ArmR (Kind=Arm) and Head (Kind=Head). Break both arms during the slam to topple it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|WeakPoint") TArray<FGolemWeakPoint> WeakPoints;
+
+	/** Arms can be hit at ALL times (the giant's arms are the player's damage outlet; the body itself stays invulnerable).
+	 *  OFF = arms only register hits while a slam exposes them (bExposesArmWeakPoints / IsWeakPointVulnerable). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|WeakPoint") bool bArmsAlwaysHittable = true;
+
+	/** Player hits an arm soaks before its crystal shatters. After it shatters, that arm takes the broken-crystal bonus. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|WeakPoint", meta = (ClampMin = "1")) int32 ArmCrystalHitsToBreak = 3;
+
+	/** Damage multiplier applied to arm hits once that arm's crystal is shattered (the "extra damage" bonus). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|WeakPoint", meta = (ClampMin = "1")) float BrokenArmDamageMultiplier = 2.f;
 
 	/** How long the boss stays toppled (head on the ground) after both arms break — the head-crit window. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|WeakPoint", meta = (ClampMin = "0.5")) float ToppleDuration = 8.f;
@@ -408,6 +431,10 @@ private:
 	bool IsActorAirborne(const AActor* A) const;
 	float CurrentDamageScale() const;
 	void DealDamage(AActor* Victim, float Damage, FVector FromLocation, float Knockback, FName AttackId);
+
+	/** Apply damage to the BOSS itself, bypassing its body invulnerability (used by weak-point / arm hits).
+	 *  Lifts the HealthComponent's invuln for the single hit so normal melee on the body stays harmless. */
+	void DealDamageToBoss(float Amount, AActor* Instigator);
 
 	/* ── Air zones ── */
 	void TickAirZones(float DeltaTime);

@@ -82,6 +82,7 @@ void UGolemBossComponent::BeginPlay()
 		WP.CurrentHealth = WP.Health;
 		WP.bBroken = false;
 		WP.bVulnerable = false;
+		WP.CrystalHits = 0;
 	}
 
 	if (UWorld* W = GetWorld())
@@ -1100,6 +1101,20 @@ void UGolemBossComponent::DealDamage(AActor* Victim, float Damage, FVector FromL
 	OnGolemDamageDealt.Broadcast(Victim, Final, AttackId, Victim->GetActorLocation());
 }
 
+void UGolemBossComponent::DealDamageToBoss(float Amount, AActor* Instigator)
+{
+	if (Amount <= 0.f || !OwnerHealth) return;
+
+	// The body is invulnerable to normal melee (bCanReceiveDamage = false). Lift the HealthComponent's invuln
+	// just for this hit so arm/head damage actually lands, then restore it. HP=0 still routes to Die() as usual.
+	const bool bWasInvuln = OwnerHealth->IsInvulnerable();
+	OwnerHealth->SetInvulnerable(false);
+	OwnerHealth->TakeDamage(Amount);
+	OwnerHealth->SetInvulnerable(bWasInvuln);
+
+	if (Instigator && OwnerCharacter) OwnerCharacter->AddThreat(Instigator, Amount); // keep aggro on the attacker
+}
+
 int32 UGolemBossComponent::ApplyRadialBurst(FVector Center, float Radius, float Damage, bool bAirborneIsSafe, float Knockback, FName AttackId, float MinSafeAltitude)
 {
 	TArray<AActor*> Targets;
@@ -1311,11 +1326,7 @@ bool UGolemBossComponent::HitWeakPoint(FName Id, float Damage, AActor* Instigato
 	if (WP->Kind == EGolemWeakPointKind::Head)
 	{
 		const float Crit = Damage * HeadCritMultiplier;
-		if (OwnerCharacter)
-		{
-			AController* Inst = Instigator ? Instigator->GetInstigatorController() : nullptr;
-			UGameplayStatics::ApplyDamage(OwnerCharacter, Crit, Inst, Instigator, UDamageType::StaticClass());
-		}
+		DealDamageToBoss(Crit, Instigator); // bypass the body invuln so the crit actually lands
 		OnGolemWeakPointHit.Broadcast(Id, Crit, 0.f);
 		OnGolemCriticalHit.Broadcast(Crit, Id);
 		return true;
@@ -1331,6 +1342,63 @@ bool UGolemBossComponent::HitWeakPoint(FName Id, float Damage, AActor* Instigato
 		CheckTopple();
 	}
 	return true;
+}
+
+bool UGolemBossComponent::HitArm(FName ArmId, float Damage, AActor* Instigator)
+{
+	FGolemWeakPoint* WP = FindWeakPoint(ArmId);
+	if (!WP || WP->Kind != EGolemWeakPointKind::Arm || Damage <= 0.f) return false;
+
+	// Arms are the player's damage outlet. By default they're hittable the whole fight; flip bArmsAlwaysHittable OFF
+	// to gate them on the slam-expose window (bVulnerable) instead.
+	if (!bArmsAlwaysHittable && !WP->bVulnerable) return false;
+
+	// A shattered crystal makes its arm a juicier target — the "extra damage once broken" the design asks for.
+	const float Mult = WP->bBroken ? FMath::Max(1.f, BrokenArmDamageMultiplier) : 1.f;
+	const float Dealt = Damage * Mult;
+	DealDamageToBoss(Dealt, Instigator);
+
+	const float Remaining = WP->bBroken ? 0.f : (float)FMath::Max(0, ArmCrystalHitsToBreak - WP->CrystalHits);
+	OnGolemWeakPointHit.Broadcast(ArmId, Dealt, Remaining);
+
+	// Crystal break progression — N hits, then it shatters (and breaking BOTH arms still topples the boss).
+	if (!WP->bBroken && ++WP->CrystalHits >= ArmCrystalHitsToBreak)
+	{
+		WP->bBroken = true;
+		WP->bVulnerable = false;
+		OnGolemWeakPointBroken.Broadcast(ArmId);
+		CheckTopple();
+	}
+	return true;
+}
+
+bool UGolemBossComponent::RouteBodyHit(float Damage, AActor* Instigator)
+{
+	if (Damage <= 0.f) return false;
+
+	// A hit while down lands on the head crystal (the big crit); the rest of the time it feeds an arm.
+	if (bToppled)
+	{
+		for (const FGolemWeakPoint& WP : WeakPoints)
+			if (WP.Kind == EGolemWeakPointKind::Head && WP.bVulnerable && !WP.bBroken)
+				if (HitWeakPoint(WP.Id, Damage, Instigator)) return true;
+	}
+
+	// Pick the arm closest to the attacker so left/right reads right without per-part colliders.
+	const FVector From = Instigator ? Instigator->GetActorLocation()
+		: (OwnerCharacter ? OwnerCharacter->GetActorLocation() : FVector::ZeroVector);
+	FName BestArm = NAME_None;
+	float BestDistSq = TNumericLimits<float>::Max();
+	for (const FGolemWeakPoint& WP : WeakPoints)
+	{
+		if (WP.Kind != EGolemWeakPointKind::Arm) continue;
+		const float DistSq = FVector::DistSquared(GetWeakPointLocation(WP.Id), From);
+		if (DistSq < BestDistSq) { BestDistSq = DistSq; BestArm = WP.Id; }
+	}
+
+	const bool bApplied = (BestArm != NAME_None) && HitArm(BestArm, Damage, Instigator);
+	if (bApplied && !bActivated && bAutoActivateOnTarget) ActivateBoss(); // first hit also wakes the fight
+	return bApplied;
 }
 
 void UGolemBossComponent::ExposeArmWeakPoints(bool bExpose, FName AttackId)
@@ -1398,6 +1466,7 @@ void UGolemBossComponent::EndTopple()
 			WP.CurrentHealth = WP.Health;
 			WP.bBroken = false;
 			WP.bVulnerable = false;
+			WP.CrystalHits = 0;
 		}
 	}
 

@@ -19,6 +19,11 @@ AGolemBossCharacter::AGolemBossCharacter()
 	HostilityType = EAIHostilityType::Aggressive;
 	Rank = EAIRank::Boss;
 
+	// The body is untouchable: normal melee on the torso does nothing (fires OnAIDamageBlocked for a "ting").
+	// HP only comes off through the arms (HitArm) and the head crystal (HitWeakPoint) — both route through
+	// UGolemBossComponent::DealDamageToBoss, which bypasses this gate for the single hit.
+	bCanReceiveDamage = false;
+
 	AIControllerClass = AGolemBossController::StaticClass();
 
 	// Hand-faced giant: the component drives yaw; movement must not fight it or wander off.
@@ -51,6 +56,21 @@ void AGolemBossCharacter::LaunchCharacter(FVector LaunchVelocity, bool bXYOverri
 	// The arena Golem absorbs hits without being knocked back — you can damage it, but you can't shove it.
 	if (bImmovable) return;
 	Super::LaunchCharacter(LaunchVelocity, bXYOverride, bZOverride);
+}
+
+float AGolemBossCharacter::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+	AController* EventInstigator, AActor* DamageCauser)
+{
+	// The body is untouchable; route the hit to a weak point (nearest arm, or the head crystal while toppled). A landed
+	// hit returns here WITHOUT calling Super, so the giant takes no stagger/interrupt from chip damage (hyper-armor).
+	if (GolemBossComponent && DamageAmount > 0.f && !IsDead())
+	{
+		AActor* Causer = DamageCauser ? DamageCauser : (EventInstigator ? EventInstigator->GetPawn() : nullptr);
+		if (GolemBossComponent->RouteBodyHit(DamageAmount, Causer))
+			return DamageAmount;
+	}
+	// Unrouted damage (no weak points, or arms not hittable right now) falls back to the base gate → body shrugs it off.
+	return Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 }
 
 void AGolemBossCharacter::BuildDefaultAttacks()
