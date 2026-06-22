@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DialogData.h"
 #include "Components/ActorComponent.h"
 #include "DialogComponent.generated.h"
 
@@ -12,11 +13,15 @@ class APlayerController;
 
 //Dialog Delegate
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDialogSignature);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FUpdateDialog, class UDialogBuilderNode*, DialogNode);
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEnterChoiceSelection, const TArray<class UDialogBuilderNode_PlayerChoice*>&, PlayerChoices);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FUpdateDialogLine, FOrionDialogLine, DialogLine);
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPlayerChoiceSelected, UDialogBuilderNode_PlayerChoice*, PlayerChoice);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEnterChoiceSelection, class UDialogBuilderNode_PlayerChoice*, PlayerChoice);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPlayerChoiceSelected, UDialogBuilderNode_PlayerChoice*, PlayerChoice, int32, ChoiceIndex);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FBeginDialog, UDialogBuilderGraph*, Dialog);
 
@@ -44,6 +49,12 @@ public:
 	
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "DialogComponent")
 		FUpdateDialog OnDialogUpdated;
+
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "DialogComponent")
+	FUpdateDialogLine OnDialogLineBegin;
+
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "DialogComponent")
+	FUpdateDialogLine OnDialogLineEnded;
 	
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "DialogComponent")
 		FEnterChoiceSelection OnEnterChoiceSelection;
@@ -61,10 +72,10 @@ public:
 	virtual void DialogLineUpdated(class UDialogBuilderNode* DialogNode);
 	
 	UFUNCTION()
-	virtual void EnterChoiceSelection(const TArray<class UDialogBuilderNode_PlayerChoice*>& PlayerOptions);
+	virtual void EnterChoiceSelection(class UDialogBuilderNode_PlayerChoice* InPLayerChoice);
 	
 	UFUNCTION()
-	virtual void PlayerChoiceSelected(class UDialogBuilderNode_PlayerChoice* PlayerOption);
+	virtual void PlayerChoiceSelected(class UDialogBuilderNode_PlayerChoice* PlayerOption, int32 ChoiceIndex);
 	
 	UFUNCTION()
 	virtual void DialogBegin(UDialogBuilderGraph* Dialog);
@@ -76,7 +87,7 @@ public:
 		bool BeginDialog(UDialogBuilderGraph* DialogAsset);
 
 	UFUNCTION(BlueprintCallable, Category = "DialogComponent")
-		void SelectDialogChoice(class UDialogBuilderNode_PlayerChoice* InOption);
+		void SelectDialogChoice(class UDialogBuilderNode_PlayerChoice* PlayerChoice, int32 ChoiceIndex);
 
 	UFUNCTION()
 		virtual class UDialogBuilderGraph* MakeDialogGraphInstance(UDialogBuilderGraph* DialogGraphTemplate);
@@ -95,6 +106,9 @@ public:
 	virtual bool DeleteSave(const FString& SaveName = "DialogBuilderSaveData", const int32 Slot = 0);
 
 public:
+	UFUNCTION(BlueprintCallable, Category = "DialogComponent")
+	AActor* GetDialogDefinitionActor(UDialogDefinition* InDialogDefinition);
+
 	UFUNCTION(BlueprintPure, Category = "DialogComponent")
 	virtual APawn* GetOwningPawn() const;
 

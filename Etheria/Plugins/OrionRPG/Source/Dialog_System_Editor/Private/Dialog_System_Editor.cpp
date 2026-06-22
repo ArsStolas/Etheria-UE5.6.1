@@ -20,6 +20,10 @@
 #include "DialogBuilderSetting.h"
 #include "DialogNodeDetails.h"
 #include "DialogData.h"
+#include "ISequencerModule.h"
+#include "Modules/ModuleManager.h"
+#include "Sequencer/DialogTrackEditor.h"
+#include "DialogSequenceDetails.h"
 
 
 #define LOCTEXT_NAMESPACE "FDialog_System_EditorModule"
@@ -28,7 +32,10 @@ static const FName Dialog_System_EditorTabName("Dialog_System_Editor");
 TSharedPtr<FSlateStyleSet> FDialog_System_EditorModule::CustomAssetsEditorSlateStyle;
 
 void FDialog_System_EditorModule::StartupModule()
-{	
+{
+	MenuExtensibilityManager = MakeShareable(new FExtensibilityManager);
+	ToolBarExtensibilityManager = MakeShareable(new FExtensibilityManager);
+
 	// Register the PropertyEditors
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	RegisterObjectCustomizations();
@@ -46,10 +53,16 @@ void FDialog_System_EditorModule::StartupModule()
 	FEdGraphUtilities::RegisterVisualNodeFactory(GraphPanelNodeFactory_DialogEditor);
 	
 	PropertyModule.NotifyCustomizationModuleChanged();
+
+	ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
+	DialogTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FDialogTrackEditor::CreateTrackEditor));
 }
 
 void FDialog_System_EditorModule::ShutdownModule()
 {
+	MenuExtensibilityManager.Reset();
+	ToolBarExtensibilityManager.Reset();
+
 	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
 	// we call this function before unloading the module.
 	if (GraphPanelNodeFactory_DialogEditor.IsValid())
@@ -81,6 +94,12 @@ void FDialog_System_EditorModule::ShutdownModule()
 				PropertyModule.UnregisterCustomClassLayout(*It);
 			}
 		}
+	}
+
+	if (FModuleManager::Get().IsModuleLoaded("Sequencer"))
+	{
+		ISequencerModule& SequencerModule = FModuleManager::GetModuleChecked<ISequencerModule>("Sequencer");
+		SequencerModule.UnRegisterTrackEditor(DialogTrackEditorHandle);
 	}
 
 	DecoratorClassCache.Reset();
@@ -122,6 +141,12 @@ void FDialog_System_EditorModule::RegisterSettings()
 void FDialog_System_EditorModule::RegisterObjectCustomizations()
 {
 	RegisterCustomClassLayout("DialogBuilderNode_DialogLine", FOnGetDetailCustomizationInstance::CreateStatic(&FDialogNodeDetails::MakeInstance));
+	RegisterCustomClassLayout("DialogBuilderNode_DialogSequence", FOnGetDetailCustomizationInstance::CreateStatic(&FDialogNodeDetails::MakeInstance));
+	RegisterCustomClassLayout("DialogSequenceSlot", FOnGetDetailCustomizationInstance::CreateStatic(&FDialogSequenceDetails::MakeInstance));
+	RegisterCustomClassLayout("MovieSceneDialogSection", FOnGetDetailCustomizationInstance::CreateStatic(&FDialogSequenceDetails::MakeInstance));
+	RegisterCustomClassLayout("DialogSequenceShot", FOnGetDetailCustomizationInstance::CreateStatic(&FDialogSequenceDetails::MakeInstance));
+	RegisterCustomClassLayout("DialogDefinition", FOnGetDetailCustomizationInstance::CreateStatic(&FDialogSequenceDetails::MakeInstance));
+
 }
 
 void FDialog_System_EditorModule::RegisterCustomClassLayout(FName ClassName, FOnGetDetailCustomizationInstance DetailLayoutDelegate)

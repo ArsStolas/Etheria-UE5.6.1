@@ -27,7 +27,7 @@ public:
 	EDialogRerouteRule RerouteRule;
 
 	/**Play the dialog line first before entering selection mode*/
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "RerouteRule", meta = (EditCondition = "RerouteRule == EDialogRerouteRule::E_BackToLastSelection", HideEditConditionToggle, EditConditionHides))
+	UPROPERTY(BlueprintReadOnly, Category = "RerouteRule", meta = (EditCondition = "RerouteRule == EDialogRerouteRule::E_BackToLastSelection", HideEditConditionToggle, EditConditionHides))
 		bool bPlayDialogLine;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "RerouteRule", meta = (EditCondition = "RerouteRule == EDialogRerouteRule::E_GoToNode", HideEditConditionToggle, EditConditionHides, GetOptions="GetNodeListToReroute"))

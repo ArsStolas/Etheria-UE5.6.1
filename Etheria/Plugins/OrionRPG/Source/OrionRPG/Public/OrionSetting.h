@@ -62,6 +62,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, config, Category = "Interaction", meta = (EditCondition = "bShowActionDisplayText == true", HideEditConditionToggle, EditConditionHides))
 	FText DefaultActionDisplayText;
+	
+	UPROPERTY()
+	bool bTrialVersion;
+	
+	UPROPERTY()
+	int32 NodeLimit;
+
+	UPROPERTY()
+	FString TrialPurchaseURL;
 
 };
 

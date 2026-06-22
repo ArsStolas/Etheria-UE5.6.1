@@ -23,10 +23,15 @@ public class Etheria : ModuleRules
 			//"GameplayStateTreeModule",
 			"CableComponent",
 			"PhysicsCore",
-			"AnimGraphRuntime"
+			"AnimGraphRuntime",
+			"LevelSequence",
+			"MovieScene",
+			"MovieSceneTracks",
+			"Slate",
+			"SlateCore"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { 
+		PrivateDependencyModuleNames.AddRange(new string[] {
 			//"UMGEditor"
 		});
 	}

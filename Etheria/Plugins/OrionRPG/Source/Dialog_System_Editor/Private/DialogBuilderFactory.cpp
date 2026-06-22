@@ -6,10 +6,68 @@
 #include "ClassViewerModule.h"
 #include "ClassViewerFilter.h"
 #include "DialogBuilderEditorUtils.h"
+#include "OrionSetting.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/SClassPickerDialog.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "Dialog_Editor"
+
+namespace
+{
+	constexpr int32 TrialGraphAssetLimit = 1;
+
+	int32 CountDialogGraphAssets()
+	{
+		TArray<FAssetData> DialogGraphAssets;
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		AssetRegistryModule.Get().GetAssetsByClass(FTopLevelAssetPath(UDialogBuilderGraph::StaticClass()), DialogGraphAssets, true);
+		return DialogGraphAssets.Num();
+	}
+
+	void ShowDialogGraphTrialLimitNotification(const UOrionSetting* Settings)
+	{
+		FNotificationInfo Info(LOCTEXT("DialogGraphTrialLimitWarning", "Trial Version only allows 1 dialog graph asset."));
+		Info.ExpireDuration = 5.0f;
+		Info.bUseLargeFont = false;
+
+		const FString PurchaseURL = Settings ? Settings->TrialPurchaseURL : FString();
+		if (!PurchaseURL.IsEmpty())
+		{
+			Info.HyperlinkText = LOCTEXT("DialogGraphTrialLimitPurchaseLink", "Purchase full product");
+			Info.Hyperlink = FSimpleDelegate::CreateLambda([PurchaseURL]()
+			{
+				FPlatformProcess::LaunchURL(*PurchaseURL, nullptr, nullptr);
+			});
+		}
+
+		TSharedPtr<SNotificationItem> Notification = FSlateNotificationManager::Get().AddNotification(Info);
+		if (Notification.IsValid())
+		{
+			Notification->SetCompletionState(SNotificationItem::CS_Fail);
+		}
+	}
+
+	bool CanCreateDialogGraphAsset()
+	{
+		const UOrionSetting* Settings = GetDefault<UOrionSetting>();
+		if (!Settings || !Settings->bTrialVersion)
+		{
+			return true;
+		}
+
+		if (CountDialogGraphAssets() < TrialGraphAssetLimit)
+		{
+			return true;
+		}
+
+		ShowDialogGraphTrialLimitNotification(Settings);
+		return false;
+	}
+}
 
 class FAssetClassParentFilter : public IClassViewerFilter
 {
@@ -72,6 +130,12 @@ bool UDialogBuilderFactory::ConfigureProperties()
 UObject* UDialogBuilderFactory::FactoryCreateNew(UClass* Class, UObject* InParent, FName Name, EObjectFlags Flags, UObject* Context, FFeedbackContext* Warn)
 {
 	check(Class->IsChildOf(UDialogBuilderGraph::StaticClass()));
+
+	if (!CanCreateDialogGraphAsset())
+	{
+		return nullptr;
+	}
+
 	UDialogBuilderGraph* DialogGraph = nullptr;
 	if (DialogSystemGraphClass)
 	{
@@ -87,6 +151,7 @@ FDialogGraphEditorSummoner::FDialogGraphEditorSummoner(TSharedPtr<class FDialogB
 , DialogEditorPtr(InDialogEditorPtr)
 , OnCreateGraphEditorWidget(CreateGraphEditorWidgetCallback)
 {
+	TabLabel = LOCTEXT("DialogGraphLabel", "Dialog Graph");
 }
 
 void FDialogGraphEditorSummoner::OnTabActivated(TSharedPtr<SDockTab> Tab) const

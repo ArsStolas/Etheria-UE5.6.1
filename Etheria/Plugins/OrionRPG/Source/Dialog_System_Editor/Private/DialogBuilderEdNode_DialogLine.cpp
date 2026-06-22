@@ -82,31 +82,7 @@ void UDialogBuilderEdNode_DialogLine::PostPlacedNewNode()
 
 void UDialogBuilderEdNode_DialogLine::NodeConnectionListChanged()
 {
-	UDialogBuilderNode_DialogLine* DialogLineNode = Cast<UDialogBuilderNode_DialogLine>(NodeInstance);
 
-	if (!DialogLineNode)
-		return;
-
-	for (int PinIdx = 0; PinIdx < Pins.Num(); ++PinIdx)
-	{
-		UEdGraphPin* Pin = Pins[PinIdx];
-
-		if (Pin->Direction != EEdGraphPinDirection::EGPD_Output)
-			continue;
-
-		if(Pin->LinkedTo.IsValidIndex(0))
-		{
-			UDialogBuilderNode* ChildNode = nullptr;
-			if (UDialogBuilderEdNode_PlayerChoice* PlayerOptionEdNode_Child = Cast<UDialogBuilderEdNode_PlayerChoice>(Pin->LinkedTo[0]->GetOwningNode()))
-			{
-				DialogLineNode->bIsSelector = true;
-				return;
-			}
-
-		}
-	}
-
-	DialogLineNode->bIsSelector = false;
 }
 
 void UDialogBuilderEdNode_DialogLine::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const

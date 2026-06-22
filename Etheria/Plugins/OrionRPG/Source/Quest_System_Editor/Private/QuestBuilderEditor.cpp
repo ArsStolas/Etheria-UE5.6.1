@@ -904,12 +904,12 @@ bool FQuestBuilderEditor::InEditingMode(bool bGraphIsEditable) const
 
 bool FQuestBuilderEditor::IsPIESimulating()
 {
-	return GEditor->bIsSimulatingInEditor || GEditor->PlayWorld;
+	return GEditor->IsSimulateInEditorInProgress() || GEditor->PlayWorld;
 }
 
 bool FQuestBuilderEditor::IsPIENotSimulating()
 {
-	return !GEditor->bIsSimulatingInEditor && (GEditor->PlayWorld == NULL);
+	return !GEditor->IsSimulateInEditorInProgress() && (GEditor->PlayWorld == NULL);
 }
 
 void FQuestBuilderEditor::OnChangeBreadCrumbGraph(UEdGraph* InGraph)

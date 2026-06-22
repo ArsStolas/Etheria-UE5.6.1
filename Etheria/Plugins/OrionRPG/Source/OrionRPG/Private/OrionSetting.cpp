@@ -39,6 +39,10 @@ UOrionSetting::UOrionSetting()
 	}
 	bShowActionDisplayText = true;
 	DefaultActionDisplayText = FText::FromString("Interact");
+	
+	bTrialVersion = false;
+	NodeLimit = 3;
+	TrialPurchaseURL = TEXT("https://www.fab.com/listings/8ac4736e-039a-4869-8abc-85c5e8c151a8?lang=en");
 }
 
 UOrionSetting::~UOrionSetting()
