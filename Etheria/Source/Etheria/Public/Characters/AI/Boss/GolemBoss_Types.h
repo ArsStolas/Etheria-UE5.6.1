@@ -372,3 +372,19 @@ struct FGolemWeakPoint
 	 *  after which hits on the arm deal the broken-crystal bonus (see UGolemBossComponent::HitArm). */
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 CrystalHits = 0;
 };
+
+/**
+ * A crystal planted in the ARENA by the two-hand slam. Destroy it (ArenaCrystalHitsToBreak hits) to deal the player's
+ * damage × ArenaCrystalBreakDamageMult to the boss; destroying ALL of a slam's crystals STUNS it. BP spawns the
+ * destructible mesh at Location from OnGolemArenaCrystalSpawned and calls HitArenaCrystal(Id, ...) when the player connects.
+ */
+USTRUCT(BlueprintType)
+struct FGolemArenaCrystal
+{
+	GENERATED_BODY()
+	/** Unique id mapping this crystal to its spawn/hit/destroy events. */
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 Id = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") FVector Location = FVector::ZeroVector;
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 HitsRemaining = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") bool bDestroyed = false;
+};

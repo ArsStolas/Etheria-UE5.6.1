@@ -730,6 +730,7 @@ void UGolemBossComponent::DoStrike()
 		ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 		for (int32 i = 0; i < CurrentTelegraph.ImpactPoints.Num(); ++i)
 			Broadcast(CurrentTelegraph.ImpactPoints[i], Cfg.ImpactRadius, i, CurrentTelegraph.ImpactPoints.Num());
+		if (bSlamPlantsArenaCrystals) PlantArenaCrystals(); // drop the destructible crystals at the fissure points
 		break;
 	}
 	case EGolemHazardShape::SweepLine:
@@ -1385,7 +1386,8 @@ bool UGolemBossComponent::RouteBodyHit(float Damage, AActor* Instigator)
 {
 	if (Damage <= 0.f) return false;
 
-	// A hit while down lands on the head crystal (the big crit); the rest of the time it feeds an arm.
+	// A hit while down lands on the head crystal (old crit flow); the rest of the time it feeds an arm. (The slam
+	// mechanic's big crystal spawns at the ARENA CENTRE — the player hits that actor directly, not the golem body.)
 	if (bToppled)
 	{
 		for (const FGolemWeakPoint& WP : WeakPoints)
@@ -1457,6 +1459,9 @@ void UGolemBossComponent::Topple()
 		W->GetTimerManager().SetTimer(ToppleTimerHandle, this, &UGolemBossComponent::OnToppleElapsed, ToppleDuration, false);
 
 	OnGolemToppled.Broadcast(ToppleDuration);
+
+	// New stun mechanic: open the big crystal on the downed golem (6 hits → a big HP chunk).
+	if (bSlamPlantsArenaCrystals) SpawnBigCrystal();
 }
 
 void UGolemBossComponent::OnToppleElapsed() { EndTopple(); }
@@ -1466,6 +1471,9 @@ void UGolemBossComponent::EndTopple()
 	if (!bToppled) return;
 	bToppled = false;
 	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(ToppleTimerHandle);
+
+	EndBigCrystal();      // retract the big crystal if the player didn't break it in time
+	ClearArenaCrystals(); // and despawn any stragglers
 
 	for (FGolemWeakPoint& WP : WeakPoints)
 	{
@@ -1484,6 +1492,93 @@ void UGolemBossComponent::EndTopple()
 	NextAttackReadyTime = Now + GlobalCooldown; // a beat before resuming attacks
 
 	OnGolemRecoverFromTopple.Broadcast();
+}
+
+/* ═══════════ Arena crystals ═══════════ */
+
+void UGolemBossComponent::PlantArenaCrystals()
+{
+	ClearArenaCrystals(); // replace any crystals the player left standing from a previous slam
+	for (const FVector& P : CurrentTelegraph.ImpactPoints)
+	{
+		FGolemArenaCrystal C;
+		C.Id = NextArenaCrystalId++;
+		C.Location = P;
+		C.HitsRemaining = FMath::Max(1, ArenaCrystalHitsToBreak);
+		C.bDestroyed = false;
+		ArenaCrystals.Add(C);
+		OnGolemArenaCrystalSpawned.Broadcast(C.Id, C.Location);
+	}
+}
+
+void UGolemBossComponent::ClearArenaCrystals()
+{
+	if (ArenaCrystals.Num() == 0) return;
+	ArenaCrystals.Reset();
+	OnGolemArenaCrystalsCleared.Broadcast(); // BP despawns any remaining crystal actors
+}
+
+bool UGolemBossComponent::AllArenaCrystalsDestroyed() const
+{
+	if (ArenaCrystals.Num() == 0) return false;
+	for (const FGolemArenaCrystal& C : ArenaCrystals)
+		if (!C.bDestroyed) return false;
+	return true;
+}
+
+bool UGolemBossComponent::HitArenaCrystal(int32 CrystalId, float PlayerDamage, AActor* Instigator)
+{
+	FGolemArenaCrystal* C = ArenaCrystals.FindByPredicate([CrystalId](const FGolemArenaCrystal& X){ return X.Id == CrystalId; });
+	if (!C || C->bDestroyed) return false;
+
+	C->HitsRemaining = FMath::Max(0, C->HitsRemaining - 1);
+	OnGolemArenaCrystalHit.Broadcast(C->Id, C->HitsRemaining);
+
+	if (C->HitsRemaining <= 0)
+	{
+		C->bDestroyed = true;
+		DealDamageToBoss(FMath::Max(0.f, PlayerDamage) * ArenaCrystalBreakDamageMult, Instigator); // the x6 burst
+		OnGolemArenaCrystalDestroyed.Broadcast(C->Id, C->Location);
+
+		if (AllArenaCrystalsDestroyed())
+		{
+			ArenaCrystals.Reset(); // spent — their actors were removed by the Destroyed events above
+			Topple();              // STUN the boss → opens the big crystal
+		}
+	}
+	return true;
+}
+
+void UGolemBossComponent::SpawnBigCrystal()
+{
+	bBigCrystalActive = true;
+	BigCrystalHitsRemaining = FMath::Max(1, BigCrystalHitsToBreak);
+	OnGolemBigCrystalSpawned.Broadcast(ResolveArenaCentre()); // big crystal opens at the arena centre during the stun
+}
+
+void UGolemBossComponent::EndBigCrystal()
+{
+	if (!bBigCrystalActive) return;
+	bBigCrystalActive = false;
+	BigCrystalHitsRemaining = 0;
+}
+
+bool UGolemBossComponent::HitBigCrystal(float PlayerDamage, AActor* Instigator)
+{
+	if (!bBigCrystalActive) return false;
+
+	BigCrystalHitsRemaining = FMath::Max(0, BigCrystalHitsRemaining - 1);
+	OnGolemBigCrystalHit.Broadcast(BigCrystalHitsRemaining);
+
+	if (BigCrystalHitsRemaining <= 0)
+	{
+		const float Chunk = OwnerHealth ? OwnerHealth->GetMaxHealth() * FMath::Clamp(BigCrystalHealthFraction, 0.f, 1.f) : 0.f;
+		DealDamageToBoss(Chunk, Instigator); // remove ~half the max HP
+		OnGolemBigCrystalBroken.Broadcast(Chunk);
+		EndBigCrystal();
+		EndTopple();                         // the player earned it — stand back up
+	}
+	return true;
 }
 
 /* ═══════════ Debug ═══════════ */
@@ -1588,6 +1683,8 @@ void UGolemBossComponent::HandleOwnerDied()
 {
 	if (State != EGolemAttackState::Idle) FinishAttack(true);
 	ClearAirZones();
+	EndBigCrystal();
+	ClearArenaCrystals(); // despawn any crystal actors on death
 	bActivated = false;
 	bToppled = false; // no recover-from-topple should fire on the corpse
 	if (UWorld* W = GetWorld())

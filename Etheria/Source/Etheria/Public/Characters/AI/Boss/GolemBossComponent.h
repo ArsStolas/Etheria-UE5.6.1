@@ -85,6 +85,23 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGolemRecoverFromTopple);
 /** A head-crystal critical landed (player Damage * HeadCritMultiplier applied to the boss). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemCriticalHit, float, Damage, FName, Id);
 
+/* ── Arena crystals (two-hand slam plants them) ── */
+/** The slam planted an arena crystal — spawn the destructible crystal mesh/collider at Location. Id maps it to its hit/destroy events; the actor calls HitArenaCrystal(Id, ...) when the player connects. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemArenaCrystalSpawned, int32, Id, FVector, Location);
+/** An arena crystal took a hit. Id + hits left. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemArenaCrystalHit, int32, Id, int32, HitsRemaining);
+/** An arena crystal was destroyed (remove its actor, shatter VFX). It dealt the player's damage × mult to the boss. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemArenaCrystalDestroyed, int32, Id, FVector, Location);
+/** Despawn any leftover arena crystals (a new slam replaced them, or the boss stunned/died). */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGolemArenaCrystalsCleared);
+/** The big crystal appeared at the ARENA CENTRE during the stun — spawn the destructible big-crystal actor at Location
+ *  (BigCrystalHitsToBreak hits to break). The actor calls HitBigCrystal when the player connects. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGolemBigCrystalSpawned, FVector, Location);
+/** The big crystal took a hit. Hits left. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGolemBigCrystalHit, int32, HitsRemaining);
+/** The big crystal broke — it removed DamageDealt (≈ half max HP) from the boss. Shatter it / end the stun visuals. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGolemBigCrystalBroken, float, DamageDealt);
+
 /** A montage hit a designer-placed cue marker (anim start, anticipation, enrage roar, footstep…). Tag says which one. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGolemAnimCue, FName, Tag);
 
@@ -167,6 +184,22 @@ public:
 	/** Manually set a crystal vulnerable (designers usually let the slam expose the arms automatically). */
 	UFUNCTION(BlueprintCallable, Category = "Golem|WeakPoint") void SetWeakPointVulnerable(FName Id, bool bVulnerable);
 
+	/* ═══════════ Arena crystals (slam mechanic) ═══════════ */
+
+	/** The player's attack connected with an arena crystal (call from the crystal actor's hit handler with the Id from
+	 *  OnGolemArenaCrystalSpawned). Each call counts as ONE hit; on the final hit the crystal is destroyed, dealing
+	 *  PlayerDamage * ArenaCrystalBreakDamageMult to the boss, and destroying ALL of the slam's crystals STUNS it.
+	 *  Returns true if the hit registered. Pass the player as Instigator. */
+	UFUNCTION(BlueprintCallable, Category = "Golem|Crystals") bool HitArenaCrystal(int32 CrystalId, float PlayerDamage, AActor* Instigator);
+
+	/** The player struck the BIG crystal (it spawns at the arena centre during the stun — call this from that crystal
+	 *  actor's hit handler). Each call = one hit; on the last hit it breaks, removing BigCrystalHealthFraction of the
+	 *  boss MAX HP and ending the stun. Returns true while the big crystal is live. */
+	UFUNCTION(BlueprintCallable, Category = "Golem|Crystals") bool HitBigCrystal(float PlayerDamage, AActor* Instigator);
+
+	UFUNCTION(BlueprintPure, Category = "Golem|Crystals") bool IsBigCrystalActive() const { return bBigCrystalActive; }
+	UFUNCTION(BlueprintPure, Category = "Golem|Crystals") const TArray<FGolemArenaCrystal>& GetArenaCrystals() const { return ArenaCrystals; }
+
 	UFUNCTION(BlueprintCallable, Category = "Golem|WeakPoint") void ForceTopple();
 	UFUNCTION(BlueprintCallable, Category = "Golem|WeakPoint") void EndTopple();
 
@@ -232,6 +265,13 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemToppled OnGolemToppled;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemRecoverFromTopple OnGolemRecoverFromTopple;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemCriticalHit OnGolemCriticalHit;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemArenaCrystalSpawned OnGolemArenaCrystalSpawned;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemArenaCrystalHit OnGolemArenaCrystalHit;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemArenaCrystalDestroyed OnGolemArenaCrystalDestroyed;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemArenaCrystalsCleared OnGolemArenaCrystalsCleared;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemBigCrystalSpawned OnGolemBigCrystalSpawned;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemBigCrystalHit OnGolemBigCrystalHit;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemBigCrystalBroken OnGolemBigCrystalBroken;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemAnimCue OnGolemAnimCue;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemRepelledPlayer OnGolemRepelledPlayer;
 
@@ -305,6 +345,27 @@ public:
 
 	/** Extra seconds the arm crystals stay reachable after the exposing attack ends, to give the player time to climb and hit. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|WeakPoint", meta = (ClampMin = "0")) float WeakPointExposeLinger = 3.f;
+
+	/* ── Arena crystals (the two-hand-slam stun mechanic) ── */
+
+	/** The two-hand slam plants destructible crystals in the arena (at the fissure points). Destroy them all to STUN
+	 *  the boss; while stunned a big crystal can be broken for a huge HP chunk. Turn OFF to use the old arm-crystal flow. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals",
+		meta = (ToolTip = "Two-hand slam plants arena crystals (the new stun mechanic). OFF = use the arm-crystal/topple flow instead.")) bool bSlamPlantsArenaCrystals = true;
+
+	/** Hits to destroy one small arena crystal. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals", ClampMin = "1")) int32 ArenaCrystalHitsToBreak = 3;
+
+	/** Destroying a small arena crystal deals (the player's hit damage × this) to the boss — the main way to chip the giant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals", ClampMin = "0",
+		ToolTip = "On destroy, a crystal deals player damage × this to the boss. 6 = the x6 burst.")) float ArenaCrystalBreakDamageMult = 6.f;
+
+	/** Hits to break the BIG crystal that appears on the golem during the stun. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals", ClampMin = "1")) int32 BigCrystalHitsToBreak = 6;
+
+	/** Breaking the big crystal removes this fraction of the boss MAX HP (0.5 = half). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals", ClampMin = "0", ClampMax = "1",
+		ToolTip = "Break the big crystal → remove this fraction of the boss MAX HP. 0.5 = half its life.")) float BigCrystalHealthFraction = 0.5f;
 
 	/* ── Facing ── */
 
@@ -448,6 +509,13 @@ private:
 	FGolemWeakPoint* FindWeakPoint(FName Id);
 	const FGolemWeakPoint* FindWeakPoint(FName Id) const;
 
+	/* ── Arena crystals ── */
+	void PlantArenaCrystals();   // slam impact: drop the destructible crystals at the fissure points
+	void ClearArenaCrystals();   // despawn any leftover crystals (new slam / stun / death)
+	bool AllArenaCrystalsDestroyed() const;
+	void SpawnBigCrystal();      // on stun: open the big crystal for the HP-chunk break
+	void EndBigCrystal();        // stun ended (timed out or broken): retract the big crystal
+
 	/* ── Debug ── */
 	void DrawTelegraphDebug(const FGolemTelegraph& T, float Lifetime) const;
 	void DrawImpactDebug(const FVector& Center, float Radius, bool bAirborneIsSafe) const;
@@ -491,6 +559,11 @@ private:
 	bool bToppled = false;
 	bool bRockLaunched = false;          // the thrown rock already left the hand this attack
 	FName ExposingAttackId = NAME_None;  // attack currently exposing the arm crystals
+
+	UPROPERTY() TArray<FGolemArenaCrystal> ArenaCrystals; // crystals currently planted in the arena
+	int32 NextArenaCrystalId = 1;
+	bool bBigCrystalActive = false;
+	int32 BigCrystalHitsRemaining = 0;
 
 	FTimerHandle BrainTimerHandle;
 	FTimerHandle WindupTimerHandle;
