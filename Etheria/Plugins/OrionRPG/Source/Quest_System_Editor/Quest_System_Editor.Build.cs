@@ -37,6 +37,7 @@ public class Quest_System_Editor : ModuleRules
                 "SlateCore",
                 "Slate",
                 "AssetDefinition",
+                "AssetRegistry",
             }
 			);
 		
@@ -61,6 +62,7 @@ public class Quest_System_Editor : ModuleRules
 				"SlateCore", 
 				"AIGraph",
 				"UMG",
+				"AssetRegistry",
    }
 			);
 		

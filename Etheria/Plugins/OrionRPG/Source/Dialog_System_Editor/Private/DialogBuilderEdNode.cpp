@@ -10,6 +10,7 @@
 #include "DialogBuilderNode.h"
 #include "DialogBuilderNode_Root.h"
 #include "DialogBuilderNode_DialogLine.h"
+#include "DialogBuilderNode_DialogSequence.h"
 #include "DialogBuilderNode_RerouteNode.h"
 #include "DialogBuilderNode_PlayerChoice.h"
 #include "DialogBuilderNode_PlayerLine.h"
@@ -231,6 +232,11 @@ void UDialogBuilderEdNode::PostPlacedNewNode()
 			}
 			if (NodeInstance)
 			{
+				if (UDialogBuilderNode_DialogSequence* DialogSequenceNode = Cast<UDialogBuilderNode_DialogSequence>(NodeInstance))
+				{
+					FindUniqueNodeName("Sequence");
+					DialogSequenceNode->NodeDisplayName = DialogSequenceNode->ID.ToString();
+				}
 				if (UDialogBuilderNode_PlayerLine* PlayerLineNode = Cast<UDialogBuilderNode_PlayerLine>(NodeInstance))
 				{
 					FindUniqueNodeName("PlayerLine");
@@ -252,7 +258,7 @@ void UDialogBuilderEdNode::PostPlacedNewNode()
 				if (UDialogBuilderNode_PlayerChoice* PlayerOptionNode = Cast<UDialogBuilderNode_PlayerChoice>(NodeInstance))
 				{
 					FindUniqueNodeName("PlayerChoice");
-					PlayerOptionNode->ChoiceText = FText::FromString("Choice");
+					PlayerOptionNode->ChoiceList.Add(FText::FromString("Option 1"));
 
 				}
 				if (UOrionDecorator* OrionDecorator = Cast<UOrionDecorator>(NodeInstance))
@@ -738,8 +744,8 @@ void UDialogBuilderEdNode::AddContextMenuActionsDecorators(UToolMenu* Menu, cons
 	FToolMenuSection& Section = Menu->FindOrAddSection(SectionName);
 	Section.AddSubMenu(
 		"AddDecorator",
-		LOCTEXT("AddDecorator", "Add Decorator..."),
-		LOCTEXT("AddDecoratorTooltip", "Adds new decorator as a subnode"),
+		LOCTEXT("AddDecorator", "Add Enter Condition..."),
+		LOCTEXT("AddDecoratorTooltip", "Adds new condition as a subnode"),
 		FNewToolMenuDelegate::CreateUObject(this, &UDialogBuilderEdNode::CreateAddDecoratorSubMenu, (UEdGraph*)Context->Graph));
 
 }

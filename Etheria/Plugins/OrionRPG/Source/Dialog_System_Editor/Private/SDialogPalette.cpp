@@ -5,7 +5,7 @@
 #include "DialogBuilder_EditorStyle.h"
 #include "SlateOptMacros.h"	
 #include "TutorialMetaData.h"
-#include "SMyDialog.h"
+#include "SDialogDefinitions.h"
 #include "Widgets/Text/SInlineEditableTextBlock.h"
 #include "EdGraphSchema_DialogBuilder.h"
 #include "DialogBuilderEdGraph.h"
@@ -15,6 +15,11 @@
 #include "DialogBuilderFunctionLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Event/OrionEvent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Actor.h"
+#include "DialogDefinition.h"
+#include "ClassIconFinder.h"
+#include "Engine/Light.h"
 
 
 #define LOCTEXT_NAMESPACE "DialogPaletteItem"
@@ -46,7 +51,7 @@ void SDialogPaletteItem::Construct(const FArguments& InArgs, FCreateWidgetForAct
 	DialogEditorPtr = InDialogEditor;
 
 	// construct the icon widget
-	FSlateBrush const* IconBrush = FDialogBuilder_EditorStyle::Get().GetBrush("ClassIcon.Dialog");
+	FSlateBrush const* IconBrush = GetPaletteIconBrushForAction(GraphAction);
 	FSlateBrush const* SecondaryBrush = FAppStyle::GetBrush(TEXT("NoBrush"));
 	FSlateColor        IconColor = FSlateColor::UseForeground();
 	FSlateColor        SecondaryIconColor = FSlateColor::UseForeground();
@@ -76,7 +81,12 @@ void SDialogPaletteItem::Construct(const FArguments& InArgs, FCreateWidgetForAct
 		.Padding(FMargin(0.0f, 0.0f, 0.0f, 0.0f))
 		.VAlign(VAlign_Center)
 		[
-			IconWidget
+			SNew(SBox)
+				.WidthOverride(22.0f)
+				.HeightOverride(22.0f)
+				[
+					IconWidget
+				]
 		];
 
 
@@ -95,9 +105,51 @@ void SDialogPaletteItem::Construct(const FArguments& InArgs, FCreateWidgetForAct
 		];
 
 }
+
+
+
 END_SLATE_FUNCTION_BUILD_OPTIMIZATION
 
 
+const FSlateBrush* SDialogPaletteItem::GetPaletteIconBrushForAction(const TSharedPtr<FEdGraphSchemaAction>& Action)
+{
+	if (!Action.IsValid())
+	{
+		return FAppStyle::GetBrush(TEXT("NoBrush"));
+	}
+
+	UClass* IconClass = nullptr;
+	switch (Action->GetSectionID())
+	{
+	case DialogSectionID::PARTICIPANTS:
+	{
+		return FClassIconFinder::FindThumbnailForClass(ACharacter::StaticClass());
+		//return FDialogBuilder_EditorStyle::Get().GetBrush("ClassIcon.Dialog.Participant");
+	}
+
+	case DialogSectionID::PROPS:
+	{
+
+		return FClassIconFinder::FindThumbnailForClass(UObject::StaticClass());
+		/*const FAssetSchemaAction_Prop* PropAction = static_cast<const FAssetSchemaAction_Prop*>(Action.Get());
+		if (PropAction && PropAction->Prop)
+		{
+			IconClass = PropAction->Prop->PropClassSoft.Get();
+			if (IconClass)
+			{
+				return FClassIconFinder::FindThumbnailForClass(IconClass);
+			}
+		}*/
+		//return FDialogBuilder_EditorStyle::Get().GetBrush("ClassIcon.Dialog.Prop");
+	}
+
+	
+	default:
+		break;
+	}
+
+	return FDialogBuilder_EditorStyle::Get().GetBrush("ClassIcon.Dialog");
+}
 
 void SDialogPaletteItem::OnDragEnter(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
 {
@@ -134,7 +186,7 @@ TSharedRef<SWidget> SDialogPaletteItem::CreateTextSlotWidget(FCreateWidgetForAct
 			SAssignNew(EditableTextElement, SInlineEditableTextBlock)
 				.Text(this, &SDialogPaletteItem::GetDisplayText)
 				.Style(FAppStyle::Get(), "Graph.StateNode.NodeTitleInlineEditableText")
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11.5f))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9.5f))
 				.HighlightText(InCreateData->HighlightText)
 				.ToolTip(ToolTipWidget)
 				.OnVerifyTextChanged(OnVerifyTextChanged)
@@ -152,13 +204,47 @@ TSharedRef<SWidget> SDialogPaletteItem::CreateTextSlotWidget(FCreateWidgetForAct
 FText SDialogPaletteItem::GetDisplayText() const
 {
 	const UEdGraphSchema_DialogBuilder* DialogSchema = GetDefault<UEdGraphSchema_DialogBuilder>();
-	if (MenuDescriptionCache.IsOutOfDate(DialogSchema))
+	if (!MenuDescriptionCache.IsOutOfDate(DialogSchema))
 	{
-		TSharedPtr< FEdGraphSchemaAction > GraphAction = ActionPtr.Pin();
-		FAssetSchemaAction_DialogSystemGraph* DialogGraphAction = (FAssetSchemaAction_DialogSystemGraph*)GraphAction.Get();
-		if (UDialogBuilderEdGraph* DialogEdGraph = Cast<UDialogBuilderEdGraph>(DialogGraphAction->EdGraph))
+		return MenuDescriptionCache;
+	}
+
+	TSharedPtr<FEdGraphSchemaAction> GraphAction = ActionPtr.Pin();
+	if (!GraphAction.IsValid())
+	{
+		return FText::FromString("Empty");
+	}
+
+	if (GraphAction->GetTypeId() == FAssetSchemaAction_Participant::StaticGetTypeId())
+	{
+		const FAssetSchemaAction_Participant* ParticipantAction = static_cast<const FAssetSchemaAction_Participant*>(GraphAction.Get());
+		if (const UDialogPlayerParticipant* PlayerParticipant = Cast<UDialogPlayerParticipant>(ParticipantAction ? ParticipantAction->Participant : nullptr))
 		{
-			MenuDescriptionCache.SetCachedText(FText::FromString("Dialog Graph"), DialogSchema);
+			const FText ParticipantName = FText::FromString("PLAYER - " + PlayerParticipant->DisplayName.ToString());
+			MenuDescriptionCache.SetCachedText(ParticipantName.IsEmpty() ? FText::FromString("PLAYER - EMPTY") : ParticipantName, DialogSchema);
+		}
+		else if (const UDialogParticipant* DialogParticipant = Cast<UDialogParticipant>(ParticipantAction ? ParticipantAction->Participant : nullptr))
+		{
+			const FText ParticipantName = DialogParticipant->GetDisplayName();
+			MenuDescriptionCache.SetCachedText(ParticipantName.IsEmpty() ? FText::FromString("Empty") : ParticipantName, DialogSchema);
+		}
+	}
+	else if (GraphAction->GetTypeId() == FAssetSchemaAction_Prop::StaticGetTypeId())
+	{
+		const FAssetSchemaAction_Prop* PropAction = static_cast<const FAssetSchemaAction_Prop*>(GraphAction.Get());
+		if (const UDialogProp* DialogProp = Cast<UDialogProp>(PropAction ? PropAction->Prop : nullptr))
+		{
+			const FText PropName = DialogProp->DisplayName;
+			MenuDescriptionCache.SetCachedText(PropName.IsEmpty() ? FText::FromString("Empty") : PropName, DialogSchema);
+		}
+	}
+	else if (GraphAction->GetTypeId() == FAssetSchemaAction_Light::StaticGetTypeId())
+	{
+		const FAssetSchemaAction_Light* LightAction = static_cast<const FAssetSchemaAction_Light*>(GraphAction.Get());
+		if (const UDialogLight* DialogLight = Cast<UDialogLight>(LightAction ? LightAction->Light : nullptr))
+		{
+			const FText LightName = DialogLight->DisplayName;
+			MenuDescriptionCache.SetCachedText(LightName.IsEmpty() ? FText::FromString("Empty") : LightName, DialogSchema);
 		}
 	}
 
@@ -171,7 +257,7 @@ bool SDialogPaletteItem::OnNameTextVerifyChanged(const FText& InNewText, FText& 
 
 	FName OriginalName;
 
-	FAssetSchemaAction_DialogSystemGraph* DialogGraphAction = (FAssetSchemaAction_DialogSystemGraph*)ActionPtr.Pin().Get();
+	FAssetSchemaAction_Participant* DialogGraphAction = (FAssetSchemaAction_Participant*)ActionPtr.Pin().Get();
 	
 
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
@@ -196,9 +282,9 @@ void SDialogPaletteItem::OnNameTextCommitted(const FText& NewText, ETextCommit::
   const FName NewName = *NewNameString;  
   FName OriginalName;  
 
-  FAssetSchemaAction_DialogSystemGraph* DialogGraphAction = (FAssetSchemaAction_DialogSystemGraph*)ActionPtr.Pin().Get();  
+  FAssetSchemaAction_Participant* DialogGraphAction = (FAssetSchemaAction_Participant*)ActionPtr.Pin().Get();  
 
-  DialogEditorPtr.Pin()->GetMyDialogWidget()->Refresh();  
+  DialogEditorPtr.Pin()->GetDialogDefinitionsWidget()->Refresh();  
 
   DialogEditorPtr.Pin()->GetDialogBuilderGraph()->Modify();  
 }

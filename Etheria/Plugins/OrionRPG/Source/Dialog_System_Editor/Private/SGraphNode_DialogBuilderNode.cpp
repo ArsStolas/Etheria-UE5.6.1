@@ -2,8 +2,12 @@
 
 
 #include "SGraphNode_DialogBuilderNode.h"
+#include "DialogBuilderEditor.h"
 #include "DialogBuilder_EditorStyle.h"
 #include "SlateOptMacros.h"
+#include "DialogBuilderNode_DialogSequence.h"
+#include "DialogBuilderEdNode_PlayerChoice.h"
+#include "DialogBuilderEdNode_DialogSequence.h"
 #include "Types/SlateStructs.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Images/SImage.h"
@@ -32,6 +36,8 @@
 #include "DialogBuilderEdSubNode_Decorator.h"
 #include "DialogBuilderEdSubNode_Event.h"
 #include "IDocumentation.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Widgets/Input/SButton.h"
 
 #define LOCTEXT_NAMESPACE "EdNode_DialogBuilder"
 
@@ -55,42 +61,75 @@ public:
 
 	void Construct(const FArguments& InArgs, UEdGraphPin* InPin)
 	{
-		this->SetCursor(EMouseCursor::Default);
+		SetCursor(EMouseCursor::Default);
 
 		bShowLabel = true;
-
 		GraphPinObj = InPin;
 		check(GraphPinObj != nullptr);
 
 		const UEdGraphSchema* Schema = GraphPinObj->GetSchema();
 		check(Schema);
 
+		CachePinIcons();
+
 		SBorder::Construct(SBorder::FArguments()
-			.BorderImage(this, &SDialogSystemPin::GetPinBorder)
+			.BorderImage(this, &SDialogSystemPin::GetPinIcon)
 			.BorderBackgroundColor(this, &SDialogSystemPin::GetPinColor)
 			.OnMouseButtonDown(this, &SDialogSystemPin::OnPinMouseDown)
 			.Cursor(this, &SDialogSystemPin::GetPinCursor)
-			.Padding(FMargin(5.0f))
+			.Padding(FMargin(1.0f))
+			[
+				SNew(SBox)
+					.WidthOverride(10.0f)
+					.HeightOverride(14.0f)
+			]
 		);
 	}
 
 protected:
+	const FSlateBrush* CachedImg_Pin_ConnectedHovered;
+	const FSlateBrush* CachedImg_Pin_DisconnectedHovered;
+
+	void CachePinIcons()
+	{
+		CachedImg_Pin_ConnectedHovered = FAppStyle::GetBrush(TEXT("Graph.ExecPin.ConnectedHovered"));
+		CachedImg_Pin_Connected = FAppStyle::GetBrush(TEXT("Graph.ExecPin.Connected"));
+		CachedImg_Pin_DisconnectedHovered = FAppStyle::GetBrush(TEXT("Graph.ExecPin.DisconnectedHovered"));
+		CachedImg_Pin_Disconnected = FAppStyle::GetBrush(TEXT("Graph.ExecPin.Disconnected"));
+	}
+
+
+	const FSlateBrush* GetPinIcon() const
+	{
+		const FSlateBrush* Brush = NULL;
+
+		if (IsConnected())
+		{
+			Brush = IsHovered() ? CachedImg_Pin_ConnectedHovered : CachedImg_Pin_Connected;
+		}
+		else
+		{
+			Brush = IsHovered() ? CachedImg_Pin_ConnectedHovered : CachedImg_Pin_Disconnected;
+		}
+
+		return Brush;
+	}
 	virtual FSlateColor GetPinColor() const override
 	{
 		return bIsDiffHighlighted ? DialogBuilderColors::Pin::Diff :
-			IsHovered() ? DialogBuilderColors::Pin::Hover : DialogBuilderColors::Pin::Default;
+			IsHovered() ? FLinearColor(1.0f, 1.0f, 1.0f) : FLinearColor(.5f, .5f, .5f);
 	}
 
-	virtual TSharedRef<SWidget>	GetDefaultValueWidget() override
+	virtual TSharedRef<SWidget> GetDefaultValueWidget() override
 	{
-		return SNew(STextBlock);
+		return SNew(SSpacer);
 	}
 
 	const FSlateBrush* GetPinBorder() const
 	{
-		return FAppStyle::GetBrush(TEXT("Graph.StateNode.Body"));
+		const bool bIsConnected = GraphPinObj && GraphPinObj->LinkedTo.Num() > 0;
+		return FAppStyle::GetBrush(bIsConnected ? TEXT("Graph.Pin.Connected") : TEXT("Graph.Pin.Disconnected"));
 	}
-
 };
 
 
@@ -187,6 +226,10 @@ void SGraphNode_DialogBuilderNode::Construct(const FArguments& InArgs, UDialogBu
 	UpdateGraphNode();
 	InNode->SGraphNode = this;
 	bDragMarkerVisible = false;
+	SequenceThumbnailFallbackBrush = FSlateBrush();
+	SequenceThumbnailFallbackBrush.DrawAs = ESlateBrushDrawType::Image;
+	SequenceThumbnailFallbackBrush.TintColor = FSlateColor(FLinearColor::Black);
+	SequenceThumbnailFallbackBrush.ImageSize = FVector2D(32.0f, 32.0f);
 }
 
 
@@ -200,7 +243,7 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 	if (DecoratorsBox.IsValid())
 	{
 		DecoratorsBox->ClearChildren();
-	}
+	}		
 	else
 	{
 		SAssignNew(DecoratorsBox, SVerticalBox);
@@ -214,6 +257,10 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 	{
 		SAssignNew(EventsBox, SVerticalBox);
 	}
+
+	SAssignNew(StartEventsBox, SVerticalBox);
+	SAssignNew(EndEventsBox, SVerticalBox);
+	SAssignNew(BothEventsBox, SVerticalBox);
 
 	// Reset variables that are going to be exposed, in case we are refreshing an already setup node.
 	RightNodeBox.Reset();
@@ -252,7 +299,8 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 					NewNode->SetOwner(OwnerGraphPanelPtr.Pin().ToSharedRef());
 					OwnerGraphPanelPtr.Pin()->AttachGraphEvents(NewNode);
 				}
-				AddEvent(NewNode);
+				UOrionEvent* Event = DialogEdNode->Events[i] ? Cast<UOrionEvent>(DialogEdNode->Events[i]->NodeInstance) : nullptr;
+				AddEvent(NewNode, Event ? Event->EventLaunchType : EEventLaunchType::E_Start);
 				NewNode->UpdateGraphNode();
 			}
 		}
@@ -290,7 +338,7 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 
 	const FMargin PinPadding = (Cast<UDialogBuilderEdSubNode_Decorator>(GraphNode) || Cast<UDialogBuilderEdSubNode_Event>(GraphNode))
 		? FMargin(0.f)
-		: FMargin(2.f, 3.f, 2.f, 3.f);
+		: FMargin(5.f, 3.f, 5.f, 3.f);
 
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 
@@ -314,7 +362,7 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 				SNew(SBorder)
 					.BorderImage(FAppStyle::GetBrush("Graph.StateNode.Body"))
 					.BorderBackgroundColor(this, &SGraphNode_DialogBuilderNode::GetSelectorColor)
-					.Visibility(this, &SGraphNode_DialogBuilderNode::GetSelectorVisibility)
+					.Visibility(this, &SGraphNode_DialogBuilderNode::GetNodeHeaderTitleVisibility)
 					[
 						SNew(SOverlay)
 							// Pins and node details
@@ -329,7 +377,7 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 									.AutoWidth()
 									[
 										SNew(STextBlock)
-											.Text(FText::FromString("SELECTOR"))
+											.Text(this, &SGraphNode_DialogBuilderNode::GetNodeHeaderTitleText)
 											.TextStyle(FAppStyle::Get(), TEXT("PhysicsAssetEditor.Tools.Font"))
 											.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9.5))
 											.Clipping(EWidgetClipping::ClipToBounds)
@@ -509,6 +557,18 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 																]
 														]
 												]
+											/*+ SVerticalBox::Slot()
+												.AutoHeight()
+												.Padding(FMargin(0.0f, 6.0f, 0.0f, 0.0f))
+												[
+													SNew(SBox)
+														.WidthOverride(180.0f)
+														.HeightOverride(100.0f)
+														[
+															SNew(SImage)
+																.Image(this, &SGraphNode_DialogBuilderNode::GetDialogSequenceThumbnail)
+														]
+												]*/
 											+ SVerticalBox::Slot()
 												.AutoHeight()
 												[
@@ -551,7 +611,82 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 																		.Padding(FMargin(8.0f, 0, 0, 0))
 																		.AutoHeight()
 																		[
-																			EventsBox.ToSharedRef()
+																			SNew(SVerticalBox)
+																			+ SVerticalBox::Slot()
+																			.AutoHeight()
+																			[
+																				SNew(SBorder)
+																					.BorderImage(FAppStyle::GetBrush("BTEditor.Graph.BTNode.Body"))
+																					.BorderBackgroundColor(DialogBuilderColors::NodeBorder::SubNodeBorder)
+																					.Visibility(this, &SGraphNode_DialogBuilderNode::GetStartEventsVisibility)
+																					[
+																						SNew(SVerticalBox)
+																						+ SVerticalBox::Slot()
+																						.AutoHeight()
+																						.Padding(FMargin(4.0f, 0.0f))
+																						[
+																							SNew(STextBlock)
+																								.Text(LOCTEXT("StartEventLabel", "Start"))
+																								.TextStyle(FAppStyle::Get(), TEXT("PhysicsAssetEditor.Tools.Font"))
+																						]
+																						+ SVerticalBox::Slot()
+																						.AutoHeight()
+																						.Padding(FMargin(8.0f, 0.0f, 0.0f, 0.0f))
+																						[
+																							StartEventsBox.ToSharedRef()
+																						]
+																					]
+																			]
+																			+ SVerticalBox::Slot()
+																			.AutoHeight()
+																			[
+																				SNew(SBorder)
+																					.BorderImage(FAppStyle::GetBrush("BTEditor.Graph.BTNode.Body"))
+																					.BorderBackgroundColor(DialogBuilderColors::NodeBorder::SubNodeBorder)
+																					.Visibility(this, &SGraphNode_DialogBuilderNode::GetEndEventsVisibility)
+																					[
+																						SNew(SVerticalBox)
+																						+ SVerticalBox::Slot()
+																						.AutoHeight()
+																						.Padding(FMargin(4.0f, 0.0f))
+																						[
+																							SNew(STextBlock)
+																								.Text(LOCTEXT("EndEventLabel", "End"))
+																								.TextStyle(FAppStyle::Get(), TEXT("PhysicsAssetEditor.Tools.Font"))
+																						]
+																						+ SVerticalBox::Slot()
+																						.AutoHeight()
+																						.Padding(FMargin(8.0f, 0.0f, 0.0f, 0.0f))
+																						[
+																							EndEventsBox.ToSharedRef()
+																						]
+																					]
+																			]
+																			+ SVerticalBox::Slot()
+																			.AutoHeight()
+																			[
+																				SNew(SBorder)
+																					.BorderImage(FAppStyle::GetBrush("BTEditor.Graph.BTNode.Body"))
+																					.BorderBackgroundColor(DialogBuilderColors::NodeBorder::SubNodeBorder)
+																					.Visibility(this, &SGraphNode_DialogBuilderNode::GetBothEventsVisibility)
+																					[
+																						SNew(SVerticalBox)
+																						+ SVerticalBox::Slot()
+																						.AutoHeight()
+																						.Padding(FMargin(4.0f, 0.0f))
+																						[
+																							SNew(STextBlock)
+																								.Text(LOCTEXT("BothEventLabel", "Both"))
+																								.TextStyle(FAppStyle::Get(), TEXT("PhysicsAssetEditor.Tools.Font"))
+																						]
+																						+ SVerticalBox::Slot()
+																						.AutoHeight()
+																						.Padding(FMargin(8.0f, 0.0f, 0.0f, 0.0f))
+																						[
+																							BothEventsBox.ToSharedRef()
+																						]
+																					]
+																			]
 																		]
 																]
 														]
@@ -589,7 +724,7 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 																				.Padding(FMargin(4.0f, 0.0f, 4.0f, 0.0f))
 																				[
 																					SNew(STextBlock)
-																						.Text(LOCTEXT("DecoratorLabel", "Decorators"))
+																						.Text(LOCTEXT("DecoratorLabel", "Conditions"))
 																						.TextStyle(FAppStyle::Get(), TEXT("PhysicsAssetEditor.Tools.Font"))
 																						.Clipping(EWidgetClipping::Inherit)
 																				]
@@ -607,16 +742,17 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 										]
 
 									// OUTPUT PIN AREA
-									+ SHorizontalBox::Slot()
-										.Padding(PinPadding)
-										.AutoWidth()
-										[
-											SNew(SBox)
-												.MinDesiredWidth(NodePadding.Right)
-												[
-													SAssignNew(RightNodeBox, SVerticalBox)
-												]
-										]
+										+ SHorizontalBox::Slot()
+											.Padding(PinPadding)
+											.AutoWidth()
+											[
+												SNew(SBox)
+													.Padding(FMargin(0.0f, 5.0f, 0.0f, 0.0f))
+													.MinDesiredWidth(NodePadding.Right)
+													[
+														SAssignNew(RightNodeBox, SVerticalBox)
+													]
+											]
 								]
 							// Drag marker overlay
 							+ SOverlay::Slot()
@@ -634,14 +770,42 @@ void SGraphNode_DialogBuilderNode::UpdateGraphNode()
 										]
 								]
 
-							// Blueprint indicator overlay
+							// Node action indicators overlay
 							+ SOverlay::Slot()
 								.HAlign(HAlign_Right)
 								.VAlign(VAlign_Top)
 								[
-									SNew(SImage)
-										.Image(FAppStyle::GetBrush(TEXT("BTEditor.Graph.BTNode.Blueprint")))
-										.Visibility(this, &SGraphNode_DialogBuilderNode::GetBlueprintIconVisibility)
+									SNew(SHorizontalBox)
+										+ SHorizontalBox::Slot()
+										.AutoWidth()
+										[
+											SNew(SButton)
+												.ButtonStyle(FAppStyle::Get(), "NoBorder")
+												.ContentPadding(FMargin(-10.f, -32.5f, 0.f, 0.f))
+												.ToolTipText(LOCTEXT("OpenDialogSequenceTooltip", "Open Dialog Sequence in Sequencer"))
+												.Visibility(this, &SGraphNode_DialogBuilderNode::GetSequencerIconVisibility)
+												.OnClicked(this, &SGraphNode_DialogBuilderNode::OnOpenSequencerClicked)
+												.OnHovered(this, &SGraphNode_DialogBuilderNode::OnSequencerButtonHovered)
+												.OnUnhovered(this, &SGraphNode_DialogBuilderNode::OnSequencerButtonUnhovered)
+												[
+													SNew(SBox)
+														.WidthOverride(30.0f)
+														.HeightOverride(30.0f)
+														[
+															SNew(SImage)
+																.Image(FAppStyle::GetBrush(TEXT("ClassIcon.LevelSequence")))
+																.ColorAndOpacity(this, &SGraphNode_DialogBuilderNode::GetSequencerButtonColor)
+														]
+												]
+										]
+										+ SHorizontalBox::Slot()
+										.AutoWidth()
+										[
+											SNew(SImage)
+											.Image(FAppStyle::GetBrush(TEXT("BTEditor.Graph.BTNode.Blueprint")))
+											.Visibility(this, &SGraphNode_DialogBuilderNode::GetBlueprintIconVisibility)
+										]
+
 								]
 
 						]
@@ -770,12 +934,14 @@ FReply SGraphNode_DialogBuilderNode::OnDrop(const FGeometry& MyGeometry, const F
 
 		UDialogBuilderEdNode* DropTargetNode = DragNodeOp->GetDropTargetNode();
 		const int32 InsertIndex = MyNode->FindSubNodeDropIndex(DropTargetNode);
+		const EEventLaunchType DroppedEventLaunchType = GetEventLaunchTypeForDrop(MyGeometry, DragDropEvent);
 
 		for (int32 Idx = 0; Idx < DraggedNodes.Num(); Idx++)
 		{
 			UDialogBuilderEdNode* DraggedTestNode = Cast<UDialogBuilderEdNode>(DraggedNodes[Idx]->GetNodeObj());
 			DraggedTestNode->Modify();
 			DraggedTestNode->ParentNode = MyNode;
+			SetEventLaunchType(DraggedTestNode, DroppedEventLaunchType);
 
 			MyNode->Modify();
 			MyNode->InsertSubNodeAt(DraggedTestNode, InsertIndex);
@@ -887,6 +1053,43 @@ TArray<FOverlayWidgetInfo> SGraphNode_DialogBuilderNode::GetOverlayWidgets(bool 
 	return Widgets;
 }
 
+void SGraphNode_DialogBuilderNode::OnSequencerButtonHovered()
+{
+	bSequencerButtonHovered = true;
+}
+
+void SGraphNode_DialogBuilderNode::OnSequencerButtonUnhovered()
+{
+	bSequencerButtonHovered = false;
+}
+
+FSlateColor SGraphNode_DialogBuilderNode::GetSequencerButtonColor() const
+{
+	return bSequencerButtonHovered
+		? FSlateColor(FLinearColor(1.0f, 1.0f, 1.0f, 1.0f))
+		: FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f, 1.0f));
+}
+
+const FSlateBrush* SGraphNode_DialogBuilderNode::GetDialogSequenceThumbnail() const
+{
+	UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
+	UDialogBuilderNode_DialogSequence* DialogSequenceNode = DialogEdNode
+		? Cast<UDialogBuilderNode_DialogSequence>(DialogEdNode->NodeInstance)
+		: nullptr;
+	if (!DialogSequenceNode) return nullptr;
+
+	if (DialogSequenceNode->Thumbnail)
+	{
+		SequenceThumbnailBrush = FSlateBrush();
+		SequenceThumbnailBrush.DrawAs = ESlateBrushDrawType::Image;
+		SequenceThumbnailBrush.SetResourceObject(DialogSequenceNode->Thumbnail);
+		SequenceThumbnailBrush.ImageSize = FVector2D(180.0f, 100.0f);
+		return &SequenceThumbnailBrush;
+	}
+
+	return &SequenceThumbnailFallbackBrush;
+}
+
 void SGraphNode_DialogBuilderNode::CreatePinWidgets()
 {
 	UDialogBuilderEdNode* StateNode = CastChecked<UDialogBuilderEdNode>(GraphNode);
@@ -933,7 +1136,7 @@ void SGraphNode_DialogBuilderNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 		PinBox = LeftNodeBox;
 		InputPins.Add(PinToAdd);
 	}
-	else // Direction == EEdGraphPinDirection::EGPD_Output
+	else
 	{
 		PinBox = RightNodeBox;
 		OutputPins.Add(PinToAdd);
@@ -941,15 +1144,98 @@ void SGraphNode_DialogBuilderNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 
 	if (PinBox)
 	{
-		PinBox->AddSlot()
-			.HAlign(HAlign_Fill)
-			.VAlign(VAlign_Fill)
-			.FillHeight(1.0f)
-			//.Padding(6.0f, 0.0f)
-			[
-				PinToAdd
-			];
+		const bool bIsPlayerChoiceOutputPin =
+			(PinObj != nullptr) &&
+			(PinObj->Direction == EEdGraphPinDirection::EGPD_Output) &&
+			Cast<UDialogBuilderEdNode_PlayerChoice>(GraphNode) != nullptr;
+
+		if (bIsPlayerChoiceOutputPin)
+		{
+			const FText PinLabel = PinObj->PinFriendlyName.IsEmpty() ? FText::FromName(PinObj->PinName) : PinObj->PinFriendlyName;
+
+			PinBox->AddSlot()
+				.HAlign(HAlign_Right)
+				.VAlign(VAlign_Center)
+				.Padding(FMargin(0.0f, 0.0f, 0.0f, 5.0f))
+				[
+					SNew(SBorder)
+						.BorderImage(FAppStyle::GetBrush("BTEditor.Graph.BTNode.Body"))
+						.BorderBackgroundColor(FLinearColor(.05f, .05f, .05f))
+						.Padding(FMargin(4.0f, 2.0f))
+						[
+							SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(FMargin(0.0f, 0.0f, 6.0f, 0.0f))
+								[
+									SNew(STextBlock)
+										.Text(PinLabel)
+										.TextStyle(FAppStyle::Get(), TEXT("PhysicsAssetEditor.Tools.Font"))
+										.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+										.ColorAndOpacity(FLinearColor::White)
+								]
+							+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								[
+									PinToAdd
+								]
+						]
+				];
+		}
+		else
+		{
+			PinBox->AddSlot()
+				.HAlign(HAlign_Center)
+				.VAlign(VAlign_Center)
+				[
+					PinToAdd
+				];
+		}
 	}
+}
+
+int32 SGraphNode_DialogBuilderNode::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId,
+	const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	if (IsCurrentEditingSequenceNode())
+	{
+		const double Time = FSlateApplication::Get().GetCurrentTime();
+
+		const float Cycle = 1.2f;
+		const float T = FMath::Fmod(Time, Cycle) / Cycle;
+
+		const float Expand = FMath::Lerp(6.0f, 28.0f, T);
+		const float Alpha = 1.0f - T;
+
+		const FVector2D NodeSize = AllottedGeometry.GetLocalSize();
+		const FVector2D RippleSize = NodeSize + FVector2D(Expand * 2.0f);
+		const FVector2D RippleOffset = FVector2D(-Expand, -Expand);
+
+		FSlateDrawElement::MakeBox(
+			OutDrawElements,
+			LayerId,
+			AllottedGeometry.ToPaintGeometry(
+				RippleSize,
+				FSlateLayoutTransform(RippleOffset)
+			),
+			FAppStyle::GetBrush("WhiteBrush"),
+			ESlateDrawEffect::None,
+			FLinearColor(0.1f, 0.55f, 1.0f, 0.22f * Alpha)
+		);
+	}
+
+	return SGraphNode::OnPaint(
+		Args,
+		AllottedGeometry,
+		MyCullingRect,
+		OutDrawElements,
+		LayerId + 1,
+		InWidgetStyle,
+		bParentEnabled
+	);
 }
 
 void SGraphNode_DialogBuilderNode::SetOwner(const TSharedRef<SGraphPanel>& OwnerPanel)
@@ -1018,6 +1304,45 @@ EVisibility SGraphNode_DialogBuilderNode::GetEventsVisibility() const
 	}
 	return EVisibility::Collapsed;
 }
+
+
+EVisibility SGraphNode_DialogBuilderNode::GetLaunchTypeEventsVisibility(EEventLaunchType LaunchType) const
+{
+	UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
+	UDialogBuilderNode* DialogNode = DialogEdNode ? Cast<UDialogBuilderNode>(DialogEdNode->NodeInstance) : nullptr;
+	
+	if (DialogNode)
+	{
+		for (auto& Event : DialogNode->Events)
+		{
+			if (Event->EventLaunchType == LaunchType)
+			{
+				return EVisibility::Visible;
+			}
+		}
+	}
+
+	return EVisibility::Collapsed;
+}
+
+EVisibility SGraphNode_DialogBuilderNode::GetStartEventsVisibility() const
+{
+	
+	return GetLaunchTypeEventsVisibility(EEventLaunchType::E_Start);
+}
+
+EVisibility SGraphNode_DialogBuilderNode::GetEndEventsVisibility() const
+{
+	
+	return GetLaunchTypeEventsVisibility(EEventLaunchType::E_End);
+}
+
+EVisibility SGraphNode_DialogBuilderNode::GetBothEventsVisibility() const
+{
+	return GetLaunchTypeEventsVisibility(EEventLaunchType::E_Both);
+}
+
+
 EVisibility SGraphNode_DialogBuilderNode::GetDecoratorVisibility() const
 {
 	UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
@@ -1031,6 +1356,7 @@ EVisibility SGraphNode_DialogBuilderNode::GetDecoratorVisibility() const
 void SGraphNode_DialogBuilderNode::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
 	SGraphNode::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
 }
 
 void SGraphNode_DialogBuilderNode::AddDecorator(TSharedPtr<SGraphNode> DecoratorWidget)
@@ -1047,12 +1373,81 @@ void SGraphNode_DialogBuilderNode::AddDecorator(TSharedPtr<SGraphNode> Decorator
 
 void SGraphNode_DialogBuilderNode::AddEvent(TSharedPtr<SGraphNode> EventWidget)
 {
-	EventsBox->AddSlot().AutoHeight()
+	UDialogBuilderEdNode* EventNode = EventWidget.IsValid() ? Cast<UDialogBuilderEdNode>(EventWidget->GetNodeObj()) : nullptr;
+	UOrionEvent* Event = EventNode ? Cast<UOrionEvent>(EventNode->NodeInstance) : nullptr;
+	AddEvent(EventWidget, Event ? Event->EventLaunchType : EEventLaunchType::E_Start);
+}
+
+void SGraphNode_DialogBuilderNode::AddEvent(TSharedPtr<SGraphNode> EventWidget, EEventLaunchType EventLaunchType)
+{
+	TSharedPtr<SVerticalBox> TargetBox = StartEventsBox;
+	if (EventLaunchType == EEventLaunchType::E_End)
+	{
+		TargetBox = EndEventsBox;
+	}
+	else if (EventLaunchType == EEventLaunchType::E_Both)
+	{
+		TargetBox = BothEventsBox;
+	}
+
+	TargetBox->AddSlot().AutoHeight()
 		[
 			EventWidget.ToSharedRef()
 		];
 	EventsWidgets.Add(EventWidget);
 	AddSubNode(EventWidget);
+}
+
+EEventLaunchType SGraphNode_DialogBuilderNode::GetEventLaunchTypeForDrop(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) const
+{
+	TSet<TSharedRef<SWidget>> EventContainers;
+	if (StartEventsBox.IsValid())
+	{
+		EventContainers.Add(StartEventsBox.ToSharedRef());
+	}
+	if (EndEventsBox.IsValid())
+	{
+		EventContainers.Add(EndEventsBox.ToSharedRef());
+	}
+	if (BothEventsBox.IsValid())
+	{
+		EventContainers.Add(BothEventsBox.ToSharedRef());
+	}
+
+	TMap<TSharedRef<SWidget>, FArrangedWidget> Result;
+	FindChildGeometries(MyGeometry, EventContainers, Result);
+
+	if (Result.Num() > 0)
+	{
+		FArrangedChildren ArrangedChildren(EVisibility::Visible);
+		Result.GenerateValueArray(ArrangedChildren.GetInternalArray());
+
+		const int32 HoveredIndex = SWidget::FindChildUnderMouse(ArrangedChildren, MouseEvent);
+		if (HoveredIndex != INDEX_NONE)
+		{
+			const TSharedRef<SWidget>& HoveredWidget = ArrangedChildren[HoveredIndex].Widget;
+			if (EndEventsBox.IsValid() && &HoveredWidget.Get() == EndEventsBox.Get())
+			{
+				return EEventLaunchType::E_End;
+			}
+			if (BothEventsBox.IsValid() && &HoveredWidget.Get() == BothEventsBox.Get())
+			{
+				return EEventLaunchType::E_Both;
+			}
+		}
+	}
+
+	return EEventLaunchType::E_Start;
+}
+
+void SGraphNode_DialogBuilderNode::SetEventLaunchType(UDialogBuilderEdNode* EventNode, EEventLaunchType EventLaunchType)
+{
+	UOrionEvent* Event = EventNode ? Cast<UOrionEvent>(EventNode->NodeInstance) : nullptr;
+	if (Event && Event->EventLaunchType != EventLaunchType)
+	{
+		Event->Modify();
+		Event->EventLaunchType = EventLaunchType;
+	}
 }
 
 void SGraphNode_DialogBuilderNode::AddSubNode(TSharedPtr<SGraphNode> SubNodeWidget)
@@ -1283,12 +1678,12 @@ EVisibility SGraphNode_DialogBuilderNode::GetParentNodeVisibility() const
 	return EVisibility::Visible;
 }
 
-EVisibility SGraphNode_DialogBuilderNode::GetSelectorVisibility() const
+EVisibility SGraphNode_DialogBuilderNode::GetNodeHeaderTitleVisibility() const
 {
 	UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
-	UDialogBuilderNode_DialogLine* DialogLineNode = DialogEdNode ? Cast<UDialogBuilderNode_DialogLine>(DialogEdNode->NodeInstance) : nullptr;
 
-	if (DialogLineNode && DialogLineNode->bIsSelector)
+	bool bVisible = DialogEdNode && (DialogEdNode->IsA(UDialogBuilderEdNode_PlayerChoice::StaticClass()) || DialogEdNode->IsA(UDialogBuilderEdNode_DialogSequence::StaticClass()));
+	if (bVisible)
 	{
 		return EVisibility::Visible;
 	}
@@ -1309,6 +1704,26 @@ EVisibility SGraphNode_DialogBuilderNode::GetSubNodeVisibility() const
 EVisibility SGraphNode_DialogBuilderNode::GetDragOverMarkerVisibility() const
 {
 	return bDragMarkerVisible ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+bool SGraphNode_DialogBuilderNode::IsCurrentEditingSequenceNode() const
+{
+	const UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
+	const UDialogBuilderNode_DialogSequence* ThisSequenceNode = DialogEdNode
+		? Cast<UDialogBuilderNode_DialogSequence>(DialogEdNode->NodeInstance)
+		: nullptr;
+
+	const UDialogBuilderNode* DialogNode = DialogEdNode
+		? Cast<UDialogBuilderNode>(DialogEdNode->NodeInstance)
+		: nullptr;
+
+	const UDialogBuilderGraph* DialogGraph = DialogNode
+		? DialogNode->DialogGraph
+		: nullptr;
+
+	return ThisSequenceNode
+		&& DialogGraph
+		&& DialogGraph->CurrentEditingSequenceNode == ThisSequenceNode;
 }
 
 EVisibility SGraphNode_DialogBuilderNode::GetDebuggerSearchFailedMarkerVisibility() const
@@ -1343,6 +1758,46 @@ EVisibility SGraphNode_DialogBuilderNode::GetBlueprintIconVisibility() const
 
 }
 
+EVisibility SGraphNode_DialogBuilderNode::GetSequencerIconVisibility() const
+{
+	const UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
+	const UDialogBuilderNode_DialogSequence* DialogSequenceNode = DialogEdNode
+		? Cast<UDialogBuilderNode_DialogSequence>(DialogEdNode->NodeInstance)
+		: nullptr;
+
+	const bool bCanShowIcon = DialogSequenceNode && DialogSequenceNode->DialogSequence != nullptr;
+
+	TSharedPtr<SGraphPanel> MyOwnerPanel = GetOwnerPanel();
+	return (bCanShowIcon && (!MyOwnerPanel.IsValid() || MyOwnerPanel->GetCurrentLOD() > EGraphRenderingLOD::LowDetail))
+		? EVisibility::Visible
+		: EVisibility::Collapsed;
+}
+
+FReply SGraphNode_DialogBuilderNode::OnOpenSequencerClicked()
+{
+	UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
+	UDialogBuilderNode_DialogSequence* DialogSequenceNode = DialogEdNode
+		? Cast<UDialogBuilderNode_DialogSequence>(DialogEdNode->NodeInstance)
+		: nullptr;
+
+	if (!DialogSequenceNode || !DialogSequenceNode->DialogSequence)
+	{
+		return FReply::Unhandled();
+	}
+
+	UDialogBuilderEdGraph* DialogEdGraph = Cast<UDialogBuilderEdGraph>(GraphNode ? GraphNode->GetGraph() : nullptr);
+	if (DialogEdGraph)
+	{
+		if (TSharedPtr<FDialogBuilderEditor> DialogEditor = DialogEdGraph->DialogEditorPtr.Pin())
+		{
+			DialogEditor->OnOpenDialogSequenceNode(DialogSequenceNode);
+			return FReply::Handled();
+		}
+	}
+
+	return FReply::Unhandled();
+}
+
 EVisibility SGraphNode_DialogBuilderNode::GetIndexVisibility() const
 {
 	// always hide the index on the root node
@@ -1359,7 +1814,7 @@ EVisibility SGraphNode_DialogBuilderNode::GetIndexVisibility() const
 		MyParentOutputPin = MyInputPin->LinkedTo[0];
 	}
 
-	
+
 	// LOD this out once things get too small
 	TSharedPtr<SGraphPanel> MyOwnerPanel = GetOwnerPanel();
 
@@ -1383,8 +1838,8 @@ EVisibility SGraphNode_DialogBuilderNode::GetIndexVisibility() const
 
 	// Visible if ((we are in PIE || if we have siblings) && (SelectedNodes only one && Matching parent with selected nodes))
 	const bool bCanShowIndex = (ShouldShowExecutionIndex() || (MyParentOutputPin && MyParentOutputPin->LinkedTo.Num() > 1)) &&
-        (SelectedNodes.Num() == 1 && (FirstSelectedNode && DialogNode) &&
-        (DialogNode->ParentNodes.Contains(FirstSelectedNode) || DialogNode == FirstSelectedNode));
+		(SelectedNodes.Num() == 1 && (FirstSelectedNode && DialogNode) &&
+			(DialogNode->ParentNodes.Contains(FirstSelectedNode) || DialogNode == FirstSelectedNode));
 	return (bCanShowIndex && (!MyOwnerPanel.IsValid() || MyOwnerPanel->GetCurrentLOD() > EGraphRenderingLOD::LowDetail)) ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
@@ -1430,9 +1885,29 @@ FText SGraphNode_DialogBuilderNode::GetIndexText() const
 			}
 		}
 	}
-	
-	
+
+
 	return FText::AsNumber(Index);
+}
+
+FText SGraphNode_DialogBuilderNode::GetNodeHeaderTitleText() const
+{
+	UDialogBuilderEdNode* DialogEdNode = Cast<UDialogBuilderEdNode>(GraphNode);
+
+	bool bIsSelector = DialogEdNode && DialogEdNode->IsA(UDialogBuilderEdNode_PlayerChoice::StaticClass());
+	bool bIsSequence = DialogEdNode && DialogEdNode->IsA(UDialogBuilderEdNode_DialogSequence::StaticClass());
+	FText HeaderTitle = FText::GetEmpty();
+	if (bIsSelector)
+	{
+		HeaderTitle = LOCTEXT("PlayerChoiceNodeHeader", "SELECTOR");
+	}
+	else if (bIsSequence)
+	{
+		HeaderTitle = LOCTEXT("DialogSequenceNodeHeader", "SEQUENCE");
+	}
+
+
+	return HeaderTitle;
 }
 
 FText SGraphNode_DialogBuilderNode::GetIndexTooltipText() const

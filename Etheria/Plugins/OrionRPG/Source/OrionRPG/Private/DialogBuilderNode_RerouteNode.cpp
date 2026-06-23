@@ -24,23 +24,9 @@ void UDialogBuilderNode_RerouteNode::BeginNode()
 	{
 		case EDialogRerouteRule::E_BackToLastSelection:
 		{
-			bool bSuccess = false;
-			if (UDialogBuilderNode_DialogLine* LatestRootSelectionNode = Cast<UDialogBuilderNode_DialogLine>(GetOwningDialogGraph()->LatestRootSelectionNode))
+			if (UDialogBuilderNode* LatestRootSelectionNode = GetOwningDialogGraph()->LatestRootSelectionNode)
 			{
-				if (bPlayDialogLine)
-				{
-					GetOwningDialogGraph()->BeginNode(LatestRootSelectionNode);
-					return;
-				}
-				else
-				{
-					GetOwningDialogGraph()->CurrentNode = LatestRootSelectionNode;
-					bSuccess = LatestRootSelectionNode->EvaluateAnyPlayerOptions();
-				}
-			}
-			if (!bSuccess)
-			{
-				GetDialogComponent()->OnEndDialog.Broadcast(GetOwningDialogGraph());
+				GetOwningDialogGraph()->BeginNode(LatestRootSelectionNode);
 			}
 			break;
 		}

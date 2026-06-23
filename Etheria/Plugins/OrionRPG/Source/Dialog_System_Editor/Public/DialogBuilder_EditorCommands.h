@@ -21,6 +21,9 @@ public:
 public:
 	TSharedPtr< FUICommandInfo > OpenPluginWindow;
 
+	//Viewport
+	TSharedPtr< FUICommandInfo > ShowGrid;
+
 	// New documents
 	TSharedPtr< FUICommandInfo > AddNewDialogGraph;
 	
@@ -29,4 +32,24 @@ public:
 	TSharedPtr<FUICommandInfo> NewDialogEvent;
 	TSharedPtr<FUICommandInfo> NewDialogCameraShot;
 	TSharedPtr<FUICommandInfo> DialogSetting;
+
+	//Sequencer
+	/** Create camera and set it as the current camera cut */
+	TSharedPtr< FUICommandInfo > CreateCamera;
+
+	/** Actor pilot commands */
+	TSharedPtr< FUICommandInfo > SelectPilotedActor;
+	TSharedPtr< FUICommandInfo > EjectActorPilot;
+	TSharedPtr< FUICommandInfo > PilotSelectedActor;
+
+	/** Toggles showing the exact camera view when locking a viewport to a camera */
+	TSharedPtr< FUICommandInfo > ToggleActorPilotCameraView;
+
+	/** Toggles game preview in the viewport */
+	TSharedPtr< FUICommandInfo > ToggleGameView;
+
+	// Viewport camera modes
+	TSharedPtr<FUICommandInfo> SetViewportCameraPerspective;
+	TSharedPtr<FUICommandInfo> SetViewportCameraDialogCamera;
+	TSharedPtr<FUICommandInfo> SetViewportCameraSequencerCuts;
 };

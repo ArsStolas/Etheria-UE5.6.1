@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Mato
- * Last Updated by: Mato
+ * Last Updated by: ArsStolas
  * Class: "BaseAICharacter - Header"
  * Notes: Pack, respawn, dormancy (timer-based), detection decal, hit reactions,
  *        death VFX + dissolve fade, flee/fight-back.
@@ -12,6 +12,7 @@
 #include "CoreMinimal.h"
 #include "Characters/BaseCharacter.h"
 #include "Characters/AI/AI_Types.h"
+#include "Interfaces/Interaction.h"
 #include "BaseAICharacter.generated.h"
 
 class UAIMovementComponent;
@@ -38,9 +39,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDormancyChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDeathFadeStarted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIDeathFadeCompleted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAIDamageBlocked, AActor*, Instigator, float, AttemptedDamage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnAIInteractionStarted, AActor*, Interactor, EAINPCRole, Role, FName, DialogueID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAIInteractionEnded);
 
 UCLASS()
-class ETHERIA_API ABaseAICharacter : public ABaseCharacter
+class ETHERIA_API ABaseAICharacter : public ABaseCharacter, public IInteraction
 {
 	GENERATED_BODY()
 
@@ -58,6 +61,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") EAIRank GetRank() const { return Rank; }
 	UFUNCTION(BlueprintPure, Category="AI") EAIState GetCurrentAIState() const { return CurrentState; }
 	UFUNCTION(BlueprintPure, Category="AI") AActor* GetCurrentTarget() const { return CurrentTarget; }
+	UFUNCTION(BlueprintPure, Category="AI") FVector GetLastHitDirection() const { return LastHitDirection; }
 	UFUNCTION(BlueprintPure, Category="AI") float GetLeashRange() const { return LeashRange; }
 	UFUNCTION(BlueprintPure, Category="AI") bool CanFlee() const { return bCanFlee; }
 	UFUNCTION(BlueprintPure, Category="AI") bool ShouldShowDebugPerception() const { return bShowDebugPerception; }
@@ -67,6 +71,23 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDead() const { return CurrentState == EAIState::Dead; }
 	UFUNCTION(BlueprintPure, Category="AI") bool IsDormant() const { return bIsDormant; }
 	UFUNCTION(BlueprintPure, Category="AI") bool OnlyDetectsPlayers() const { return bOnlyDetectPlayers; }
+
+	UFUNCTION(BlueprintPure, Category="AI") bool ShouldEngageTargets() const;
+
+	/** True if this AI can ever act on a PERCEIVED actor (engage on sight, or flee from it). Inert NPCs
+	 *  (passive/neutral that can't flee) return false — used to skip perception/proximity scans entirely. */
+	UFUNCTION(BlueprintPure, Category="AI") bool CanReactToPerception() const;
+
+	/** Shared target-acquisition filter: rejects self, other AI, and (when bOnlyDetectPlayers) non-players —
+	 *  but always allows actors carrying a FleeFromTags tag (predators), so prey can detect them. */
+	UFUNCTION(BlueprintPure, Category="AI") bool IsValidTargetCandidate(AActor* Candidate) const;
+
+	/** True if Other carries one of this AI's FleeFromTags (i.e. it's a predator to flee). */
+	UFUNCTION(BlueprintPure, Category="AI") bool MatchesFleeTag(const AActor* Other) const;
+
+	/** True if a target is gone or dead (invalid, AI IsDead, or has a dead HealthComponent) — stop attacking it. */
+	UFUNCTION(BlueprintPure, Category="AI") bool IsTargetDeadOrInvalid(const AActor* Target) const;
+
 	UFUNCTION(BlueprintPure, Category="AI") bool ShouldShowDebugPatrol() const { return bShowDebugPatrol; }
 	UFUNCTION(BlueprintPure, Category="AI|Damage") bool GetCanReceiveDamage() const { return bCanReceiveDamage; }
 
@@ -75,28 +96,63 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI") void SetTarget(AActor* NewTarget);
 	UFUNCTION(BlueprintCallable, Category="AI") void ClearTarget();
 	UFUNCTION(BlueprintCallable, Category="AI") void SetAwarenessLevel(EAIAwarenessLevel NewLevel);
-	UFUNCTION(BlueprintCallable, Category="AI") void SetHostilityType(EAIHostilityType NewType) { HostilityType = NewType; }
+	UFUNCTION(BlueprintCallable, Category="AI") void SetHostilityType(EAIHostilityType NewType);
+
+	/** Add threat for an actor (damage auto-adds it; call directly for taunts/abilities). The highest-threat
+	 *  actor steals aggro once it beats the current target by ThreatSwitchMargin. */
+	UFUNCTION(BlueprintCallable, Category="AI|Threat") void AddThreat(AActor* Source, float Amount);
+
+	/** Override in BP to report whether a target is actively defending (blocking / parrying / i-frames). The AI
+	 *  uses this to BAIT — holding its attack instead of feeding a guard. Default: false (always attack). */
+	UFUNCTION(BlueprintNativeEvent, Category="AI|Combat") bool IsTargetDefending(AActor* Target) const;
+	virtual bool IsTargetDefending_Implementation(AActor* Target) const { return false; }
+
+	/** Override in BP to report whether the target is currently winding up an attack. Lets Elite/Boss AI
+	 *  sidestep/back-hop to dodge it. Default: false (never dodges until the player-combat side reports wind-ups). */
+	UFUNCTION(BlueprintNativeEvent, Category="AI|Combat") bool IsTargetWindingUpAttack(AActor* Target) const;
+	virtual bool IsTargetWindingUpAttack_Implementation(AActor* Target) const { return false; }
 
 	/** Toggle damage immunity at runtime. Useful for cutscenes, scripted moments, or boss invulnerability phases. */
-	UFUNCTION(BlueprintCallable, Category="AI|Damage") void SetCanReceiveDamage(bool bNewCanReceiveDamage) { bCanReceiveDamage = bNewCanReceiveDamage; }
+	UFUNCTION(BlueprintCallable, Category="AI|Damage") void SetCanReceiveDamage(bool bNewCanReceiveDamage);
 
 	/* ═══════════ Perception / Damage ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI") void OnPerceiveTarget(AActor* PerceivedActor);
 	UFUNCTION(BlueprintCallable, Category="AI") void OnReceiveDamage(AActor* DamageInstigator, float DamageAmount);
 
+	/* ═══════════ Interaction (IInteraction) ═══════════ */
+	virtual void Interact_Implementation(AActor* Target) override;
+	virtual void CanReceiveTrace_Implementation() override;
+
+	/** Start an interaction: stops, faces the interactor, plays the interaction montage, broadcasts OnInteractionStarted. */
+	UFUNCTION(BlueprintCallable, Category="AI|Interaction") void BeginInteraction(AActor* Interactor);
+	/** End the interaction and resume Idle/Patrol. */
+	UFUNCTION(BlueprintCallable, Category="AI|Interaction") void EndInteraction();
+	UFUNCTION(BlueprintPure, Category="AI|Interaction") AActor* GetInteractionPartner() const { return InteractionPartner; }
+	UFUNCTION(BlueprintPure, Category="AI|Interaction") bool IsInteractable() const { return bIsInteractable; }
+
+	UPROPERTY(BlueprintAssignable, Category="AI|Interaction") FOnAIInteractionStarted OnInteractionStarted;
+	UPROPERTY(BlueprintAssignable, Category="AI|Interaction") FOnAIInteractionEnded OnInteractionEnded;
+
 	/* ═══════════ Pack ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI|Pack") void AlertPack(AActor* Threat);
 	UFUNCTION(BlueprintCallable, Category="AI|Pack") void OnPackAlert(ABaseAICharacter* Alerter, AActor* Threat);
 	UFUNCTION(BlueprintCallable, Category="AI|Pack") TArray<ABaseAICharacter*> GetPackMembers() const;
+
+	/** Tell idle pack members to go search a location (e.g. where this AI last saw a now-lost target). */
+	UFUNCTION(BlueprintCallable, Category="AI|Pack") void AlertPackSearch(const FVector& Location);
 	UFUNCTION(BlueprintPure, Category="AI|Pack") ABaseAICharacter* GetPackLeader() const;
 	UFUNCTION(BlueprintPure, Category="AI|Pack") bool IsPackLeader() const;
 
 	/* ═══════════ Leash / Respawn ═══════════ */
-	UFUNCTION(BlueprintCallable, Category="AI") void TeleportToSpawn();
+	UFUNCTION(BlueprintCallable, Category="AI") void TeleportToSpawn(FVector OverrideLocation = FVector::ZeroVector);
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void Die();
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void Respawn();
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void NotifyPlayerSaved();
 	UFUNCTION(BlueprintCallable, Category="AI|Respawn") void NotifyDayCycleComplete();
+
+	/** Called by a day/night manager when the time of day changes (0..1). Override in BP for roosting, going home, schedules. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="AI|Schedule") void OnTimeOfDayChanged(float NormalizedTime);
+	virtual void OnTimeOfDayChanged_Implementation(float NormalizedTime) {}
 
 	/* ═══════════ Optimization ═══════════ */
 	UFUNCTION(BlueprintCallable, Category="AI|Optimization") void SetDormant(bool bDormant);
@@ -161,34 +217,95 @@ protected:
 		meta=(ToolTip="When a Neutral AI is fleeing and gets hit, it turns around and fights the attacker.", EditCondition="bCanFlee"))
 	bool bFightBackWhenAttacked = true;
 
+	/** Below this HP fraction, a flee-capable AI breaks off and runs even mid-fight (morale). 0 = never flee from low HP. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0", ClampMax="1", EditCondition="bCanFlee",
+		ToolTip="HP fraction (0-1) under which the AI panics and flees mid-fight. 0 = off. e.g. 0.25 = flee under 25% HP."))
+	float FleeHealthThreshold = 0.f;
+
+	/** After a morale break, suppress re-engaging for this long so a hit doesn't instantly cancel the flee (anti-flicker). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0", EditCondition="bCanFlee",
+		ToolTip="Seconds after a morale-break flee during which the AI won't turn back to fight, even if hit."))
+	float MoraleBreakCooldown = 4.f;
+
+	/* ── Threat / aggro ── */
+
+	/** Enable a threat table so the AI focuses whoever dealt the most damage / was taunted, instead of always
+	 *  the nearest. Lets a tank hold aggro and lets co-op damage redirect the AI. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Threat",
+		meta=(ToolTip="Focus the highest-threat attacker instead of the nearest. Supports taunts (AddThreat) and co-op."))
+	bool bUseThreatSystem = true;
+
+	/** A challenger must exceed the current target's threat by this factor to steal aggro. Higher = stickier target. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Threat", meta=(EditCondition="bUseThreatSystem", ClampMin="1.0",
+		ToolTip="Threat factor needed to steal aggro. 1.5 = a challenger needs 50% more threat than the current target."))
+	float ThreatSwitchMargin = 1.5f;
+
+	/** Threat generated per point of damage taken. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Threat", meta=(EditCondition="bUseThreatSystem", ClampMin="0"))
+	float ThreatPerDamage = 1.f;
+
+	/** Threat decayed per second while engaged. 0 = threat never fades. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Threat", meta=(EditCondition="bUseThreatSystem", ClampMin="0",
+		ToolTip="Threat lost per second so old attackers eventually stop holding aggro. 0 = permanent."))
+	float ThreatDecayPerSecond = 2.f;
+
+	/** If true, a passive/neutral NPC that notices the player (but won't fight or flee) turns to look at them briefly (curiosity). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
+		meta=(ToolTip="Idle NPCs turn to look at the player when noticed. Pure ambient flavor."))
+	bool bNoticeReactions = true;
+
 	/** Maximum distance from spawn point. AI teleports back if it exceeds this while chasing or fleeing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0",
 		ToolTip="How far this AI can go from its spawn before it teleports back."))
 	float LeashRange = 2000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0.1",
+		ToolTip="Duration (seconds) of the stagger triggered after taking StaggerThreshold hits."))
+	float StaggerDuration = 1.f;
 
 	/** If true, the player can interact with this AI (talk, quest, trade). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
 		meta=(ToolTip="Enable interaction. When true, the player can talk to this AI."))
 	bool bIsInteractable = false;
 
+	/** What interacting with this NPC does (drives BP: dialogue UI / shop / quest). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Interaction", meta=(EditCondition="bIsInteractable"))
+	EAINPCRole NPCRole = EAINPCRole::Dialogue;
+
+	/** Dialogue/data id passed to BP on interaction (look up the conversation / shop inventory). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Interaction", meta=(EditCondition="bIsInteractable"))
+	FName DialogueID = NAME_None;
+
 	/* ── Damage ── */
 
 	/** If true, this AI can take damage normally (HP loss, hit reaction, death). If false, all incoming
 	 *  damage is rejected — no HP change, no animation, no death — and OnAIDamageBlocked fires instead.
-	 *  Use this for invulnerable NPCs (merchants, story characters) or scripted invulnerability phases. */
+	 *  Defaults to true so enemies are killable out of the box. Set to false for invulnerable NPCs
+	 *  (merchants, story characters) or scripted invulnerability phases. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Damage",
 		meta=(ToolTip="When OFF, the player (and anything else using ApplyDamage) cannot harm this AI. The AI plays no hit reaction, loses no HP, and OnAIDamageBlocked fires for feedback hooks."))
-	bool bCanReceiveDamage = false;
+	bool bCanReceiveDamage = true;
 	
 	/* ── Component Movements ── */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components") TObjectPtr<UAIMovementComponent> AIMovementComponent;
 	
 	/* ── Detection ── */
 
-	/** Tags that trigger flee. If empty, the AI flees from any detected actor (that passes the player filter). */
+	/** Tags that trigger flee (e.g. "Predator"). If empty, the AI flees from any detected actor (that passes the player filter).
+	 *  Tagged actors are detectable even when bOnlyDetectPlayers is true — so prey can flee wolves while ignoring other NPCs. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection",
-		meta=(ToolTip="Specific actor tags that make this AI flee. Leave empty to flee from any valid target."))
+		meta=(ToolTip="Actor tags that make this AI flee (e.g. 'Predator'). Tagged actors are seen even when 'Only Detect Players' is on."))
 	TArray<FName> FleeFromTags;
+
+	/** When this AI starts fleeing, alarm nearby same-type NPCs so the herd scatters together. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection",
+		meta=(ToolTip="On flee, alert nearby NPCs of the same hostility within AlarmRadius so a herd panics together."))
+	bool bAlarmsNearbyAllies = true;
+
+	/** Radius for the flee alarm broadcast (independent of PackID). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection", meta=(EditCondition="bAlarmsNearbyAllies", ClampMin="0",
+		ToolTip="How far a panic spreads to same-type NPCs when this one flees."))
+	float AlarmRadius = 1000.f;
 
 	/** If true, this AI only detects player-controlled pawns. Ignores other AI and NPCs. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection",
@@ -197,9 +314,10 @@ protected:
 	
 	/* ── Pack ── */
 
-	/** Pack identifier. AI with the same PackID form a group and share alerts. Leave empty for solo AI. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack",
-		meta=(ToolTip="Set the same PackID on multiple AI to make them a pack. They will alert and follow each other."))
+	/** Pack identifier. AI with the same PackID form a group and share alerts. Leave empty for solo AI.
+	 *  Read-only at runtime: it's captured into the pack registry at BeginPlay, so changing it live would desync. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="AI|Pack",
+		meta=(ToolTip="Set the same PackID on multiple AI to make them a pack. They will alert and follow each other. Set in the editor, not at runtime."))
 	FName PackID = NAME_None;
 
 	/** Radius within which pack alerts are transmitted. */
@@ -229,6 +347,11 @@ protected:
 		meta=(EditCondition="RespawnCondition==EAIRespawnCondition::OnTimer", ClampMin="1",
 		ToolTip="Time in seconds before this AI respawns (only for Timer mode)."))
 	float RespawnTimerDuration = 300.f;
+
+	/** When RespawnCondition is Never, fully Destroy the actor after the death fade instead of leaving a hidden corpse. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Respawn",
+		meta=(ToolTip="If this AI never respawns, destroy it after the fade so it doesn't linger as a hidden actor."))
+	bool bDestroyCorpseIfNoRespawn = true;
 
 	/* ═══════════ Death VFX & Smooth Fade ═══════════ */
 
@@ -290,6 +413,11 @@ protected:
 		meta=(ToolTip="If true, this AI starts dormant on BeginPlay. The dormancy timer will wake it up when the player gets close enough."))
 	bool bStartDormant = false;
 
+	/** Enable skeletal-mesh Update Rate Optimization (animate less often when small on screen / far). Big CPU win for crowds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization",
+		meta=(ToolTip="Animate the mesh less frequently when it's far/small on screen. Recommended ON for all AI."))
+	bool bEnableAnimURO = true;
+
 	/* ── Detection Decal ── */
 
 	/** Show a decal on the ground representing the detection radii. */
@@ -341,8 +469,16 @@ private:
 	/* ── Pack ── */
 	void UpdatePackFollow(float DeltaTime);
 
+	bool ReactToThreat(AActor* Threat, bool bFromDamage);
+	void AlarmNearbyAllies(AActor* Threat);
+
+	/* ── Threat ── */
+	void EvaluateThreatSwitch();
+	void TickThreatDecay(float DeltaTime);
+
 	/* ── Respawn ── */
 	void HandleRespawnTimer();
+	void DestroyCorpse();
 
 	/* ── Death sequence ── */
 	void OnDeathVFXAndFadeStart();
@@ -367,6 +503,15 @@ private:
 	UPROPERTY() EAIState CurrentState = EAIState::Idle;
 	UPROPERTY() EAIAwarenessLevel AwarenessLevel = EAIAwarenessLevel::Unaware;
 	UPROPERTY() TObjectPtr<AActor> CurrentTarget;
+	UPROPERTY() TObjectPtr<AActor> InteractionPartner;
+	UPROPERTY() EAIState PreInteractionState = EAIState::Idle;
+
+	mutable TWeakObjectPtr<ABaseAICharacter> CachedPackLeader;
+	mutable float PackLeaderCacheStamp = -1000.f;
+	static constexpr float PACK_LEADER_CACHE_TTL = 0.5f;
+	FVector CachedFollowOffset = FVector::ZeroVector; // cached herd-follow spread (re-rolled on a timer, not per frame)
+	float FollowReevalTimer = 0.f;
+	bool bHasFollowOffset = false;
 	UPROPERTY() TObjectPtr<UNiagaraComponent> SpawnedDeathVFX;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> CachedDynamicMaterials;
 	UPROPERTY() TObjectPtr<UHealthComponent> CachedHealthComponent;
@@ -374,6 +519,13 @@ private:
 	FVector SpawnLocation;
 	FRotator SpawnRotation;
 	FVector SpawnScale = FVector::OneVector;
+	float LastHealthFraction = 1.f;
+	float MoraleBreakUntil = -1000.f; // world time until which a morale-broken AI refuses to re-engage
+	FVector LastHitDirection = FVector::ZeroVector; // travel direction of the last hit (for directional reactions)
+	bool bSuppressAlarmBroadcast = false; // set while reacting to a herd alarm so we don't re-broadcast (anti-cascade)
+
+	/** Per-attacker threat (weak keys; not GC-tracked). Drives target focus when bUseThreatSystem. */
+	TMap<TWeakObjectPtr<AActor>, float> ThreatTable;
 	FVector DeathStartLocation;
 	bool bIsDormant = false;
 	bool bIsDeathFading = false;

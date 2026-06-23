@@ -10,4 +10,5 @@
 //Gameplay Tags
 ORIONRPG_API UE_DEFINE_GAMEPLAY_TAG(TAG_Dialog, "Dialog");
 ORIONRPG_API UE_DEFINE_GAMEPLAY_TAG(TAG_Dialog_Participant, "Dialog.Participant");
+ORIONRPG_API UE_DEFINE_GAMEPLAY_TAG(TAG_Dialog_Prop, "Dialog.Prop");
 ORIONRPG_API UE_DEFINE_GAMEPLAY_TAG(TAG_Dialog_Participant_Player, "Dialog.Participant.Player");
