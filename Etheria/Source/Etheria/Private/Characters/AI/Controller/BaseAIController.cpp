@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
+ * Created by: ArsStolas
  * Last Updated by: ArsStolas
  * Class: "BaseAIController - Source"
  */
@@ -19,6 +19,7 @@
 #include "Perception/AISense_Hearing.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Navigation/CrowdFollowingComponent.h"
 #include "NavigationSystem.h"
 #include "Kismet/GameplayStatics.h"
@@ -769,11 +770,37 @@ float ABaseAIController::GetCombatApproachDistance(float Range) const
 	return FMath::Max(Dist, 1.f);
 }
 
+float ABaseAIController::GetCombatReach(const AActor* Target) const
+{
+	float Reach = 0.f;
+	if (AICharacter)
+		if (const UCapsuleComponent* MyCap = AICharacter->GetCapsuleComponent())
+			Reach += MyCap->GetScaledCapsuleRadius();
+	if (const ACharacter* C = Cast<ACharacter>(Target))
+		if (const UCapsuleComponent* TCap = C->GetCapsuleComponent())
+			Reach += TCap->GetScaledCapsuleRadius();
+	return Reach;
+}
+
 bool ABaseAIController::IsThreatInTerritory(const AActor* Threat) const
 {
 	if (!Threat || !AICharacter) return false;
-	const float Leash = AICharacter->GetLeashRange() * 1.15f; // match CheckLeashAndReturn's give-up radius — no dead band
-	return FVector::DistSquared(Threat->GetActorLocation(), SpawnOrigin) <= Leash * Leash;
+	const float OuterSq = FMath::Square(AICharacter->GetLeashRange() * 1.15f);          // the give-up domain
+	const float InnerSq = FMath::Square(AICharacter->GetLeashRange() * LeashReengageRatio); // re-engage dead band
+	// In territory if the threat is within the leash DOMAIN of home (1.15), OR the WOLF itself is back within the
+	// inner re-engage radius. The wolf-vs-spawn clause uses the inner ratio so a returning wolf can't flip at the
+	// boundary (give up at 1.15, re-acquire only once back inside Inner) — that hysteresis kills the stutter.
+	return FVector::DistSquared(Threat->GetActorLocation(), SpawnOrigin) <= OuterSq
+		|| FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) <= InnerSq;
+}
+
+bool ABaseAIController::IsSelfOutsideLeash() const
+{
+	if (!AICharacter) return false;
+	// Inner re-engage radius (not the 1.15 give-up) so a leashed wolf must travel back inside the dead band before it
+	// may cold-acquire again — no knife-edge flip at the tether.
+	return FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin)
+		> FMath::Square(AICharacter->GetLeashRange() * LeashReengageRatio);
 }
 
 bool ABaseAIController::CheckLeashAndReturn()
@@ -781,8 +808,15 @@ bool ABaseAIController::CheckLeashAndReturn()
 	const float GiveUpSq = FMath::Square(AICharacter->GetLeashRange() * 1.15f);
 	AActor* T = AICharacter->GetCurrentTarget();
 
-	const bool bSelfTooFar = FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > GiveUpSq;
-	const bool bTargetGone = !T || FVector::DistSquared(T->GetActorLocation(), SpawnOrigin) > GiveUpSq;
+	// A wolf toe-to-toe with its target is committed — don't yank it home through the player just because the fight
+	// drifted far from ITS spawn. Only the SELF-tether give-up is suppressed in melee; bTargetGone still ends a fight
+	// the target genuinely fled, and the leash resumes the moment the target leaves attack range.
+	const bool bInMelee = T && FVector::DistSquared(AICharacter->GetActorLocation(), T->GetActorLocation())
+		<= FMath::Square(GetEffectiveAttackRange());
+	const bool bSelfTooFar = !bInMelee && FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > GiveUpSq;
+	// Give up on the TARGET by how far it is from US (the chaser), not from spawn — so walking toward the pack can
+	// never make a wolf quit on a player standing next to it. The wolf's own tether (bSelfTooFar) stays spawn-relative.
+	const bool bTargetGone = !T || FVector::DistSquared(AICharacter->GetActorLocation(), T->GetActorLocation()) > GiveUpSq;
 	if (!bSelfTooFar && !bTargetGone) return false;
 
 	ReleaseAttackTokenHeld();
@@ -861,9 +895,10 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 
 	const float Range = GetEffectiveAttackRange();
 	const float Dist = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+	const float SurfDist = FMath::Max(0.f, Dist - GetCombatReach(Target)); // body-surface gap (capsule-aware)
 
 	// In range → commit to the attack regardless of LoS flicker (the hit-window itself enforces line of sight).
-	if (Dist <= Range)
+	if (SurfDist <= Range)
 	{
 		AICharacter->SetAIState(EAIState::Attacking);
 		if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
@@ -892,6 +927,7 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 
 	const float Range = GetEffectiveAttackRange();
 	const float Dist  = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+	const float SurfDist = FMath::Max(0.f, Dist - GetCombatReach(Target)); // body-surface gap; range checks use this, positions use Dist
 
 	// Custom (scripted) offense: BP owns the whole attack pattern. Skip the built-in melee/slot/token/evade/kite
 	// loop and never auto-disengage on range — the boss stays engaged until BP/perception says otherwise.
@@ -904,7 +940,7 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 		return;
 	}
 
-	if (Dist > Range * CombatDisengageRangeRatio)
+	if (SurfDist > Range * CombatDisengageRangeRatio)
 	{
 		ReleaseAttackTokenHeld();
 		// Chasing is also a combat state, so this transition won't ExitCombat — cancel a wind-up charge
@@ -989,16 +1025,67 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 
 		const float SlotRadius = GetCombatApproachDistance(Range);
 		const FVector SlotLoc = GetAttackSlotLocation(Target, SlotRadius, DeltaTime);
-		const bool bAtSlot = (FVector::Dist(AICharacter->GetActorLocation(), SlotLoc) <= CombatPositionAcceptance * 2.f) || (Dist <= SlotRadius);
+		// "At slot" only once we've genuinely reached our standoff (tight tolerance) OR our body surface is within the
+		// standoff of the target — so the wolf closes IN before swinging instead of attacking from the far edge of range.
+		const bool bAtSlot = (FVector::Dist(AICharacter->GetActorLocation(), SlotLoc) <= CombatPositionAcceptance) || (SurfDist <= SlotRadius);
 
-		// Hold back on a wider "wait ring" instead of crowding the target.
+		// Reposition that never recedes past the player: keep the reserved encirclement angle but clamp the radius to
+		// no more than our current distance, so an in-close wolf strafes/holds instead of back-pedalling out of range.
+		auto GetReposSlot = [&](float CurDist) -> FVector
+		{
+			const float EffRadius = FMath::Min(SlotRadius, CurDist);
+			const FVector Dir = (SlotLoc - Target->GetActorLocation()).GetSafeNormal2D();
+			return Dir.IsNearlyZero() ? AICharacter->GetActorLocation()
+									  : Target->GetActorLocation() + Dir * FMath::Max(EffRadius, 1.f);
+		};
+
+		// Hold back on a wider "wait ring" instead of crowding the target — but never recede OUT of attack range.
 		auto WaitOnRing = [&]()
 		{
 			if (!MC) return;
+			// Already in range but maybe short of our slot (e.g. waiting out an attack cooldown): drift onto the
+			// reserved slot angle at SlotRadius (radius clamped <= current Dist so we never recede out of range), then
+			// hold once settled — ready to pounce the instant the cooldown/turn frees, instead of freezing at the edge.
+			if (SurfDist <= Range)
+			{
+				const FVector InSlot = GetReposSlot(Dist);
+				if (FVector::Dist(AICharacter->GetActorLocation(), InSlot) <= CombatPositionAcceptance) MC->StopMovement();
+				else { MC->SetDesiredSpeed(StrafeSpeed); MC->MoveToLocation(InSlot, CombatPositionAcceptance); }
+				return;
+			}
 			const FVector Dir = (SlotLoc - Target->GetActorLocation()).GetSafeNormal2D();
-			const FVector WaitSlot = Dir.IsNearlyZero() ? SlotLoc : Target->GetActorLocation() + Dir * (Range * WaitRingRatio);
+			// Clamp the ring UNDER the disengage band so reaching it can't trip Dist>Range*Disengage → Chasing (a flicker).
+			const float WaitRadius = FMath::Min(Range * WaitRingRatio, Range * CombatDisengageRangeRatio - 1.f);
+			const FVector WaitSlot = Dir.IsNearlyZero() ? SlotLoc : Target->GetActorLocation() + Dir * WaitRadius;
 			MC->SetDesiredSpeed(StrafeSpeed);
 			MC->MoveToLocation(WaitSlot, CombatPositionAcceptance);
+		};
+
+		// Overflow waiter (no attack turn this round): HOLD at our own encirclement slot — never recede. GetReposSlot
+		// clamps the radius to our current distance, so as the player advances we hold ground (or close in), we don't
+		// back away. Keep facing the target (handled above) and menace/howl on a throttle while we wait our turn.
+		auto WaitYourTurn = [&]()
+		{
+			ReleaseAttackTokenHeld();
+			bool bSettled = false;
+			if (MC)
+			{
+				const FVector Slot = GetReposSlot(Dist);
+				if (FVector::Dist(AICharacter->GetActorLocation(), Slot) <= CombatPositionAcceptance * 1.5f)
+				{ MC->StopMovement(); bSettled = true; }
+				else { MC->SetDesiredSpeed(StrafeSpeed); MC->MoveToLocation(Slot, CombatPositionAcceptance); }
+			}
+			// Menace only while holding still (so a DirectPlayback howl doesn't foot-slide), on a throttle.
+			if (bSettled)
+			{
+				MenaceTimer -= DeltaTime;
+				if (MenaceTimer <= 0.f)
+				{
+					MenaceTimer = CombatWaitMenaceInterval * FMath::FRandRange(0.7f, 1.3f); // desync the pack's howls
+					if (UAIAnimationComponent* Anim = AICharacter->GetAIAnimation())
+						if (!Anim->IsPlayingAction()) Anim->PlayMenace();
+				}
+			}
 		};
 
 		// Bait: against a defending target, commit to a short hold (no per-frame re-roll) and DON'T hold a token,
@@ -1014,31 +1101,32 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 		}
 		BaitTimer = 0.f;
 
-		if (Combat->CanAttack() && TryTakeAttackTurn(Target))
+		// Claim/refresh our attack turn (slot). No slot left → overflow: hold back and wait our turn instead of
+		// crowding the melee (fewer bodies in the fray = no pathing jam) while keeping aggro.
+		if (!TryTakeAttackTurn(Target))
 		{
-			if (Dist <= Range && bAtSlot && HasUsableAttack(Combat, Dist) && IsAttackWindowOpen(Target))
+			WaitYourTurn();
+			return;
+		}
+
+		if (Combat->CanAttack() && SurfDist <= Range && bAtSlot && HasUsableAttack(Combat, SurfDist) && IsAttackWindowOpen(Target))
+		{
+			if (Combat->ExecuteRandomAttack(SurfDist))
 			{
-				if (Combat->ExecuteRandomAttack(Dist))
-				{
-					NotifyAttackStarted(Target); // stamp the group window ONLY on a confirmed swing
-					if (MC) MC->StopMovement();
-				}
-				else if (MC)
-				{
-					MC->SetDesiredSpeed(StrafeSpeed);
-					MC->MoveToLocation(SlotLoc, CombatPositionAcceptance);
-				}
+				NotifyAttackStarted(Target); // stamp the group window ONLY on a confirmed swing
+				if (MC) MC->StopMovement();
 			}
 			else if (MC)
 			{
-				MC->SetDesiredSpeed(Dist <= Range ? StrafeSpeed : GetChaseSpeed());
-				MC->MoveToLocation(SlotLoc, CombatPositionAcceptance);
+				MC->SetDesiredSpeed(StrafeSpeed);
+				MC->MoveToLocation(GetReposSlot(Dist), CombatPositionAcceptance);
 			}
 		}
 		else if (MC)
 		{
-			ReleaseAttackTokenHeld();
-			WaitOnRing();
+			// Hold our slot, close in, ready to bite on our turn (own cooldown / group pacing). Never recede out of range.
+			MC->SetDesiredSpeed(SurfDist <= Range ? StrafeSpeed : GetChaseSpeed());
+			MC->MoveToLocation(GetReposSlot(Dist), CombatPositionAcceptance);
 		}
 	}
 	else if (MC)
@@ -1073,6 +1161,19 @@ float ABaseAIController::ComputeFreeSlotAngle(AActor* Target, float Radius)
 	FVector ToMe = (AICharacter->GetActorLocation() - PlayerLoc).GetSafeNormal2D();
 	if (ToMe.IsNearlyZero()) ToMe = -AICharacter->GetActorForwardVector().GetSafeNormal2D();
 	const float MyAngle = FMath::Atan2(ToMe.Y, ToMe.X);
+
+	// Global slot coordination: reserve a distinct angular lane through the director so packmates spread around
+	// the target instead of all driving to the same side. The lane we currently hold is our preferred lane, so we
+	// keep it unless another attacker already claimed it. Falls back to the local scan below when no director exists.
+	if (bCoordinateAttackSlots)
+	{
+		if (UAICombatDirectorSubsystem* Dir = GetCombatDirector())
+		{
+			const float SlotLease = FMath::Max(SlotUpdateInterval * 3.f, 1.f);
+			return Dir->ReserveAttackAngle(Target, AICharacter, MyAngle,
+				FMath::DegreesToRadians(SlotSeparationDegrees), SlotLease);
+		}
+	}
 
 	TArray<float> Occupied;
 	if (UWorld* W = GetWorld())
@@ -1118,8 +1219,23 @@ void ABaseAIController::HandleReturnState(float DeltaTime)
 	UAIMovementComponent* MC = AICharacter->GetAIMovement();
 	if (!MC) return;
 
+	// Keep scanning on the way home so a player standing next to a returning AI re-aggros it — BUT only once we're
+	// back inside our own leash. Re-aggroing while still beyond the tether would be undone next tick by
+	// CheckLeashAndReturn's bSelfTooFar, producing a Return->Chase->Return flip every 0.4s (the jerk/rollback).
+	const bool bWolfInLeash = FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin)
+		<= FMath::Square(AICharacter->GetLeashRange() * LeashReengageRatio); // inner ratio: re-aggro only once well home
+	if (bWolfInLeash)
+	{
+		ReacquireCooldown -= DeltaTime;
+		if (ReacquireCooldown <= 0.f)
+		{
+			ReacquireCooldown = 0.4f;
+			if (ReacquireOnReturn()) return; // spotted the player → engage
+		}
+	}
+
 	MC->SetDesiredSpeed(MC->PatrolSpeed);
-	MC->MoveToLocation(SpawnOrigin);
+	const bool bMoving = MC->MoveToLocation(SpawnOrigin);
 
 	// 2D arrival + generous Z band so standing on a slope/step still counts as "home".
 	const bool bArrived =
@@ -1127,7 +1243,9 @@ void ABaseAIController::HandleReturnState(float DeltaTime)
 		&& FMath::Abs(AICharacter->GetActorLocation().Z - SpawnOrigin.Z) <= 200.f;
 
 	// Watchdog: if home is unreachable (knocked off-nav, blocked door…), hard-teleport instead of shuffling forever.
-	ReturnTimer += DeltaTime;
+	// A return move that can't even be issued (no path) accelerates the watchdog so a wedged AI un-sticks sooner —
+	// but only 2x: the teleport is a visible position snap, and 4x rushed it on a transient one-frame repath miss.
+	ReturnTimer += bMoving ? DeltaTime : DeltaTime * 2.f;
 	if (!bArrived && ReturnTimer >= ReturnTimeout)
 	{
 		AICharacter->TeleportToSpawn(SpawnOrigin); // land on the reachable, nav-projected origin (not the raw spawn)

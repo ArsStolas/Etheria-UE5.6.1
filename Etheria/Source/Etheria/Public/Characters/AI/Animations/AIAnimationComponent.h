@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
- * Last Updated by: Mato
+ * Created by: ArsStolas
+ * Last Updated by: ArsStolas
  * Class: "AIAnimationComponent - Header"
  * Notes: Two modes:
  *   DirectPlayback — PlayAnimation(Montage) on mesh. No ABP. For creatures.
@@ -54,6 +54,9 @@ public:
 	/** Hit reaction chosen by the local octant of the incoming hit. Falls back to the generic pool if no directional clips are set. */
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayDirectionalHitReaction(const FVector& WorldHitDir);
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayStartle();
+	/** Play the combat "menace/howl" montage (used while a pack member holds back waiting its turn). Works in
+	 *  DirectPlayback because the AI holds still while menacing. No-op if MenaceMontage is unset. */
+	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayMenace();
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayDeath();
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayRandomDeath();
 	UFUNCTION(BlueprintCallable, Category="AI|Animation") UAnimMontage* PlayActionMontage(UAnimMontage* Montage, float PlayRate = 1.f);
@@ -129,6 +132,10 @@ public:
 
 	/** Played once when this AI starts fleeing (startle/panic reaction). Optional — leave empty for no startle. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Flee") TObjectPtr<UAnimMontage> StartleMontage;
+
+	/** Played while this AI holds back waiting its turn to attack in a pack (howl/menace/snarl). Optional. Add the howl
+	 *  SFX as an AnimNotify on the montage. Leave empty for no menace animation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Combat") TObjectPtr<UAnimMontage> MenaceMontage;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Death") TArray<TObjectPtr<UAnimMontage>> DeathMontages;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Interaction") TObjectPtr<UAnimMontage> InteractionMontage;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation", meta=(ClampMin="0.5", ClampMax="2.0")) float IdlePlayRate = 1.f;

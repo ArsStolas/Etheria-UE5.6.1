@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
+ * Created by: ArsStolas
  * Last Updated by: ArsStolas
  * Class: "BaseAICharacter - Header"
  * Notes: Pack, respawn, dormancy (timer-based), detection decal, hit reactions,
@@ -325,6 +325,23 @@ protected:
 		ToolTip="How far a pack alert travels. Only AI within this distance will be notified."))
 	float PackAlertRadius = 3000.f;
 
+	/** When this AI enters combat (gets hit OR starts attacking the player), pull nearby aggressive allies into the
+	 *  fight too — no PackID needed. This is what makes a wolf pack react when you attack one of them. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack",
+		meta=(EditCondition="HostilityType==EAIHostilityType::Aggressive",
+		ToolTip="When this AI engages, rally nearby aggressive allies onto the same target (independent of PackID). The reason packmates join in when you hit one of them."))
+	bool bCallForHelpOnEngage = true;
+
+	/** Radius for the combat rally (independent of PackID). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(EditCondition="bCallForHelpOnEngage", ClampMin="0",
+		ToolTip="How far the 'call for help' reaches. Nearby aggressive allies within this distance join the fight."))
+	float CombatAlertRadius = 1500.f;
+
+	/** True = rallied allies engage immediately; false = they walk over to investigate and only commit once they see the target. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(EditCondition="bCallForHelpOnEngage",
+		ToolTip="ON: allies aggro the target instantly (snappy pack). OFF: allies investigate the spot first and only fight once they see it (cautious, no aggro through walls)."))
+	bool bRallyEngagesDirectly = true;
+
 	/** Pack members try to stay this far from the leader when patrolling. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(ClampMin="50",
 		ToolTip="Ideal distance from the pack leader during patrol."))
@@ -472,6 +489,9 @@ private:
 	bool ReactToThreat(AActor* Threat, bool bFromDamage);
 	void AlarmNearbyAllies(AActor* Threat);
 
+	/** Radius-based combat rally: when this AI engages, pull nearby aggressive allies onto the same target. */
+	void RallyNearbyAllies(AActor* Threat);
+
 	/* ── Threat ── */
 	void EvaluateThreatSwitch();
 	void TickThreatDecay(float DeltaTime);
@@ -523,6 +543,7 @@ private:
 	float MoraleBreakUntil = -1000.f; // world time until which a morale-broken AI refuses to re-engage
 	FVector LastHitDirection = FVector::ZeroVector; // travel direction of the last hit (for directional reactions)
 	bool bSuppressAlarmBroadcast = false; // set while reacting to a herd alarm so we don't re-broadcast (anti-cascade)
+	bool bSuppressRallyBroadcast = false; // set while answering a combat rally so we don't re-rally (single-hop spread)
 
 	/** Per-attacker threat (weak keys; not GC-tracked). Drives target focus when bUseThreatSystem. */
 	TMap<TWeakObjectPtr<AActor>, float> ThreatTable;

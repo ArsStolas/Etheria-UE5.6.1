@@ -156,6 +156,14 @@ struct FGolemAttackConfig
 	/** Length of the wall (set ~arena diameter so it spans the whole arena). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Sweep", meta = (ClampMin = "100")) float SweepLength = 3000.f;
 
+	/** Sweep anim played when the wall travels toward the Golem's RIGHT (starts left edge → ends right = "left to right").
+	 *  Usually one arm. Optional — falls back to Montage if unset. The Golem faces the player, so "to the Golem's right"
+	 *  is the player's left; if it looks mirrored in game, just swap this clip with SweepMontageRightToLeft. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Sweep") TObjectPtr<UAnimMontage> SweepMontageLeftToRight;
+
+	/** Sweep anim played when the wall travels toward the Golem's LEFT ("right to left") — the OTHER arm. Optional, falls back to Montage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Sweep") TObjectPtr<UAnimMontage> SweepMontageRightToLeft;
+
 	/* ── Geometry: Beams (BeamSweep) ── */
 
 	/** Number of beams. 2 gives a V (or, mirrored, an X). */

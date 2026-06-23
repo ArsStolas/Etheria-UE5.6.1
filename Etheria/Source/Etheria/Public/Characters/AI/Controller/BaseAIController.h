@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
+ * Created by: ArsStolas
  * Last Updated by: ArsStolas
  * Class: "BaseAIController - Header"
  */
@@ -42,6 +42,14 @@ public:
 
 	/** True if Threat is within this AI's leash territory. */
 	UFUNCTION(BlueprintPure, Category="AI") bool IsThreatInTerritory(const AActor* Threat) const;
+
+	/** True if this AI is itself beyond its leash tether (mirrors CheckLeashAndReturn's bSelfTooFar). Public so the
+	 *  character can refuse a NEW acquisition while out of territory — it must finish returning home first. */
+	bool IsSelfOutsideLeash() const;
+
+	/** Look around once for a valid target (player-only fast path or sight overlap); engages if found, returns true.
+	 *  Public so the character can re-scan the instant it teleports home — a player on the spawn re-aggros with no ramp wait. */
+	bool ReacquireOnReturn();
 
 	/** Drive your boss's attack pattern here. Fires every frame while the AI is engaged (in the Attacking state),
 	 *  but ONLY when bUseCustomAttackLogic is ON — the built-in approach/slot/token/melee loop is then skipped, so you
@@ -184,12 +192,16 @@ protected:
 	bool bCustomLogicFacesTarget = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Range", meta=(ClampMin="0.3", ClampMax="1.0",
-		ToolTip="Fraction of attack range the AI closes to before attacking. 0.85 = stop at 85% of range, comfortably inside."))
-	float CombatEngageRangeRatio = 0.85f;
+		ToolTip="How close the AI stands to attack, as a fraction of attack range. LOWER = gets right in the target's face (aggressive melee); higher = hangs back near max reach. 0.6 of a 300 range = stands ~180 out."))
+	float CombatEngageRangeRatio = 0.6f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Range", meta=(ClampMin="1.05", ClampMax="3.0",
 		ToolTip="How far past attack range the AI keeps re-approaching before switching back to a full chase."))
 	float CombatDisengageRangeRatio = 1.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0.5", ClampMax="1.15",
+		ToolTip="Inner leash ratio. A leashed/returning AI gives up at LeashRange*1.15 but only RE-ENGAGES once back within LeashRange*this. Keep below 1.15 to leave a no-flip dead band (stops boundary stutter)."))
+	float LeashReengageRatio = 0.95f;
 
 	/* ── Crowd avoidance (Detour) ── */
 
@@ -212,7 +224,7 @@ protected:
 	bool bUseAttackTokens = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(EditCondition="bUseAttackTokens", ClampMin="1",
-		ToolTip="Max number of AI attacking the same target simultaneously."))
+		ToolTip="Max number of AI that may be ASSIGNED an attack slot on the same target at once. Any beyond this hold their encirclement spot, face the target and menace (MenaceMontage), waiting a slot to free — they do NOT back away. Raise for swarms, lower (2-3) only if big bodies crowd."))
 	int32 MaxSimultaneousAttackers = 5;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(EditCondition="bUseAttackTokens", ClampMin="0.5",
@@ -220,12 +232,24 @@ protected:
 	float AttackTokenLeaseDuration = 3.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(EditCondition="bUseAttackTokens", ClampMin="0.0",
-		ToolTip="Minimum delay between attack STARTS among ALL enemies on the same target. Staggers the group so they don't swing in unison. 0 = no pacing."))
-	float AttackInterval = 0.8f;
+		ToolTip="Minimum delay between attack STARTS among ALL enemies on the same target. Staggers the group so they don't swing in unison. LOWER = more bites land per second (aggressive pack). 0 = no pacing (everyone swings freely)."))
+	float AttackInterval = 0.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(EditCondition="bUseAttackTokens", ClampMin="1.0", ClampMax="3.0",
 		ToolTip="Enemies waiting for an attack turn hold at this multiple of attack range instead of crowding the target."))
 	float WaitRingRatio = 1.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director",
+		meta=(ToolTip="Coordinate WHERE each attacker stands: each reserves a distinct angular lane around the target (via the combat director) so they surround it instead of stacking on one side."))
+	bool bCoordinateAttackSlots = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(EditCondition="bCoordinateAttackSlots", ClampMin="10", ClampMax="180",
+		ToolTip="Minimum angular spacing (degrees) the director keeps between two attackers around the same target. ~360/this = how many fit around it (e.g. 60 = up to 6)."))
+	float SlotSeparationDegrees = 55.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(ClampMin="0.5",
+		ToolTip="Seconds between menace/howl montages while an AI holds back waiting its turn to attack (needs MenaceMontage set)."))
+	float CombatWaitMenaceInterval = 3.f;
 
 	/** Chance to hold/bait instead of attacking when the target is defending (ABaseAICharacter::IsTargetDefending). 0 = always attack. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat|Director", meta=(ClampMin="0", ClampMax="1",
@@ -287,13 +311,16 @@ private:
 	/** True if the current target is genuinely sensed right now (sight active, or point-blank) — vs tracked through walls. */
 	bool IsTargetCurrentlySeen(AActor* Target);
 	void BeginInvestigate(const FVector& Location);
-	bool ReacquireOnReturn();
 	void DrawDebugPerception() const;
 	float GetEffectiveAttackRange() const;
 
 	float GetChaseSpeed() const;
 	void ApproachTarget(AActor* Target, float DesiredDistance);
 	float GetCombatApproachDistance(float Range) const;
+
+	/** Combined collision reach (this AI's capsule radius + the target's) so attack range is measured body-surface to
+	 *  body-surface, not center to center — a large creature otherwise can't close inside its own capsule to attack. */
+	float GetCombatReach(const AActor* Target) const;
 
 	FVector GetAttackSlotLocation(AActor* Target, float Radius, float DeltaTime);
 	float ComputeFreeSlotAngle(AActor* Target, float Radius);
@@ -349,6 +376,7 @@ private:
 	bool bEvading = false;          // committed to a reactive dodge
 	float EvadeTimer = 0.f;
 	float EvadeCooldownTimer = 0.f;
+	float MenaceTimer = 0.f;        // throttle for the wait-your-turn menace/howl montage
 
 	float CachedSlotAngle = 0.f;
 	float SlotTargetAngle = 0.f; // chosen slot angle the cached angle smoothly rotates toward (hysteresis)

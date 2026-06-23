@@ -321,9 +321,18 @@ void UGolemBossComponent::BeginAttack(int32 Index)
 	BombardImpactFired.Init(false, CurrentTelegraph.ImpactPoints.Num());
 	BombardLaunched.Init(false, CurrentTelegraph.ImpactPoints.Num());
 
-	if (Cfg.Montage)
+	// Choose the wind-up/cast montage. A sideways sweep uses a DIFFERENT arm depending on travel direction, so pick the
+	// matching directional clip (LineDirection was just resolved by BuildTelegraph); fall back to Montage if unset.
+	UAnimMontage* MontageToPlay = Cfg.Montage;
+	if (Cfg.Shape == EGolemHazardShape::SweepLine)
+	{
+		const bool bTravelsRight = FVector::DotProduct(CurrentTelegraph.LineDirection, OwnerCharacter->GetActorRightVector()) >= 0.f;
+		UAnimMontage* DirMontage = bTravelsRight ? Cfg.SweepMontageLeftToRight : Cfg.SweepMontageRightToLeft;
+		if (DirMontage) MontageToPlay = DirMontage;
+	}
+	if (MontageToPlay)
 		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
-			Anim->PlayActionMontage(Cfg.Montage);
+			Anim->PlayActionMontage(MontageToPlay);
 
 	OnGolemAttackBegin.Broadcast(Cfg.AttackId, Cfg.Shape);
 	OnGolemTelegraph.Broadcast(CurrentTelegraph);

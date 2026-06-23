@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
- * Last Updated by: Mato
+ * Created by: ArsStolas
+ * Last Updated by: ArsStolas
  * Class: "AIAnimationComponent - Source"
  * Notes:
  *   DirectPlayback — Mesh::PlayAnimation(Montage). Action timer tracks end.
@@ -286,6 +286,12 @@ UAnimMontage* UAIAnimationComponent::PlayStartle()
 	// and make them slide. Startle is an ABP (humanoid) feature where montages layer over the locomotion graph.
 	if (AnimationMode == EAIAnimationMode::DirectPlayback) return nullptr;
 	return StartleMontage ? PlayActionMontage(StartleMontage) : nullptr;
+}
+
+UAnimMontage* UAIAnimationComponent::PlayMenace()
+{
+	// The AI holds still while menacing, so a montage is safe even in DirectPlayback (no foot-slide).
+	return MenaceMontage ? PlayActionMontage(MenaceMontage) : nullptr;
 }
 
 UAnimMontage* UAIAnimationComponent::PlayDeath() { return PlayRandomDeath(); }

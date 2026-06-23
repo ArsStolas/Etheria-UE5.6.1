@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
+ * Created by: ArsStolas
  * Last Updated by: ArsStolas
  * Class: "BaseAICharacter - Source"
  * Notes: Connects to HealthComponent for hit reactions AND auto-Die() on HP=0.
@@ -421,6 +421,15 @@ bool ABaseAICharacter::ReactToThreat(AActor* Threat, bool bFromDamage)
 		}
 	}
 
+	// A wolf dragged past its own tether must finish going home before it may re-acquire — otherwise the next
+	// CheckLeashAndReturn (spawn-relative bSelfTooFar) flips it straight back to Returning (the stutter loop). This is
+	// the one chokepoint ALL cold-acquire paths funnel through (sight/proximity/ramp/rally). Damage and an
+	// already-engaged/fleeing AI are exempt; once back inside leash the return handler re-aggros cleanly.
+	if (!bFromDamage && !bAlreadyEngaging && !bAlreadyFleeing)
+		if (ABaseAIController* AIC = Cast<ABaseAIController>(GetController()))
+			if (AIC->IsSelfOutsideLeash())
+				return false;
+
 	if (bWantsFight)
 	{
 		if (bAlreadyEngaging) return false;
@@ -434,6 +443,7 @@ bool ABaseAICharacter::ReactToThreat(AActor* Threat, bool bFromDamage)
 			AIMovementComponent->MoveToLocation(Threat->GetActorLocation());
 		}
 		if (PackID != NAME_None) AlertPack(Threat);
+		RallyNearbyAllies(Threat); // wolf-pack reflex: drag nearby allies into the fight (no PackID needed)
 		return true;
 	}
 
@@ -601,6 +611,45 @@ void ABaseAICharacter::AlarmNearbyAllies(AActor* Threat)
 	}
 }
 
+void ABaseAICharacter::RallyNearbyAllies(AActor* Threat)
+{
+	// Single-hop: an ally we rally engages but doesn't itself re-rally, so the shout doesn't chain across the map.
+	if (!bCallForHelpOnEngage || CombatAlertRadius <= 0.f || !Threat || bSuppressRallyBroadcast) return;
+	if (HostilityType != EAIHostilityType::Aggressive) return; // only predators call the pack in to attack
+	UWorld* W = GetWorld();
+	if (!W) return;
+
+	TArray<FOverlapResult> Overlaps;
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this);
+	W->OverlapMultiByObjectType(Overlaps, GetActorLocation(), FQuat::Identity,
+		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn),
+		FCollisionShape::MakeSphere(CombatAlertRadius), Params);
+
+	for (const FOverlapResult& Ov : Overlaps)
+	{
+		ABaseAICharacter* O = Cast<ABaseAICharacter>(Ov.GetActor());
+		if (!O || O == this || O->IsDead() || O->IsDormant()) continue;
+		if (O->HostilityType != EAIHostilityType::Aggressive) continue;
+		if (!O->IsValidTargetCandidate(Threat)) continue; // respect each ally's own target filter (e.g. players-only)
+
+		const EAIState S = O->GetCurrentAIState();
+		if (S == EAIState::Chasing || S == EAIState::Attacking || S == EAIState::Fleeing || S == EAIState::Dead) continue;
+
+		O->bSuppressRallyBroadcast = true;
+		if (bRallyEngagesDirectly)
+			O->OnPerceiveTarget(Threat); // aggressive → ReactToThreat → chase the target now
+		else if (ABaseAIController* AIC = Cast<ABaseAIController>(O->GetController()))
+			AIC->InvestigateThreat(Threat); // softer: converge on the spot, commit only on sight
+		O->bSuppressRallyBroadcast = false;
+	}
+
+#if ENABLE_DRAW_DEBUG
+	if (bShowDebugPack)
+		DrawDebugSphere(W, GetActorLocation(), CombatAlertRadius, 16, FColor::Red, false, 2.f, 0, 3.f);
+#endif
+}
+
 void ABaseAICharacter::OnPackAlert(ABaseAICharacter* Alerter, AActor* Threat)
 {
 	if (!Threat || CurrentState == EAIState::Dead || bIsDormant) return;
@@ -739,6 +788,12 @@ void ABaseAICharacter::TeleportToSpawn(FVector OverrideLocation)
 
 	SetAwarenessLevel(EAIAwarenessLevel::Unaware);
 	SetAIState(EAIState::Idle);
+
+	// Landed home: re-scan once right now so a player standing on the spawn re-aggros this frame, instead of being
+	// ignored until the detection ramp refills (the teleport cleared our target + perception). If it bites we go
+	// straight to Chasing and skip the patrol kick. Mirrors HandleReturnState's on-arrival reacquire.
+	if (ABaseAIController* AIC = Cast<ABaseAIController>(GetController()))
+		if (AIC->ReacquireOnReturn()) return;
 
 	if (AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
 	{

@@ -345,7 +345,11 @@ bool UAICombatComponent::IsTargetInHitZone(const AActor* Target, const FAIAttack
 	const FVector OwnerLoc = OwnerCharacter->GetActorLocation();
 	const FVector TgtLoc = Target->GetActorLocation();
 
+	// Reach is measured body-surface to body-surface: add BOTH our own capsule and the target's, so a large creature
+	// (big capsule) lands its configured Range instead of needing Range to exceed its own body radius.
 	float Reach = Atk.Range;
+	if (const UCapsuleComponent* MyCap = OwnerCharacter->GetCapsuleComponent())
+		Reach += MyCap->GetScaledCapsuleRadius();
 	if (const ACharacter* C = Cast<ACharacter>(Target))
 		if (const UCapsuleComponent* Cap = C->GetCapsuleComponent())
 			Reach += Cap->GetScaledCapsuleRadius();

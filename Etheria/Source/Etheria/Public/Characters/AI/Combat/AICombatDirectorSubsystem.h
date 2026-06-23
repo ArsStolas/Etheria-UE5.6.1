@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
+ * Created by: ArsStolas
  * Last Updated by: ArsStolas
  * Class: "AICombatDirectorSubsystem - Header"
  */
@@ -30,6 +30,13 @@ public:
 	/** Stamp "an attack just started on this target, now". Call this only on a confirmed swing. */
 	void NotifyAttackStarted(AActor* Target);
 
+	/** Reserve a distinct angular lane (radians, world-space atan2) around Target for Attacker so packmates fully
+	 *  ENCIRCLE the target. Keeps an already-held clear lane (hysteresis); otherwise drops the claim in the middle of
+	 *  the largest empty angular gap (gap-filling) so the back fills even when everyone approaches from the front —
+	 *  k claims settle at 360/k apart. MinSeparation in radians. The claim auto-expires after LeaseDuration — refresh
+	 *  it each reposition; no explicit release is needed. */
+	float ReserveAttackAngle(AActor* Target, AActor* Attacker, float PreferredAngle, float MinSeparation, float LeaseDuration);
+
 private:
 	struct FAttackLease
 	{
@@ -37,7 +44,15 @@ private:
 		float ExpiryTime = 0.f;
 	};
 
+	struct FAngleClaim
+	{
+		TWeakObjectPtr<AActor> Attacker;
+		float Angle = 0.f;       // world-space slot angle around the target (radians)
+		float ExpiryTime = 0.f;
+	};
+
 	static void PruneLeases(TArray<FAttackLease>& Leases, float Now);
+	static void PruneAngleClaims(TArray<FAngleClaim>& Claims, float Now);
 	float NowSeconds() const;
 
 	/** Periodically drop entries whose target weak-pointer has gone stale (died/despawned). */
@@ -48,4 +63,7 @@ private:
 
 	/** Last attack-start time per target, used for group attack pacing (TryReserveAttackWindow). */
 	TMap<TWeakObjectPtr<AActor>, float> LastAttackStartByTarget;
+
+	/** Claimed attack-slot angles per target, used to spread attackers around it (ReserveAttackAngle). */
+	TMap<TWeakObjectPtr<AActor>, TArray<FAngleClaim>> AnglesByTarget;
 };
