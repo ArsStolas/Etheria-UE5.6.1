@@ -28,6 +28,10 @@ class UAnimMontage;
 class UMaterialInterface;
 class UStaticMesh;
 class AGolemFallingRock;
+class AGolemCrystal;
+class UGolemBossBarWidget;
+class UAudioComponent;
+class USoundBase;
 class AActor;
 
 /* ── Dispatchers — BIND THESE IN BP ── */
@@ -222,7 +226,7 @@ public:
 	/** Damage every valid target within HalfWidth of the segment A→B. b3D = true measures full 3D distance (beams); false = horizontal only (sweeps).
 	 *  MinSafeAltitude > 0 makes only targets flying that high (an air zone) safe — a plain jump won't clear it. */
 	UFUNCTION(BlueprintCallable, Category = "Golem|Damage")
-	int32 ApplyLineDamage(FVector A, FVector B, float HalfWidth, float Damage, bool bAirborneIsSafe, bool b3D, float Knockback, FName AttackId, float MinSafeAltitude = 0.f);
+	int32 ApplyLineDamage(FVector A, FVector B, float HalfWidth, float Damage, bool bAirborneIsSafe, bool b3D, float Knockback, FName AttackId, float MinSafeAltitude = 0.f, FVector KnockbackDir = FVector::ZeroVector);
 
 	/* ═══════════ Queries / overridable anchors ═══════════ */
 
@@ -367,6 +371,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals", ClampMin = "0", ClampMax = "1",
 		ToolTip = "Break the big crystal → remove this fraction of the boss MAX HP. 0.5 = half its life.")) float BigCrystalHealthFraction = 0.5f;
 
+	/** After the big crystal breaks, the golem stays DOWN and STUNNED (a free-hit window) for this long, then recovers. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals", ClampMin = "0.5",
+		ToolTip = "Seconds the golem stays stunned/down after you break the big crystal, before it gets back up.")) float BigCrystalStunDuration = 6.f;
+
+	/** Keep planted crystals at least this far INSIDE the arena edge — the slam's hands can land at/over the rim (where
+	 *  there may be no floor to stand on). Crystals are clamped into the arena, then snapped to the ground. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals", ClampMin = "0")) float ArenaCrystalEdgeMargin = 200.f;
+
+	/** Actor spawned for each small arena crystal. Set this to your crystal BP (a child of AGolemCrystal carrying a
+	 *  crystal mesh) and the slam plants/destroys it for you — no Event-Graph wiring. Defaults to the bare C++ crystal. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals",
+		ToolTip = "Crystal BP planted at each fissure point. Child of AGolemCrystal with a mesh. The slam spawns & destroys it automatically.")) TSubclassOf<AGolemCrystal> ArenaCrystalActorClass;
+
+	/** Actor spawned for the BIG stun crystal at the arena centre. Child of AGolemCrystal with a (bigger) crystal mesh.
+	 *  Defaults to the bare C++ crystal; leave empty to spawn nothing and handle it from OnGolemBigCrystalSpawned. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystals", meta = (EditCondition = "bSlamPlantsArenaCrystals",
+		ToolTip = "Big crystal BP opened at the arena centre during the stun. Child of AGolemCrystal with a mesh.")) TSubclassOf<AGolemCrystal> BigCrystalActorClass;
+
 	/* ── Facing ── */
 
 	/** Slowly yaw the Golem to face the target between attacks so targeted strikes (hammer/rock) aim believably. */
@@ -436,6 +458,30 @@ public:
 	/** Advanced: spawn THIS actor for rocks instead of the built-in mesh flyer (e.g. your own BP rock with physics). If set, overrides RockMeshes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Rocks") TSubclassOf<AActor> RockActorClass;
 
+	/* ── Boss UI (health bar) ── */
+
+	/** Widget shown while the fight is on (boss name + HP bar). Reparent a WBP to UGolemBossBarWidget and assign it here;
+	 *  the component creates / shows / hides + feeds it automatically. Leave empty for no bar. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|UI") TSubclassOf<UGolemBossBarWidget> BossBarWidgetClass;
+
+	/** Name shown on the boss bar. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|UI") FText BossDisplayName = FText::FromString(TEXT("Golem"));
+
+	/** Draw order of the boss bar on the viewport (project convention = 100). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|UI") int32 BossBarZOrder = 100;
+
+	/* ── Combat music ── */
+
+	/** Looping track played while in combat with the boss — starts on activation, fades out on defeat. Empty = none
+	 *  (or wire your own from the OnGolemActivated / OnGolemDefeated dispatchers). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Audio") TObjectPtr<USoundBase> CombatMusic;
+
+	/** Fade-in time (s) when the combat music starts. 0 = instant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Audio", meta = (ClampMin = "0")) float CombatMusicFadeIn = 1.f;
+
+	/** Fade-out time (s) when the fight ends. 0 = cut. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Audio", meta = (ClampMin = "0")) float CombatMusicFadeOut = 2.f;
+
 	/* ── Debug ── */
 
 	/** Draw every attack's danger zone, telegraph, live hazard and air zone as debug shapes — lets you test the whole fight before any VFX/anim exists. */
@@ -486,12 +532,14 @@ private:
 	FVector ResolveArenaCentre() const;
 	FVector ClampToArena(const FVector& P, float Margin = 0.f) const;
 	FVector RandomArenaPoint(float SpreadFraction) const;
+	FVector ProjectToGround(const FVector& P) const; // trace down to the real floor Z (so crystals/debug aren't left floating)
+	bool ResolveSocketPoints(const FGolemAttackConfig& Cfg, TArray<FVector>& Out) const; // strike-frame socket world positions, ground-projected (socket-driven impacts)
 
 	/* ── Damage core ── */
 	void GatherTargets(FVector Center, float Radius, TArray<AActor*>& Out) const;
 	bool IsActorAirborne(const AActor* A) const;
 	float CurrentDamageScale() const;
-	void DealDamage(AActor* Victim, float Damage, FVector FromLocation, float Knockback, FName AttackId);
+	void DealDamage(AActor* Victim, float Damage, FVector FromLocation, float Knockback, FName AttackId, FVector KnockbackDirOverride = FVector::ZeroVector);
 
 	/** Apply damage to the BOSS itself, bypassing its body invulnerability (used by weak-point / arm hits).
 	 *  Lifts the HealthComponent's invuln for the single hit so normal melee on the body stays harmless. */
@@ -528,8 +576,15 @@ private:
 	UFUNCTION() void HandleOwnerDamaged(AActor* Instigator);
 	UFUNCTION() void HandleOwnerDied();
 
+	/* ── Boss UI / combat music ── */
+	UFUNCTION() void ShowBossUIAndMusic();   // OnGolemActivated -> create the bar + start the combat music
+	UFUNCTION() void HideBossUIAndMusic();   // OnGolemDefeated / deactivate / endplay -> remove the bar + fade the music
+	UFUNCTION() void HandleBossHealthChanged(float NewHealth, float MaxHealth); // OwnerHealth->OnHealthChanged -> bar fill
+
 	UPROPERTY() TObjectPtr<ABaseAICharacter> OwnerCharacter;
 	UPROPERTY() TObjectPtr<UHealthComponent> OwnerHealth;
+	UPROPERTY(Transient) TObjectPtr<UGolemBossBarWidget> BossBar;
+	UPROPERTY(Transient) TObjectPtr<UAudioComponent> CombatMusicComp;
 
 	EGolemAttackState State = EGolemAttackState::Idle;
 	bool bActivated = false;
@@ -564,6 +619,7 @@ private:
 	int32 NextArenaCrystalId = 1;
 	bool bBigCrystalActive = false;
 	int32 BigCrystalHitsRemaining = 0;
+	UPROPERTY() TObjectPtr<AActor> BigCrystalActor; // the big stun crystal actor, while it is open
 
 	FTimerHandle BrainTimerHandle;
 	FTimerHandle WindupTimerHandle;

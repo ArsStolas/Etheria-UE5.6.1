@@ -38,12 +38,23 @@ public:
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
 		AController* EventInstigator, AActor* DamageCauser) override;
 
+	/** Re-pin the immovable body to its anchor + zero its velocity. Called from the pawn Tick AND the component's
+	 *  BrainTick timer, because an AI boss pawn can stop ticking per-frame (dormancy) — the timer path always runs. */
+	void EnforceImmovable();
+
 protected:
 	virtual void BeginPlay() override;
+
+	/** While bImmovable, hard-pin the body to its placed location every frame so nothing (capsule depenetration after
+	 *  scaling, a stray BP/physics knockback that bypasses LaunchCharacter, etc.) can ever fling the giant into the air. */
+	virtual void Tick(float DeltaSeconds) override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components") TObjectPtr<UGolemBossComponent> GolemBossComponent;
 
 private:
 	/** Fills the component with the 6 demo attacks + a light 2-phase ramp as editable defaults (overridable in a BP child). */
 	void BuildDefaultAttacks();
+
+	FVector ImmovableAnchor = FVector::ZeroVector; // placed world location the immovable Golem is pinned to
+	bool bImmovableAnchorSet = false;
 };

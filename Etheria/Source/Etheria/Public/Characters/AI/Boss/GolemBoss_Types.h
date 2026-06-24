@@ -134,6 +134,12 @@ struct FGolemAttackConfig
 	/** Kill radius of the core impact (the fist, the rock, each falling boulder). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Impact", meta = (ClampMin = "0")) float ImpactRadius = 350.f;
 
+	/** Optional: bone/socket name(s) on the Golem mesh whose ground-projected position(s) become this attack's impact
+	 *  point(s) AT THE STRIKE FRAME — so the damage/fissures/crystals land exactly under the hand(s) the anim slams down.
+	 *  One name = a single impact (e.g. a fist); two = the two-hand slam's two fissure points. Empty = default arena geometry. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Impact",
+		meta = (ToolTip = "Bone/socket name(s) the impact snaps under at the hit frame (e.g. hand_l, hand_r). Empty = default geometry.")) TArray<FName> ImpactSocketNames;
+
 	/* ── Geometry: Shockwave ring (RadialSlam) ── */
 
 	/** Hammer punch: emit an expanding shockwave ring around the impact (the part you jump over). */
@@ -387,4 +393,7 @@ struct FGolemArenaCrystal
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") FVector Location = FVector::ZeroVector;
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 HitsRemaining = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") bool bDestroyed = false;
+
+	/** The crystal actor the component spawned for this entry (AGolemCrystal/child BP), if any. Destroyed on break/clear. */
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") TObjectPtr<AActor> SpawnedActor = nullptr;
 };

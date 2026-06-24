@@ -14,6 +14,10 @@
 
 AGolemBossCharacter::AGolemBossCharacter()
 {
+	// Tick AFTER physics so the immovable re-pin (BeginPlay/Tick) corrects anything that moved the body this frame.
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
+
 	GolemBossComponent = CreateDefaultSubobject<UGolemBossComponent>(TEXT("GolemBossComponent"));
 
 	HostilityType = EAIHostilityType::Aggressive;
@@ -48,7 +52,38 @@ void AGolemBossCharacter::BeginPlay()
 	// Collision stays untouched (the capsule still blocks the player and receives hits); facing yaw uses SetActorRotation.
 	if (bImmovable)
 		if (UCharacterMovementComponent* MC = GetCharacterMovement())
+		{
+			MC->StopMovementImmediately();
 			MC->DisableMovement();
+			MC->GravityScale = 0.f;                 // no fall
+			MC->SetComponentTickEnabled(false);     // never run floor-find / depenetration / integration again
+		}
+
+	// Pin the body in world space. DisableMovement stops CharacterMovement drift, but a scaled capsule depenetrating the
+	// floor (or a stray physics/BP impulse) can still launch it — so we cache the placed location and re-assert it.
+	ImmovableAnchor = GetActorLocation();
+	bImmovableAnchorSet = bImmovable;
+	if (bImmovable) SetActorTickEnabled(true); // make sure the pawn re-pin runs (BrainTick re-pins too, as a backup)
+}
+
+void AGolemBossCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	EnforceImmovable();
+}
+
+void AGolemBossCharacter::EnforceImmovable()
+{
+	if (!bImmovable || !bImmovableAnchorSet) return;
+
+	if (UCharacterMovementComponent* MC = GetCharacterMovement())
+	{
+		MC->StopMovementImmediately();                       // kill any accumulated launch/fall velocity
+		if (MC->MovementMode != MOVE_None) MC->SetMovementMode(MOVE_None); // defeat a MoveTo re-enabling walking
+	}
+
+	if (!GetActorLocation().Equals(ImmovableAnchor, 1.f))
+		SetActorLocation(ImmovableAnchor, /*bSweep=*/false, nullptr, ETeleportType::TeleportPhysics); // snap back, no re-sweep
 }
 
 void AGolemBossCharacter::LaunchCharacter(FVector LaunchVelocity, bool bXYOverride, bool bZOverride)
@@ -118,6 +153,7 @@ void AGolemBossCharacter::BuildDefaultAttacks()
 		A.TargetMode = EGolemTargetMode::AtTarget;
 		A.WindupDuration = 1.2f; A.ActiveDuration = 1.4f; A.RecoveryDuration = 0.9f; A.Cooldown = 8.f;
 		A.Damage = 28.f; A.SweepThickness = 300.f; A.SweepLength = 3000.f; A.DamageInterval = 0.1f;
+		A.KnockbackForce = 900.f;        // the arm physically sweeps the player across the arena
 		A.bRequiresAirZoneEscape = true; // auto-forces a rock-throw first
 		A.MinSafeAltitude = 450.f;       // above a jump (~340) yet reachable by the wind column — must FLY to clear it
 		A.SelectionWeight = 1.0f;
@@ -132,6 +168,7 @@ void AGolemBossCharacter::BuildDefaultAttacks()
 		A.TargetMode = EGolemTargetMode::ArenaExtremities;
 		A.WindupDuration = 1.6f; A.ActiveDuration = 2.0f; A.RecoveryDuration = 1.2f; A.Cooldown = 14.f;
 		A.Damage = 22.f; A.DamageInterval = 0.4f; A.ImpactRadius = 300.f;
+		A.ImpactSocketNames = { TEXT("hand_l"), TEXT("hand_r") }; // fissures/crystals land under the 2 hands — rename to your skeleton
 		A.bRequiresAirZoneEscape = true;    // auto-forces a RockThrow beforehand
 		A.bExposesArmWeakPoints = true;     // arms down -> the player can climb and break the arm crystals
 		A.SelectionWeight = 0.7f;

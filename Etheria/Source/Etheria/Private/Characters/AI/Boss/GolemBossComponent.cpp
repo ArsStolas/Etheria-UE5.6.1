@@ -16,7 +16,14 @@
 #include "Characters/AI/Animations/AIAnimationComponent.h"
 #include "Characters/AI/Combat/AICombatComponent.h"
 #include "Characters/AI/Boss/GolemFallingRock.h"
+#include "Characters/AI/Boss/GolemCrystal.h"
+#include "Characters/AI/Boss/GolemBossCharacter.h"
 #include "Components/Characters/HealthComponent.h"
+#include "UI/GolemBossBarWidget.h"
+#include "Blueprint/UserWidget.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/StaticMesh.h"
 
 #include "GameFramework/Character.h"
@@ -37,6 +44,14 @@
 
 namespace
 {
+	// Retire a crystal actor WITHOUT an immediate Destroy() (which would go pending-kill mid-hit and break a player BP
+	// that spawns a sound attached to the hit actor). Shatter defers the destroy; non-crystal actors fall back to Destroy.
+	void ShatterCrystalActor(AActor* A)
+	{
+		if (AGolemCrystal* Cr = Cast<AGolemCrystal>(A)) Cr->Shatter();
+		else if (IsValid(A)) A->Destroy();
+	}
+
 	float SegDist2D(const FVector& P, const FVector& A, const FVector& B)
 	{
 		const FVector p(P.X, P.Y, 0.f), a(A.X, A.Y, 0.f), b(B.X, B.Y, 0.f);
@@ -61,6 +76,10 @@ UGolemBossComponent::UGolemBossComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false; // tick is turned on only during a live moving hazard
+
+	// Spawn a functional crystal out of the box; assign a child BP (with a mesh) in the editor to skin it.
+	ArenaCrystalActorClass = AGolemCrystal::StaticClass();
+	BigCrystalActorClass = AGolemCrystal::StaticClass();
 }
 
 void UGolemBossComponent::BeginPlay()
@@ -73,7 +92,12 @@ void UGolemBossComponent::BeginPlay()
 		OwnerHealth = OwnerCharacter->FindComponentByClass<UHealthComponent>();
 		OwnerCharacter->OnAIDied.AddDynamic(this, &UGolemBossComponent::HandleOwnerDied);
 		OwnerCharacter->OnAIDamaged.AddDynamic(this, &UGolemBossComponent::HandleOwnerDamaged);
+		if (OwnerHealth) OwnerHealth->OnHealthChanged.AddDynamic(this, &UGolemBossComponent::HandleBossHealthChanged);
 	}
+
+	// The boss bar + combat music ride the fight-start/end dispatchers (created/torn down in the handlers below).
+	OnGolemActivated.AddDynamic(this, &UGolemBossComponent::ShowBossUIAndMusic);
+	OnGolemDefeated.AddDynamic(this, &UGolemBossComponent::HideBossUIAndMusic);
 
 	AttackReadyTimes.Init(0.f, Attacks.Num());
 
@@ -106,7 +130,11 @@ void UGolemBossComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		OwnerCharacter->OnAIDied.RemoveDynamic(this, &UGolemBossComponent::HandleOwnerDied);
 		OwnerCharacter->OnAIDamaged.RemoveDynamic(this, &UGolemBossComponent::HandleOwnerDamaged);
 	}
+	if (OwnerHealth) OwnerHealth->OnHealthChanged.RemoveDynamic(this, &UGolemBossComponent::HandleBossHealthChanged);
+	HideBossUIAndMusic(); // remove the bar + stop the music
 	ClearAirZones();
+	EndBigCrystal();      // despawn the big crystal actor if one is open
+	ClearArenaCrystals(); // despawn any planted crystal actors
 	if (HeldRock) { HeldRock->Destroy(); HeldRock = nullptr; }
 	Super::EndPlay(EndPlayReason);
 }
@@ -124,6 +152,12 @@ void UGolemBossComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 void UGolemBossComponent::BrainTick()
 {
 	if (!OwnerCharacter) return;
+
+	// Re-pin the immovable Golem every heartbeat — the pawn itself may stop ticking per-frame (dormancy), but this
+	// timer always runs, so the body can never be flung off its mark even between pawn ticks.
+	if (AGolemBossCharacter* Golem = Cast<AGolemBossCharacter>(OwnerCharacter))
+		Golem->EnforceImmovable();
+
 	const UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
 
@@ -182,6 +216,7 @@ void UGolemBossComponent::DeactivateBoss()
 	ClearAirZones();
 	if (UAICombatComponent* Combat = OwnerCharacter ? OwnerCharacter->GetAICombat() : nullptr)
 		Combat->ExitCombat();
+	HideBossUIAndMusic(); // fight aborted -> remove the bar + stop the music
 	bActivated = false;
 }
 
@@ -668,8 +703,10 @@ void UGolemBossComponent::BuildTelegraph(const FGolemAttackConfig& Cfg, FGolemTe
 	case EGolemHazardShape::GroundFissures:
 	{
 		const FVector Axis = YawRotate(FVector::ForwardVector, FMath::FRandRange(0.f, 360.f));
-		Out.ImpactPoints.Add(Centre + Axis * Radius);
-		Out.ImpactPoints.Add(Centre - Axis * Radius);
+		// Snap to the actual floor so the crystals + debug sit on the ground regardless of the Golem's scale or
+		// the (possibly elevated) arena-centre Z. Damage uses the whole arena, so the points' Z only matters here.
+		Out.ImpactPoints.Add(ProjectToGround(Centre + Axis * Radius));
+		Out.ImpactPoints.Add(ProjectToGround(Centre - Axis * Radius));
 		Out.ImpactRadii.Add(Cfg.ImpactRadius);
 		Out.ImpactRadii.Add(Cfg.ImpactRadius);
 		break;
@@ -714,12 +751,18 @@ void UGolemBossComponent::DoStrike()
 		OnGolemStrike.Broadcast(S);
 	};
 
+	// Strike-frame socket binding: if this attack lists ImpactSocketNames, place its impact point(s) under those sockets
+	// RIGHT NOW (the hands are down at the hit frame), snapped to the floor — so impacts/fissures/crystals match the anim.
+	TArray<FVector> SocketPts;
+	const bool bSockets = ResolveSocketPoints(Cfg, SocketPts);
+
 	switch (Cfg.Shape)
 	{
 	case EGolemHazardShape::RadialSlam:
 	case EGolemHazardShape::ProjectileImpact:
 	{
-		const FVector C = CurrentTelegraph.ImpactPoints.Num() > 0 ? CurrentTelegraph.ImpactPoints[0] : ResolveArenaCentre();
+		const FVector C = bSockets ? SocketPts[0]
+			: (CurrentTelegraph.ImpactPoints.Num() > 0 ? CurrentTelegraph.ImpactPoints[0] : ResolveArenaCentre());
 		ApplyRadialBurst(C, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
 		Broadcast(C, Cfg.ImpactRadius, 0, 1);
 		if (bDrawDebugHazards) DrawImpactDebug(C, Cfg.ImpactRadius, Cfg.bAirborneIsSafe);
@@ -727,6 +770,11 @@ void UGolemBossComponent::DoStrike()
 	}
 	case EGolemHazardShape::GroundFissures:
 	{
+		// Re-place the fissure points under the hands at the slam frame (cosmetic: VFX + crystals; the damage below is whole-arena).
+		if (bSockets) CurrentTelegraph.ImpactPoints = SocketPts;
+		// Keep every crystal INSIDE the arena and ON the floor — the slam's hands can land at/over the rim (no ground there).
+		for (FVector& P : CurrentTelegraph.ImpactPoints)
+			P = ProjectToGround(ClampToArena(P, ArenaCrystalEdgeMargin));
 		ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 		for (int32 i = 0; i < CurrentTelegraph.ImpactPoints.Num(); ++i)
 			Broadcast(CurrentTelegraph.ImpactPoints[i], Cfg.ImpactRadius, i, CurrentTelegraph.ImpactPoints.Num());
@@ -803,7 +851,7 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 		if (bDamageTick)
 			ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 #if ENABLE_DRAW_DEBUG
-		if (bDrawDebugHazards) DrawFlatCircle(GetWorld(), ResolveArenaCentre(), GetArenaRadius(), FColor::Red, -1.f, 8.f);
+		if (bDrawDebugHazards) DrawFlatCircle(GetWorld(), ProjectToGround(ResolveArenaCentre()), GetArenaRadius(), FColor::Red, -1.f, 8.f);
 #endif
 		break;
 	}
@@ -811,12 +859,17 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	{
 		const FVector Dir = CurrentTelegraph.LineDirection;
 		const FVector Start = ResolveArenaCentre() - Dir * GetArenaRadius();
-		const FVector Cur = Start + Dir * (Alpha * 2.f * GetArenaRadius());
+		// The wall sweeps the WHOLE arena edge-to-edge on the active-timer Alpha (sync it to the arm by matching
+		// ActiveDuration to the montage's swing). Snapped to the floor so a raised/scaled Golem can't miss the player.
+		// NOTE: do NOT center this on the literal hand socket — a giant standing OUTSIDE the arena can't reach across it,
+		// so the danger zone would end up beside the boss and hit nothing. Sync the arm by TIMING, not position.
+		const FVector Cur = ProjectToGround(Start + Dir * (Alpha * 2.f * GetArenaRadius()));
 		const FVector Perp = YawRotate(Dir, 90.f);
 		const FVector A = Cur + Perp * (Cfg.SweepLength * 0.5f);
 		const FVector B = Cur - Perp * (Cfg.SweepLength * 0.5f);
 		if (bDamageTick)
-			ApplyLineDamage(A, B, Cfg.SweepThickness, Cfg.Damage, /*bAirborneIsSafe=*/true, /*b3D=*/false, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
+			// Push the player along the sweep's travel direction — it's the boss's arm physically shoving them across the arena.
+			ApplyLineDamage(A, B, Cfg.SweepThickness, Cfg.Damage, /*bAirborneIsSafe=*/true, /*b3D=*/false, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude, Dir);
 		S.LineCentre = Cur;
 		S.LineDirection = Dir;
 #if ENABLE_DRAW_DEBUG
@@ -1055,6 +1108,45 @@ FVector UGolemBossComponent::RandomArenaPoint(float SpreadFraction) const
 	return FVector(C.X + FMath::Cos(Ang) * Rad, C.Y + FMath::Sin(Ang) * Rad, C.Z);
 }
 
+FVector UGolemBossComponent::ProjectToGround(const FVector& P) const
+{
+	const UWorld* W = GetWorld();
+	if (!W) return P;
+
+	// Trace a tall vertical line through P and snap to the floor (static/dynamic world geometry, not pawns).
+	// Keeps crystals/debug on the ground no matter the Golem's scale or the (possibly elevated) arena-centre Z.
+	const FVector Start = P + FVector(0.f, 0.f, 20000.f);
+	const FVector End   = P - FVector(0.f, 0.f, 20000.f);
+
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GolemGround), false, OwnerCharacter);
+
+	FHitResult Hit;
+	if (W->LineTraceSingleByObjectType(Hit, Start, End, ObjParams, Params))
+		return FVector(P.X, P.Y, Hit.ImpactPoint.Z);
+	return P;
+}
+
+bool UGolemBossComponent::ResolveSocketPoints(const FGolemAttackConfig& Cfg, TArray<FVector>& Out) const
+{
+	Out.Reset();
+	if (Cfg.ImpactSocketNames.Num() == 0 || !OwnerCharacter) return false;
+
+	const USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+	if (!Mesh) return false;
+
+	for (const FName& S : Cfg.ImpactSocketNames)
+	{
+		if (S.IsNone()) continue;
+		if (!Mesh->DoesSocketExist(S) && Mesh->GetBoneIndex(S) == INDEX_NONE) continue; // skip unknown socket/bone names
+		Out.Add(ProjectToGround(Mesh->GetSocketLocation(S))); // the socket's CURRENT world pos, snapped to the floor
+	}
+	return Out.Num() > 0;
+}
+
 /* ═══════════ Damage core ═══════════ */
 
 void UGolemBossComponent::GatherTargets(FVector Center, float Radius, TArray<AActor*>& Out) const
@@ -1091,12 +1183,15 @@ float UGolemBossComponent::CurrentDamageScale() const
 	return Phases.IsValidIndex(CurrentPhase) ? Phases[CurrentPhase].DamageScale : 1.f;
 }
 
-void UGolemBossComponent::DealDamage(AActor* Victim, float Damage, FVector FromLocation, float Knockback, FName AttackId)
+void UGolemBossComponent::DealDamage(AActor* Victim, float Damage, FVector FromLocation, float Knockback, FName AttackId, FVector KnockbackDirOverride)
 {
 	if (!Victim || !OwnerCharacter || Damage <= 0.f) return;
 
 	const float Final = Damage * CurrentDamageScale();
-	FVector Dir = Victim->GetActorLocation() - FromLocation;
+
+	// Push direction: an explicit override (e.g. a SWEEP shoves the player along the arm's travel direction) wins;
+	// otherwise push radially away from the impact point.
+	FVector Dir = KnockbackDirOverride.IsNearlyZero() ? (Victim->GetActorLocation() - FromLocation) : KnockbackDirOverride;
 	Dir.Z = 0.f;
 	Dir = Dir.GetSafeNormal();
 	if (Dir.IsNearlyZero()) Dir = OwnerCharacter->GetActorForwardVector();
@@ -1129,7 +1224,7 @@ int32 UGolemBossComponent::ApplyRadialBurst(FVector Center, float Radius, float 
 {
 	TArray<AActor*> Targets;
 	GatherTargets(Center, Radius, Targets);
-	const float FloorZ = GetArenaCentre().Z;
+	const float FloorZ = ProjectToGround(GetArenaCentre()).Z; // real floor, not the (possibly raised) arena-centre Z
 	int32 Hits = 0;
 	for (AActor* A : Targets)
 	{
@@ -1162,14 +1257,14 @@ int32 UGolemBossComponent::ApplyRingBurst(FVector Center, float InnerRadius, flo
 	return Hits;
 }
 
-int32 UGolemBossComponent::ApplyLineDamage(FVector A, FVector B, float HalfWidth, float Damage, bool bAirborneIsSafe, bool b3D, float Knockback, FName AttackId, float MinSafeAltitude)
+int32 UGolemBossComponent::ApplyLineDamage(FVector A, FVector B, float HalfWidth, float Damage, bool bAirborneIsSafe, bool b3D, float Knockback, FName AttackId, float MinSafeAltitude, FVector KnockbackDir)
 {
 	const FVector Mid = (A + B) * 0.5f;
 	const float GatherRadius = (FVector::Dist(A, B) * 0.5f) + HalfWidth + 50.f;
 	TArray<AActor*> Targets;
 	GatherTargets(Mid, GatherRadius, Targets);
 
-	const float FloorZ = GetArenaCentre().Z;
+	const float FloorZ = ProjectToGround(GetArenaCentre()).Z; // real floor, not the (possibly raised) arena-centre Z
 	int32 Hits = 0;
 	for (AActor* Actor : Targets)
 	{
@@ -1181,7 +1276,7 @@ int32 UGolemBossComponent::ApplyLineDamage(FVector A, FVector B, float HalfWidth
 			? ((Loc.Z - FloorZ) >= MinSafeAltitude)
 			: (bAirborneIsSafe && IsActorAirborne(Actor));
 		if (bSafe) continue;
-		DealDamage(Actor, Damage, Loc, Knockback, AttackId);
+		DealDamage(Actor, Damage, Loc, Knockback, AttackId, KnockbackDir);
 		++Hits;
 	}
 	return Hits;
@@ -1499,6 +1594,7 @@ void UGolemBossComponent::EndTopple()
 void UGolemBossComponent::PlantArenaCrystals()
 {
 	ClearArenaCrystals(); // replace any crystals the player left standing from a previous slam
+	UWorld* const W = GetWorld();
 	for (const FVector& P : CurrentTelegraph.ImpactPoints)
 	{
 		FGolemArenaCrystal C;
@@ -1506,16 +1602,33 @@ void UGolemBossComponent::PlantArenaCrystals()
 		C.Location = P;
 		C.HitsRemaining = FMath::Max(1, ArenaCrystalHitsToBreak);
 		C.bDestroyed = false;
+
+		// Spawn the destructible crystal actor directly (no Event-Graph wiring needed). It collides on ECC_Pawn
+		// and routes the player's hits back through HitArenaCrystal. Set ArenaCrystalActorClass to skin it.
+		if (W && *ArenaCrystalActorClass)
+		{
+			FActorSpawnParameters SP;
+			SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			SP.Owner = OwnerCharacter;
+			if (AGolemCrystal* Actor = W->SpawnActor<AGolemCrystal>(ArenaCrystalActorClass, P, FRotator::ZeroRotator, SP))
+			{
+				Actor->InitAsArenaCrystal(this, C.Id);
+				C.SpawnedActor = Actor;
+			}
+		}
+
 		ArenaCrystals.Add(C);
-		OnGolemArenaCrystalSpawned.Broadcast(C.Id, C.Location);
+		OnGolemArenaCrystalSpawned.Broadcast(C.Id, C.Location); // still fires so BP VFX/SFX skins can react
 	}
 }
 
 void UGolemBossComponent::ClearArenaCrystals()
 {
 	if (ArenaCrystals.Num() == 0) return;
+	for (const FGolemArenaCrystal& C : ArenaCrystals)
+		ShatterCrystalActor(C.SpawnedActor);
 	ArenaCrystals.Reset();
-	OnGolemArenaCrystalsCleared.Broadcast(); // BP despawns any remaining crystal actors
+	OnGolemArenaCrystalsCleared.Broadcast(); // BP despawns any remaining crystal actors it spawned itself
 }
 
 bool UGolemBossComponent::AllArenaCrystalsDestroyed() const
@@ -1537,14 +1650,20 @@ bool UGolemBossComponent::HitArenaCrystal(int32 CrystalId, float PlayerDamage, A
 	if (C->HitsRemaining <= 0)
 	{
 		C->bDestroyed = true;
+		ShatterCrystalActor(C->SpawnedActor); // remove the broken crystal actor (deferred — see ShatterCrystalActor)
+		C->SpawnedActor = nullptr;
 		DealDamageToBoss(FMath::Max(0.f, PlayerDamage) * ArenaCrystalBreakDamageMult, Instigator); // the x6 burst
 		OnGolemArenaCrystalDestroyed.Broadcast(C->Id, C->Location);
 
 		if (AllArenaCrystalsDestroyed())
 		{
-			ArenaCrystals.Reset(); // spent — their actors were removed by the Destroyed events above
+			ArenaCrystals.Reset(); // spent — each actor was destroyed as it broke
 			Topple();              // STUN the boss → opens the big crystal
 		}
+	}
+	else if (AGolemCrystal* Cr = Cast<AGolemCrystal>(C->SpawnedActor))
+	{
+		Cr->NotifyDamaged(C->HitsRemaining, FMath::Max(1, ArenaCrystalHitsToBreak)); // a-bit-broken anim
 	}
 	return true;
 }
@@ -1553,7 +1672,28 @@ void UGolemBossComponent::SpawnBigCrystal()
 {
 	bBigCrystalActive = true;
 	BigCrystalHitsRemaining = FMath::Max(1, BigCrystalHitsToBreak);
-	OnGolemBigCrystalSpawned.Broadcast(ResolveArenaCentre()); // big crystal opens at the arena centre during the stun
+
+	const FVector Loc = ProjectToGround(ResolveArenaCentre()); // big crystal opens at the arena centre, ON the floor
+
+	// Spawn the big crystal actor directly (it routes hits through HitBigCrystal). Set BigCrystalActorClass to skin it.
+	if (UWorld* const W = GetWorld())
+	{
+		if (IsValid(BigCrystalActor)) BigCrystalActor->Destroy();
+		BigCrystalActor = nullptr;
+		if (*BigCrystalActorClass)
+		{
+			FActorSpawnParameters SP;
+			SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			SP.Owner = OwnerCharacter;
+			if (AGolemCrystal* Actor = W->SpawnActor<AGolemCrystal>(BigCrystalActorClass, Loc, FRotator::ZeroRotator, SP))
+			{
+				Actor->InitAsBigCrystal(this);
+				BigCrystalActor = Actor;
+			}
+		}
+	}
+
+	OnGolemBigCrystalSpawned.Broadcast(Loc); // still fires so BP VFX/SFX skins can react
 }
 
 void UGolemBossComponent::EndBigCrystal()
@@ -1561,6 +1701,8 @@ void UGolemBossComponent::EndBigCrystal()
 	if (!bBigCrystalActive) return;
 	bBigCrystalActive = false;
 	BigCrystalHitsRemaining = 0;
+	ShatterCrystalActor(BigCrystalActor); // deferred (the break is triggered from inside the crystal's hit)
+	BigCrystalActor = nullptr;
 }
 
 bool UGolemBossComponent::HitBigCrystal(float PlayerDamage, AActor* Instigator)
@@ -1576,9 +1718,72 @@ bool UGolemBossComponent::HitBigCrystal(float PlayerDamage, AActor* Instigator)
 		DealDamageToBoss(Chunk, Instigator); // remove ~half the max HP
 		OnGolemBigCrystalBroken.Broadcast(Chunk);
 		EndBigCrystal();
-		EndTopple();                         // the player earned it — stand back up
+
+		// Big payoff: the golem stays DOWN and hard-stunned (a free-hit window) instead of standing up — then recovers.
+		// Re-arm the topple timer to the stun length; OnToppleElapsed -> EndTopple stands it back up afterwards.
+		if (UWorld* W = GetWorld())
+			W->GetTimerManager().SetTimer(ToppleTimerHandle, this, &UGolemBossComponent::OnToppleElapsed,
+				FMath::Max(0.5f, BigCrystalStunDuration), false);
+	}
+	else if (AGolemCrystal* Cr = Cast<AGolemCrystal>(BigCrystalActor))
+	{
+		Cr->NotifyDamaged(BigCrystalHitsRemaining, FMath::Max(1, BigCrystalHitsToBreak)); // a-bit-broken anim
 	}
 	return true;
+}
+
+/* ═══════════ Boss UI / combat music ═══════════ */
+
+void UGolemBossComponent::ShowBossUIAndMusic()
+{
+	UWorld* const W = GetWorld();
+	if (!W) return;
+
+	// Boss bar — mirrors the project's only widget pattern (UCinematicDirectorComponent): CreateWidget on the local PC + AddToViewport.
+	if (!BossBar && *BossBarWidgetClass)
+	{
+		if (APlayerController* PC = W->GetFirstPlayerController())
+		{
+			BossBar = CreateWidget<UGolemBossBarWidget>(PC, BossBarWidgetClass);
+			if (BossBar)
+			{
+				BossBar->AddToViewport(BossBarZOrder);
+				BossBar->SetBossName(BossDisplayName);
+				if (OwnerHealth) BossBar->SetBossHealth(OwnerHealth->GetHealth(), OwnerHealth->GetMaxHealth());
+			}
+		}
+	}
+
+	// Combat music — 2D; set the SoundBase itself to loop in the editor.
+	if (CombatMusic && !CombatMusicComp)
+	{
+		CombatMusicComp = UGameplayStatics::CreateSound2D(this, CombatMusic, 1.f, 1.f, 0.f, nullptr, false, /*bAutoDestroy=*/false);
+		if (CombatMusicComp)
+		{
+			if (CombatMusicFadeIn > 0.f) CombatMusicComp->FadeIn(CombatMusicFadeIn);
+			else                         CombatMusicComp->Play();
+		}
+	}
+}
+
+void UGolemBossComponent::HideBossUIAndMusic()
+{
+	if (BossBar)
+	{
+		BossBar->RemoveFromParent();
+		BossBar = nullptr;
+	}
+	if (CombatMusicComp)
+	{
+		if (CombatMusicFadeOut > 0.f) CombatMusicComp->FadeOut(CombatMusicFadeOut, 0.f);
+		else                          CombatMusicComp->Stop();
+		CombatMusicComp = nullptr;
+	}
+}
+
+void UGolemBossComponent::HandleBossHealthChanged(float NewHealth, float MaxHealth)
+{
+	if (BossBar) BossBar->SetBossHealth(NewHealth, MaxHealth);
 }
 
 /* ═══════════ Debug ═══════════ */
@@ -1599,11 +1804,14 @@ void UGolemBossComponent::DrawTelegraphDebug(const FGolemTelegraph& T, float Lif
 			DrawFlatCircle(W, T.ImpactPoints[i], T.ImpactRadii.IsValidIndex(i) ? T.ImpactRadii[i] : 200.f, Warn, Lifetime, 6.f);
 		break;
 	case EGolemHazardShape::GroundFissures:
-		DrawFlatCircle(W, ResolveArenaCentre(), GetArenaRadius(), FColor::Red, Lifetime, 8.f);
+	{
+		const FVector GroundC = ProjectToGround(ResolveArenaCentre());
+		DrawFlatCircle(W, GroundC, GetArenaRadius(), FColor::Red, Lifetime, 8.f);
 		for (const FVector& P : T.ImpactPoints)
 			DrawDebugSphere(W, P, 70.f, 10, Warn, false, Lifetime);
-		DrawDebugString(W, ResolveArenaCentre() + FVector(0, 0, 180.f), TEXT("FISSURES - FLY!"), nullptr, FColor::Red, Lifetime);
+		DrawDebugString(W, GroundC + FVector(0, 0, 180.f), TEXT("FISSURES - FLY!"), nullptr, FColor::Red, Lifetime);
 		break;
+	}
 	case EGolemHazardShape::SweepLine:
 	{
 		const FVector Perp = YawRotate(T.LineDirection, 90.f);
