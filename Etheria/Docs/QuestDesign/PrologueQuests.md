@@ -1,6 +1,8 @@
 # Document de Conception - Quetes du Prologue
 
-Ce document sert de fiche de remplissage pour Unreal Engine et ORION RPG. Il liste les quetes a creer, les noms d'assets conseilles, les tags a utiliser, les objectifs, les PNJ, les dialogues et les conditions de fin.
+Ce document sert de fiche de remplissage pour Unreal Engine et ORION RPG. Il liste les quetes a creer, les noms d'assets conseilles, les tags a utiliser, les objectifs, les PNJ et les conditions de fin.
+
+Les dialogues complets, choix et conditions de choix sont dans `PrologueDialogues.md`.
 
 ## 1. References Globales
 
@@ -11,17 +13,20 @@ Ce document sert de fiche de remplissage pour Unreal Engine et ORION RPG. Il lis
 | Antagonistes | Les Sans-Aube |
 | Deuxieme zone | Gorges d'Ysbrume |
 | Capacite debloquee | Grappin |
+| Pouvoir tease | Glide / pouvoir d'Ether lie au vent |
 
 ### Tags Cles
 
 | Usage | Tag |
 | --- | --- |
 | Quetes ORION | `Quest.*` |
+| Nodes ORION | `Quest.<Zone>.<Quest>.Node.*` |
+| Items/interactables de quete | `Quest.<Zone>.<Quest>.Item.*` |
 | Participants de dialogue ORION | `Dialog.Participant.*` |
 | Faction antagoniste | `Faction.SansAube` |
 | Capacite grappin | `Ability.GrapplingHook` |
-| Item preuve du loup | `Item.WolfClaw` |
-| Item narratif de Maelys | `Item.MaelysScarf` |
+| Item global preuve du loup | `Item.WolfClaw` |
+| Item global narratif de Maelys | `Item.MaelysScarf` |
 
 ## 2. Tableau des Assets a Creer
 
@@ -33,8 +38,9 @@ Ce document sert de fiche de remplissage pour Unreal Engine et ORION RPG. Il lis
 | Quest Blueprint | `BPQ_PRO_02_PremierSang` | `Quest.Prologue.PremierSang` | `BP_Wolf`, clairiere du vieux chene | Locked | Activee quand le joueur entre dans le trigger de la clairiere. |
 | Quest Blueprint | `BPQ_PRO_03_ArriveeValdorel` | `Quest.Prologue.ArriveeValdorel` | Aveline Ronce, porte de Valdorel | Locked | Premiere interaction avec le village. |
 | Quest Blueprint | `BPQ_PRO_04_LeDoyen` | `Quest.Prologue.LeDoyen` | Orvan Lume, maison du doyen | Locked | Pose le lore des Sans-Aube et dirige vers Nalia. |
-| Quest Blueprint | `BPQ_VIL_01_GrappinDeNalia` | `Quest.Village.GrappinDeNalia` | Nalia Forgebrume, atelier | Locked | Debloque le grappin de facon permanente. |
-| Quest Blueprint | `BPQ_VIL_02_ChatSurLesToits` | `Quest.Village.ChatSurLesToits` | Mirette Solain, auberge, chat Pepin | Unlocked | Quete secondaire optionnelle apres obtention du grappin. |
+| Quest Blueprint | `BPQ_VIL_01_GrappinDeNalia` | `Quest.Village.GrappinDeNalia` | Nalia Forgebrume, atelier | Locked | Repare et remet le grappin au joueur. |
+| Quest Blueprint | `BPQ_VIL_02_EssayerLeGrappin` | `Quest.Village.EssayerLeGrappin` | Nalia Forgebrume, zone d'entrainement | Locked | Tutoriel separe pour tester le grappin. |
+| Quest Blueprint | `BPQ_VIL_03_ChatSurLesToits` | `Quest.Village.ChatSurLesToits` | Mirette Solain, auberge, chat Pepin | Unlocked | Quete secondaire optionnelle apres obtention du grappin. |
 | Quest Blueprint | `BPQ_PRO_05_RouteDesGorges` | `Quest.Prologue.RouteDesGorges` | Pont effondre, camp abandonne | Locked | Premiere vraie utilisation du grappin hors village. |
 | Quest Blueprint | `BPQ_GOR_01_NuisiblesDEther` | `Quest.Gorges.NuisiblesDEther` | Soren Velt, wasps, nids | Locked | Introduit les monstres de la deuxieme zone. |
 
@@ -63,9 +69,9 @@ Ce document sert de fiche de remplissage pour Unreal Engine et ORION RPG. Il lis
 
 Objectifs dans l'ordre :
 
-1. Ramasser le foulard de Maelys.
-2. Suivre les traces vers le sentier.
-3. Atteindre la clairiere du vieux chene.
+1. Aller a la zone ou Maelys a ete enlevee.
+2. Ramasser le foulard de Maelys.
+3. Continuer vers le sentier.
 
 Dialogues :
 
@@ -80,7 +86,7 @@ Conditions de succes :
 
 Recompenses :
 
-- Ajout ou validation de `Item.MaelysScarf`.
+- Ajout ou validation de `Quest.Prologue.RetrouverSesEsprits.Item.MaelysScarf`.
 - Activation de `Quest.Prologue.PremierSang`.
 
 Quete suivante :
@@ -100,10 +106,12 @@ Quete suivante :
 
 Objectifs dans l'ordre :
 
-1. Survivre a l'attaque.
-2. Vaincre le loup.
-3. Recuperer une griffe de loup.
-4. Rejoindre Valdorel.
+1. Ramasser une vieille lame.
+2. Traverser le sentier sombre.
+3. Survivre a l'attaque.
+4. Vaincre le loup.
+5. Recuperer une griffe de loup.
+6. Rejoindre Valdorel.
 
 Dialogues :
 
@@ -115,12 +123,12 @@ Dialogues :
 Conditions de succes :
 
 - Le loup est mort.
-- Le joueur recupere `Item.WolfClaw`.
+- Le joueur recupere `Quest.Prologue.PremierSang.Item.WolfClaw`.
 - Le joueur atteint l'entree de Valdorel.
 
 Recompenses :
 
-- Ajout de `Item.WolfClaw`.
+- Ajout de `Quest.Prologue.PremierSang.Item.WolfClaw`.
 - Activation de `Quest.Prologue.ArriveeValdorel`.
 
 Quete suivante :
@@ -193,7 +201,7 @@ Dialogues `BPD_Orvan_LeDoyen` :
 | Orvan | "Les Sans-Aube ne prennent jamais quelqu'un au hasard." |
 | Player | "Pourquoi Maelys ?" |
 | Orvan | "Parce qu'elle porte peut-etre une trace d'Ether. Comme toi." |
-| Orvan | "Ils sont passes par les Gorges d'Ysbrume. A pied, tu n'y survivras pas. Nalia peut t'aider." |
+| Orvan | "Les Sans-Aube ont du prendre les Gorges d'Ysbrume. Sans equipement, tu n'atteindras meme pas les premieres corniches. Va voir Nalia pour son grappin. Pour les hauteurs... l'Ether devra peut-etre repondre autrement." |
 
 Conditions de succes :
 
@@ -220,15 +228,14 @@ Quete suivante :
 | Etat ORION initial | Locked |
 | Declencheur | Le joueur parle a Nalia apres la quete du doyen. |
 | PNJ principal | Nalia Forgebrume |
-| But de gameplay | Debloquer le grappin via une mini-quete de recolte, exploration et test. |
+| But de gameplay | Reparer le grappin via une mini-quete de recolte et d'exploration, puis lancer une quete separee de test. |
 
 Objectifs dans l'ordre :
 
 1. Parler a Nalia dans l'atelier.
 2. Recuperer 3 fibres de ronce solide.
 3. Recuperer 1 ressort ancien dans la remise.
-4. Tester le grappin sur la poutre d'entrainement.
-5. Revenir voir Nalia.
+4. Revenir voir Nalia.
 
 Dialogues `BPD_Nalia_Grappin` :
 
@@ -242,26 +249,57 @@ Dialogues `BPD_Nalia_Grappin` :
 Conditions de succes :
 
 - Les composants sont recuperes.
-- Le test de grappin sur la poutre est valide.
-- Dialogue final avec Nalia termine.
+- Dialogue de remise du grappin avec Nalia termine.
 
 Recompenses :
 
 - Debloque `Ability.GrapplingHook`.
+- Activation de `Quest.Village.EssayerLeGrappin`.
 - Unlock de `Quest.Village.ChatSurLesToits`.
+
+Quete suivante :
+
+- Activer `Quest.Village.EssayerLeGrappin`.
+- Unlock `Quest.Village.ChatSurLesToits` comme contenu optionnel.
+
+### Q_VIL_02 - Essayer le grappin
+
+| Champ | Valeur |
+| --- | --- |
+| Nom joueur | Essayer le grappin |
+| Nom asset conseille | `BPQ_VIL_02_EssayerLeGrappin` |
+| Quest Tag | `Quest.Village.EssayerLeGrappin` |
+| Etat ORION initial | Locked |
+| Declencheur | Completion de `Quest.Village.GrappinDeNalia`. |
+| PNJ principal | Nalia Forgebrume |
+| But de gameplay | Isoler le tutoriel du grappin dans une quete claire, sans melanger recolte/reparation et apprentissage. |
+
+Objectifs dans l'ordre :
+
+1. Parler a Nalia dans la zone d'entrainement.
+2. Tester le grappin sur l'ancre d'entrainement.
+3. Retourner voir Nalia.
+
+Conditions de succes :
+
+- Le joueur utilise correctement le grappin sur l'ancre d'entrainement.
+- Le dialogue final avec Nalia est termine.
+
+Recompenses :
+
+- Confirmation du tutoriel grappin.
 - Activation de `Quest.Prologue.RouteDesGorges`.
 
 Quete suivante :
 
 - Activer `Quest.Prologue.RouteDesGorges`.
-- Unlock `Quest.Village.ChatSurLesToits` comme contenu optionnel.
 
-### Q_VIL_02 - Le chat de Mirette
+### Q_VIL_03 - Le chat de Mirette
 
 | Champ | Valeur |
 | --- | --- |
 | Nom joueur | Le chat de Mirette |
-| Nom asset conseille | `BPQ_VIL_02_ChatSurLesToits` |
+| Nom asset conseille | `BPQ_VIL_03_ChatSurLesToits` |
 | Quest Tag | `Quest.Village.ChatSurLesToits` |
 | Etat ORION initial | Unlocked |
 | Declencheur | Disponible apres obtention du grappin. |
@@ -306,7 +344,7 @@ Quete suivante :
 | Nom asset conseille | `BPQ_PRO_05_RouteDesGorges` |
 | Quest Tag | `Quest.Prologue.RouteDesGorges` |
 | Etat ORION initial | Locked |
-| Declencheur | Completion de `Quest.Village.GrappinDeNalia`. |
+| Declencheur | Completion de `Quest.Village.EssayerLeGrappin`. |
 | But de gameplay | Faire sortir le joueur du village et valider l'usage du grappin en condition reelle. |
 
 Objectifs dans l'ordre :
@@ -380,6 +418,211 @@ Quete suivante :
 
 - Suite a definir : premiere quete des ruines hautes.
 
+## Descriptions ORION a Remplir
+
+Cette section est la reference canonique pour les champs visibles par le joueur. Utilise `Quest Name` et `Quest Description` dans la quete, puis `NodeName` et `Description` dans chaque node.
+
+### `BPQ_PRO_01_RetrouverSesEsprits`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Le foulard de Maelys` |
+| Quest Description | `Maelys vient d'etre enlevee. Reprenez vos esprits, rejoignez la zone ou elle a disparu et cherchez un indice avant de prevenir Valdorel.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Go To Location | `Quest.Prologue.RetrouverSesEsprits.Node.GoToLocation` | `Retourner au village` | `Rejoignez le point ou Maelys a ete emportee et cherchez une trace de son passage.` |
+| Collect Scarf | `Quest.Prologue.RetrouverSesEsprits.Node.CollectScarf` | `Ramasser le foulard de Maelys` | `Ramassez le foulard de Maelys. Il prouve qu'elle est passee par ici et donne une piste vers Valdorel.` |
+| Complete Quest | `Quest.Prologue.RetrouverSesEsprits.Node.CompleteQuest` | `Continuer vers le sentier` | `Le foulard en main, poursuivez vers le sentier menant a Valdorel.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Foulard de Maelys | `Quest.Prologue.RetrouverSesEsprits.Item.MaelysScarf` |
+
+Implementation :
+
+- `Collect Scarf` doit etre bloque tant que `Go To Location` n'est pas complete.
+- Dans le BP du foulard, verifier `CanProgressQuestObjective` avec `Quest.Prologue.RetrouverSesEsprits` et `Quest.Prologue.RetrouverSesEsprits.Node.CollectScarf`.
+- `Collect Scarf` est un objectif unique : `bUseAmount = false`.
+
+### `BPQ_PRO_02_PremierSang`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Le loup du sentier` |
+| Quest Description | `Le chemin vers Valdorel est dangereux. Trouvez de quoi vous defendre, traversez le repaire et survivez a l'attaque du loup.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Recover Old Blade | `Quest.Prologue.PremierSang.Node.RecoverOldBlade` | `Ramasser la vieille lame` | `Ramassez une vieille lame abandonnee pres du sentier. Elle devrait suffire a vous defendre.` |
+| Reach Wolf Den | `Quest.Prologue.PremierSang.Node.ReachWolfDen` | `Traverser le sentier sombre` | `Avancez vers Valdorel en suivant le sentier malgre les bruits dans les bois.` |
+| Survive Attack | `Quest.Prologue.PremierSang.Node.SurviveAttack` | `Survivre a l'attaque` | `Un loup vous attaque. Gardez vos distances, esquivez et restez en vie.` |
+| Defeat Wolf | `Quest.Prologue.PremierSang.Node.DefeatWolf` | `Vaincre le loup` | `Abattez le loup qui bloque le passage vers Valdorel.` |
+| Collect Wolf Claw | `Quest.Prologue.PremierSang.Node.CollectWolfClaw` | `Ramasser la griffe noircie` | `Recuperez une griffe du loup. Sa couleur anormale pourrait interesser les gardes du village.` |
+| Reach Valdorel | `Quest.Prologue.PremierSang.Node.ReachValdorel` | `Rejoindre Valdorel` | `Rejoignez les portes de Valdorel pour demander de l'aide.` |
+| Complete Quest | `Quest.Prologue.PremierSang.Node.CompleteQuest` | `Entrer a Valdorel` | `Vous avez survecu au sentier. Trouvez quelqu'un capable de vous aider.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Vieille lame | `Quest.Prologue.PremierSang.Item.OldBlade` |
+| Griffe noircie | `Quest.Prologue.PremierSang.Item.WolfClaw` |
+
+### `BPQ_PRO_03_ArriveeValdorel`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Les portes de Valdorel` |
+| Quest Description | `Vous avez atteint Valdorel avec le foulard de Maelys et une griffe noircie. Convainquez la garde Aveline de vous laisser entrer et trouvez le doyen.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Talk To Aveline | `Quest.Prologue.ArriveeValdorel.Node.TalkToAveline` | `Parler a Aveline` | `Expliquez a la garde de Valdorel ce qui est arrive a Maelys.` |
+| Show Wolf Claw | `Quest.Prologue.ArriveeValdorel.Node.ShowWolfClaw` | `Montrer la griffe noircie` | `Montrez la griffe trouvee sur le loup pour prouver que le sentier est corrompu.` |
+| Talk To Orvan | `Quest.Prologue.ArriveeValdorel.Node.TalkToOrvan` | `Trouver le doyen Orvan` | `Aveline vous envoie voir Orvan. Rejoignez sa maison pour comprendre qui a enleve Maelys.` |
+| Complete Quest | `Quest.Prologue.ArriveeValdorel.Node.CompleteQuest` | `Entrer chez Orvan` | `Le doyen doit maintenant entendre votre histoire.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Preuve de la griffe | `Quest.Prologue.ArriveeValdorel.Item.WolfClawEvidence` |
+
+### `BPQ_PRO_04_LeDoyen`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Le nom des ravisseurs` |
+| Quest Description | `Racontez l'enlevement a Orvan. Le doyen connait peut-etre le symbole des Sans-Aube et le chemin qu'ils ont emprunte.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Question Orvan | `Quest.Prologue.LeDoyen.Node.QuestionOrvan` | `Interroger Orvan` | `Racontez l'enlevement de Maelys au doyen et montrez-lui les indices recuperes.` |
+| Examine Map | `Quest.Prologue.LeDoyen.Node.ExamineMap` | `Examiner la carte d'Ysbrume` | `Examinez la carte d'Orvan pour comprendre pourquoi les Gorges d'Ysbrume sont difficiles d'acces.` |
+| Talk To Nalia | `Quest.Prologue.LeDoyen.Node.TalkToNalia` | `Aller voir Nalia` | `Orvan pense que le grappin de Nalia vous permettra d'atteindre les premieres corniches des gorges.` |
+| Complete Quest | `Quest.Prologue.LeDoyen.Node.CompleteQuest` | `Demander le grappin` | `Les Sans-Aube ont probablement pris Ysbrume. Il vous faut de l'equipement avant de les suivre.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Carte d'Ysbrume | `Quest.Prologue.LeDoyen.Item.YsbrumeMap` |
+
+Note lore :
+
+- Le grappin est l'equipement physique necessaire pour commencer Ysbrume.
+- Le glide est seulement tease ici : c'est un pouvoir d'Ether lie au vent, a eveiller plus tard dans une quete ou un donjon.
+
+### `BPQ_VIL_01_GrappinDeNalia`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Le grappin de Nalia` |
+| Quest Description | `Nalia peut vous aider a atteindre les premieres corniches d'Ysbrume, mais son grappin doit etre repare avant de pouvoir l'utiliser.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Talk To Nalia | `Quest.Village.GrappinDeNalia.Node.TalkToNalia` | `Parler a Nalia` | `Expliquez a Nalia que les Sans-Aube ont pris la route d'Ysbrume et que vous devez les suivre.` |
+| Collect Bramble Fibers | `Quest.Village.GrappinDeNalia.Node.CollectBrambleFibers` | `Recuperer 3 fibres de ronce` | `Recuperez trois fibres de ronce solide derriere l'atelier pour reparer la ligne du grappin.` |
+| Collect Ancient Spring | `Quest.Village.GrappinDeNalia.Node.CollectAncientSpring` | `Trouver le ressort ancien` | `Cherchez un ressort ancien dans la remise de Nalia.` |
+| Return To Nalia | `Quest.Village.GrappinDeNalia.Node.ReturnToNalia` | `Retourner voir Nalia` | `Retournez voir Nalia avec les pieces necessaires pour qu'elle termine le grappin.` |
+| Complete Quest | `Quest.Village.GrappinDeNalia.Node.CompleteQuest` | `Recevoir le grappin` | `Le grappin est repare. Nalia veut maintenant vous le faire essayer dans une zone sure.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Fibre de ronce | `Quest.Village.GrappinDeNalia.Item.BrambleFiber` |
+| Ressort ancien | `Quest.Village.GrappinDeNalia.Item.AncientSpring` |
+| Grappin | `Quest.Village.GrappinDeNalia.Item.GrapplingHook` |
+
+### `BPQ_VIL_02_EssayerLeGrappin`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Essayer le grappin` |
+| Quest Description | `Le grappin est repare, mais Nalia refuse de vous laisser partir sans un essai. Testez-le sur l'ancre d'entrainement avant de quitter Valdorel.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Talk To Nalia | `Quest.Village.EssayerLeGrappin.Node.TalkToNalia` | `Ecouter Nalia` | `Nalia vous explique comment viser les ancres marquees avant le premier essai.` |
+| Test Grappling Hook | `Quest.Village.EssayerLeGrappin.Node.TestGrapplingHook` | `Tester le grappin` | `Utilisez le grappin sur l'ancre d'entrainement pour verifier que vous pouvez vous accrocher et vous deplacer.` |
+| Return To Nalia | `Quest.Village.EssayerLeGrappin.Node.ReturnToNalia` | `Retourner voir Nalia` | `Retournez voir Nalia apres l'essai pour valider que vous maitrisez les bases.` |
+| Complete Quest | `Quest.Village.EssayerLeGrappin.Node.CompleteQuest` | `Partir vers Ysbrume` | `Vous savez utiliser le grappin. La route des Gorges d'Ysbrume est maintenant accessible.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Ancre d'entrainement | `Quest.Village.EssayerLeGrappin.Item.TrainingAnchor` |
+
+### `BPQ_VIL_03_ChatSurLesToits`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Le chat de Mirette` |
+| Quest Description | `Mirette a perdu son chat Pepin sur les toits de Valdorel. Utilisez le grappin pour le recuperer sans casser l'auberge.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Talk To Mirette | `Quest.Village.ChatSurLesToits.Node.TalkToMirette` | `Parler a Mirette` | `Mirette cherche quelqu'un pour recuperer son chat coince sur les toits.` |
+| Find Pepin | `Quest.Village.ChatSurLesToits.Node.FindPepin` | `Reperer Pepin` | `Trouvez Pepin sur les toits de l'auberge.` |
+| Reach Roof | `Quest.Village.ChatSurLesToits.Node.ReachRoof` | `Monter sur le toit` | `Utilisez le grappin pour atteindre le toit ou Pepin s'est refugie.` |
+| Return Pepin | `Quest.Village.ChatSurLesToits.Node.ReturnPepin` | `Ramener Pepin` | `Ramenez Pepin a Mirette pour terminer cette faveur.` |
+| Complete Quest | `Quest.Village.ChatSurLesToits.Node.CompleteQuest` | `Recevoir la recompense` | `Mirette vous remercie pour avoir sauve son chat et presque ses tuiles.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Pepin | `Quest.Village.ChatSurLesToits.Item.Pepin` |
+
+### `BPQ_PRO_05_RouteDesGorges`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Vers les Gorges d'Ysbrume` |
+| Quest Description | `Le grappin vous permet d'atteindre les premieres falaises d'Ysbrume. Suivez les traces des Sans-Aube et cherchez un passage vers les hauteurs.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Reach Broken Bridge | `Quest.Prologue.RouteDesGorges.Node.ReachBrokenBridge` | `Atteindre le pont effondre` | `Suivez la route d'Ysbrume jusqu'au pont effondre.` |
+| Cross With Grappling Hook | `Quest.Prologue.RouteDesGorges.Node.CrossWithGrapplingHook` | `Traverser avec le grappin` | `Utilisez le grappin pour franchir le pont brise et atteindre l'autre rive.` |
+| Find Abandoned Camp | `Quest.Prologue.RouteDesGorges.Node.FindAbandonedCamp` | `Trouver le camp abandonne` | `Cherchez un camp recent. Les Sans-Aube ont peut-etre fait halte dans les gorges.` |
+| Examine Sans-Aube Tracks | `Quest.Prologue.RouteDesGorges.Node.ExamineSansAubeTracks` | `Examiner les traces` | `Examinez les traces laissees par les Sans-Aube pour confirmer que Maelys est passee ici.` |
+| Complete Quest | `Quest.Prologue.RouteDesGorges.Node.CompleteQuest` | `Suivre la piste` | `La piste continue vers les hauteurs, mais la brume d'Ysbrume cache d'autres dangers.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Traces des Sans-Aube | `Quest.Prologue.RouteDesGorges.Item.SansAubeTracks` |
+
+### `BPQ_GOR_01_NuisiblesDEther`
+
+| Champ | Valeur |
+| --- | --- |
+| Quest Name | `Nids dans la brume` |
+| Quest Description | `Un eclaireur blesse a vu les Sans-Aube passer avec Maelys. Nettoyez les nids de guepes d'Ether pour ouvrir la route.` |
+
+| Node | Node Tag | NodeName | Description |
+| --- | --- | --- | --- |
+| Talk To Soren | `Quest.Gorges.NuisiblesDEther.Node.TalkToSoren` | `Parler a Soren` | `Interrogez l'eclaireur blesse pres du camp abandonne.` |
+| Kill Ether Wasps | `Quest.Gorges.NuisiblesDEther.Node.KillEtherWasps` | `Eliminer 4 guepes d'Ether` | `Tuez quatre guepes d'Ether pour securiser le passage.` |
+| Destroy Nests | `Quest.Gorges.NuisiblesDEther.Node.DestroyNests` | `Detruire 2 nids` | `Detruisez deux nids pour empecher les guepes de revenir.` |
+| Return To Soren | `Quest.Gorges.NuisiblesDEther.Node.ReturnToSoren` | `Retourner voir Soren` | `Retournez voir Soren pour obtenir la direction prise par les Sans-Aube.` |
+| Complete Quest | `Quest.Gorges.NuisiblesDEther.Node.CompleteQuest` | `Ouvrir le raccourci` | `La route vers les ruines hautes est degagee. Continuez la poursuite de Maelys.` |
+
+Items :
+
+| Element | Tag |
+| --- | --- |
+| Guepe d'Ether | `Quest.Gorges.NuisiblesDEther.Item.EtherWasp` |
+| Nid de guepes | `Quest.Gorges.NuisiblesDEther.Item.EtherNest` |
+
 ## 4. Participants de Dialogue
 
 | Personnage | Tag ORION | Role | Placement conseille |
@@ -396,8 +639,9 @@ Quete suivante :
 - Les quetes principales du prologue doivent s'enchainer avec des events `ActivateQuest` ou `UnlockQuest`.
 - Les PNJ doivent avoir un tag participant identique a celui configure dans le Dialog Builder.
 - Le grappin reste verrouille jusqu'a la completion de `Quest.Village.GrappinDeNalia`.
+- Le tutoriel d'utilisation du grappin est separe dans `Quest.Village.EssayerLeGrappin`.
 - La quete du chat est optionnelle et ne doit pas bloquer la progression principale.
-- La deuxieme zone doit etre bloquee tant que le grappin n'est pas debloque.
+- La deuxieme zone doit etre bloquee tant que `Quest.Village.EssayerLeGrappin` n'est pas completee.
 - Les noms techniques doivent rester sans accents pour eviter les soucis Unreal/Git.
 - Les noms affiches au joueur peuvent utiliser les accents dans les champs `QuestName`, `Description` et les lignes de dialogue.
 
@@ -410,6 +654,7 @@ Quete suivante :
 - Verifier que les objectifs ORION s'affichent dans l'ordre prevu.
 - Verifier que la quete `Quest.Village.ChatSurLesToits` reste optionnelle.
 - Verifier que `Ability.GrapplingHook` est indisponible avant la fin de `Quest.Village.GrappinDeNalia`.
+- Verifier que `Quest.Prologue.RouteDesGorges` ne s'active qu'apres `Quest.Village.EssayerLeGrappin`.
 
 ## Assumptions
 
