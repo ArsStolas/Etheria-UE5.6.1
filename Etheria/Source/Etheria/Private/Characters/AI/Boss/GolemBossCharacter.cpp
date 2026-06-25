@@ -183,7 +183,9 @@ void AGolemBossCharacter::BuildDefaultAttacks()
 		A.TargetMode = EGolemTargetMode::EyeSockets;
 		A.WindupDuration = 1.3f; A.ActiveDuration = 1.6f; A.RecoveryDuration = 1.0f; A.Cooldown = 9.f;
 		A.Damage = 20.f; A.DamageInterval = 0.15f;
-		A.BeamCount = 2; A.BeamLength = 3500.f; A.BeamWidth = 200.f; A.BeamSpreadAngle = 0.f; A.BeamSweepAngle = 0.f; // fixed beam from the eyes, aimed at the player
+		A.BeamCount = 2; A.BeamLength = 3500.f; A.BeamWidth = 200.f; A.BeamSpreadAngle = 0.f; A.BeamSweepAngle = 0.f;
+		A.bBeamRiseFromGround = true; A.BeamSweepStartFraction = 0.15f; A.BeamRiseExtraHeight = 0.f; A.BeamRiseHoldFraction = 0.4f; // sweep from near the golem out to the player
+		A.bUseMeshBeam = false; // use the Niagara BeamVFX only (the mesh path is opt-in, off by default)
 		A.SelectionWeight = 0.9f;
 		Atk.Add(A);
 	}

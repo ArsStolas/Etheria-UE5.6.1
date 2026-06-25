@@ -33,15 +33,19 @@ public:
 protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
-	/** Auto-bound children: name a Text Block "BossNameText" and a Progress Bar "HealthBar" in the WBP (both optional). */
+	/** Auto-bound children (all optional): a Text Block "BossNameText", a Progress Bar "HealthBar" (front, current HP), and a
+	 *  Progress Bar "DamageGhostBar" (place it BEHIND HealthBar, fill it WHITE — it shows the just-lost chunk draining down). */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional)) TObjectPtr<UTextBlock> BossNameText;
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional)) TObjectPtr<UProgressBar> HealthBar;
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional)) TObjectPtr<UProgressBar> DamageGhostBar;
 
 	/** Drain speed in bar-fraction per second (steady rate). 0.6 = the whole bar empties in ~1.7 s. 0 = snap instantly. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|UI", meta = (ClampMin = "0")) float DrainSpeed = 0.6f;
 
 private:
-	float TargetPercent = 1.f;     // where the bar is heading (the real HP fraction)
-	float DisplayedPercent = 1.f;  // where the bar currently is (lerps toward Target)
+	void RefreshBars(); // push TargetPercent (front) + DisplayedPercent (white ghost) onto the bars
+
+	float TargetPercent = 1.f;     // the real current HP fraction (front bar, instant)
+	float DisplayedPercent = 1.f;  // the white ghost: lags above Target and drains down to it
 	bool bHealthInitialized = false;
 };

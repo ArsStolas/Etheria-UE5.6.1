@@ -34,6 +34,7 @@ class UAudioComponent;
 class USoundBase;
 class UNiagaraComponent;
 class UNiagaraSystem;
+class UStaticMeshComponent;
 class AActor;
 
 /* ── Dispatchers — BIND THESE IN BP ── */
@@ -546,12 +547,16 @@ private:
 	void SpawnHeldRock();
 	void ApplyRockImpactDecal(AGolemFallingRock* Rock, const FVector& Target, float Radius, float StaticLifeSpan);
 	void BuildBeams(const FGolemAttackConfig& Cfg, float RotateDeg, TArray<FGolemBeamSegment>& Out) const;
+	void BuildBeamsToPoint(const FGolemAttackConfig& Cfg, const FVector& EndPoint, TArray<FGolemBeamSegment>& Out) const; // all eyes converge on EndPoint (rise-from-ground laser)
 
 	/* ── Beam VFX (auto-spawned + driven Niagara, one per beam) ── */
 	void SpawnBeamVFX(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams); // at the fire moment
 	void UpdateBeamVFX(const TArray<FGolemBeamSegment>& Beams);                                // per frame: drive start/end/width
 	void ClearBeamVFX();                                                                       // beam off (active ends / interrupt / endplay)
 	void SpawnBeamFireVFX(UNiagaraSystem* System);                                             // one-shot full-screen impact at the camera
+	void SpawnBeamMesh(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams); // reliable mesh beam at the fire moment
+	void UpdateBeamMesh(const TArray<FGolemBeamSegment>& Beams);                                // per frame: stretch/orient the mesh eye->target
+	void ClearBeamMesh();                                                                       // remove the mesh beam(s)
 	FVector ResolveArenaCentre() const;
 	FVector ClampToArena(const FVector& P, float Margin = 0.f) const;
 	FVector RandomArenaPoint(float SpreadFraction) const;
@@ -608,7 +613,8 @@ private:
 	UPROPERTY() TObjectPtr<UHealthComponent> OwnerHealth;
 	UPROPERTY(Transient) TObjectPtr<UGolemBossBarWidget> BossBar;
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> CombatMusicComp;
-	UPROPERTY(Transient) TArray<TObjectPtr<UNiagaraComponent>> BeamVFXComps; // live laser beam VFX, one per beam
+	UPROPERTY(Transient) TArray<TObjectPtr<UNiagaraComponent>> BeamVFXComps;       // live laser beam Niagara, one per beam
+	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> BeamMeshComps;   // live mesh beam, one per beam (reliable path)
 
 	EGolemAttackState State = EGolemAttackState::Idle;
 	bool bActivated = false;
@@ -630,6 +636,9 @@ private:
 	FGolemTelegraph CurrentTelegraph;
 	TArray<bool> BombardImpactFired; // parallel to CurrentTelegraph.ImpactPoints — boulder impact already applied
 	TArray<bool> BombardLaunched;    // parallel — boulder launch (fall start) already broadcast
+
+	FVector BeamRiseGround = FVector::ZeroVector; // rise-laser: locked ground spot it aims at first
+	FVector BeamRiseHigh = FVector::ZeroVector;   // rise-laser: locked high point it climbs to (player + extra)
 
 	UPROPERTY() TArray<FGolemAirZone> ActiveAirZones;
 	int32 NextAirZoneId = 1;

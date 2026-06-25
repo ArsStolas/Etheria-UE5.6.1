@@ -17,6 +17,8 @@
 
 class UAnimMontage;
 class UNiagaraSystem;
+class UStaticMesh;
+class UMaterialInterface;
 class AActor;
 
 /** Behavioural archetype of a Golem attack — drives C++ damage geometry AND the data handed to BP. */
@@ -201,6 +203,31 @@ struct FGolemAttackConfig
 
 	/** Delay (s) after the beam fires before BeamFireVFX plays — use it to line the screen impact up with your montage. 0 = instant. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0")) float BeamFireVFXDelay = 0.f;
+
+	/** Eye-laser style: the beam scrapes FROM NEAR THE GOLEM along the ground OUT TO THE PLAYER (instead of a fixed beam) —
+	 *  it aims low near the boss, holds, then sweeps out to catch the player. Overrides the yaw sweep when ON. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") bool bBeamRiseFromGround = false;
+
+	/** Rise-laser: where the sweep STARTS along the golem→player line (0 = at the golem, 1 = at the player). ~0.15 = just in front of the boss. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", ClampMax = "1", EditCondition = "bBeamRiseFromGround")) float BeamSweepStartFraction = 0.15f;
+
+	/** Rise-laser: optional extra height ABOVE the player the beam ends at. 0 = stop right at the player (don't go higher). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", EditCondition = "bBeamRiseFromGround")) float BeamRiseExtraHeight = 0.f;
+
+	/** Rise-laser: fraction of the active window the beam HOLDS at the start (near the golem) before it sweeps out to the player. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", ClampMax = "0.95", EditCondition = "bBeamRiseFromGround")) float BeamRiseHoldFraction = 0.4f;
+
+	/* ── Mesh beam (reliable, C++-driven; skin it with a material) ── */
+
+	/** Reliable C++ beam: a MESH stretched + oriented from the eye to the target EVERY FRAME (follows perfectly, no Niagara
+	 *  authoring). The beam VFX above (BeamVFX) is the Niagara path; this mesh path is the bulletproof one. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") bool bUseMeshBeam = false;
+
+	/** Mesh used for the beam (authored along +X). Leave empty to use a default box. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (EditCondition = "bUseMeshBeam")) TObjectPtr<UStaticMesh> BeamMesh;
+
+	/** Material on the beam mesh — YOUR laser look (an emissive / additive material). Empty = the mesh's own material. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (EditCondition = "bUseMeshBeam")) TObjectPtr<UMaterialInterface> BeamMeshMaterial;
 
 	/* ── Geometry: Bombardment (Bombardment) ── */
 

@@ -19,25 +19,36 @@ void UGolemBossBarWidget::SetBossHealth_Implementation(float Current, float Max)
 {
 	TargetPercent = (Max > 0.f) ? FMath::Clamp(Current / Max, 0.f, 1.f) : 0.f;
 
-	if (!bHealthInitialized)
-	{
-		// First fill (fight start): snap so the bar doesn't visibly drain down from full on spawn.
-		bHealthInitialized = true;
-		DisplayedPercent = TargetPercent;
-		if (HealthBar) HealthBar->SetPercent(DisplayedPercent);
-	}
+	if (!bHealthInitialized) { bHealthInitialized = true; DisplayedPercent = TargetPercent; } // first fill: snap
+	if (TargetPercent > DisplayedPercent) DisplayedPercent = TargetPercent;                    // a heal shouldn't leave a white ghost above
+
+	RefreshBars();
 }
 
 void UGolemBossBarWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	if (!HealthBar || DisplayedPercent == TargetPercent) return;
+	if (DisplayedPercent == TargetPercent) return;
 
-	// Ease the bar toward the real HP at a steady rate so a big hit drains "little by little" instead of snapping.
+	// The white ghost drains steadily down to the real HP — showing the lost chunk shrinking, then gone.
 	DisplayedPercent = (DrainSpeed <= 0.f)
 		? TargetPercent
 		: FMath::FInterpConstantTo(DisplayedPercent, TargetPercent, InDeltaTime, DrainSpeed);
 
-	HealthBar->SetPercent(DisplayedPercent);
+	RefreshBars();
+}
+
+void UGolemBossBarWidget::RefreshBars()
+{
+	if (DamageGhostBar)
+	{
+		// Chip effect: the front bar = the real current HP (instant); the WHITE ghost behind drains down to meet it.
+		if (HealthBar) HealthBar->SetPercent(TargetPercent);
+		DamageGhostBar->SetPercent(DisplayedPercent);
+	}
+	else if (HealthBar)
+	{
+		HealthBar->SetPercent(DisplayedPercent); // no ghost bar assigned: the single bar itself drains smoothly (fallback)
+	}
 }

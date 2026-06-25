@@ -36,6 +36,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/DamageType.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/DecalComponent.h"
 #include "Materials/MaterialInterface.h"
@@ -56,6 +57,25 @@ namespace
 	{
 		if (AGolemCrystal* Cr = Cast<AGolemCrystal>(A)) Cr->Shatter();
 		else if (IsValid(A)) A->Destroy();
+	}
+
+	// Drive a beam Niagara to follow the segment: move + orient the component (so a Local-Space forward beam follows), and
+	// write the start/end/width/length under SEVERAL common user-param names so most beam systems pick one up with no editing.
+	void ApplyBeamParams(UNiagaraComponent* C, const FGolemBeamSegment& B)
+	{
+		if (!C) return;
+		C->SetWorldLocation(B.Origin);                          // emit point = the eye
+		C->SetWorldRotation((B.End - B.Origin).Rotation());     // forward (X) points at the target
+		const float Len = (B.End - B.Origin).Size();
+
+		static const TCHAR* StartNames[] = { TEXT("BeamStart"), TEXT("Start"), TEXT("StartPosition"), TEXT("StartLocation"), TEXT("Source"), TEXT("Origin") };
+		static const TCHAR* EndNames[]   = { TEXT("BeamEnd"),   TEXT("End"),   TEXT("EndPosition"),   TEXT("EndLocation"),   TEXT("Target"), TEXT("Destination") };
+		for (const TCHAR* N : StartNames) { C->SetVariableVec3(FName(N), B.Origin); C->SetVariablePosition(FName(N), B.Origin); }
+		for (const TCHAR* N : EndNames)   { C->SetVariableVec3(FName(N), B.End);    C->SetVariablePosition(FName(N), B.End); }
+		C->SetVariableFloat(FName(TEXT("BeamWidth")), B.Width);
+		C->SetVariableFloat(FName(TEXT("Width")), B.Width);
+		C->SetVariableFloat(FName(TEXT("BeamLength")), Len);
+		C->SetVariableFloat(FName(TEXT("Length")), Len);
 	}
 
 	float SegDist2D(const FVector& P, const FVector& A, const FVector& B)
@@ -739,7 +759,13 @@ void UGolemBossComponent::BuildTelegraph(const FGolemAttackConfig& Cfg, FGolemTe
 	}
 	case EGolemHazardShape::BeamSweep:
 	{
-		BuildBeams(Cfg, -Cfg.BeamSweepAngle * 0.5f, Out.Beams);
+		if (Cfg.bBeamRiseFromGround)
+		{
+			const FVector GolemLoc = OwnerCharacter ? OwnerCharacter->GetActorLocation() : ResolveArenaCentre();
+			BuildBeamsToPoint(Cfg, ProjectToGround(FMath::Lerp(GolemLoc, ResolveTargetLocation(), FMath::Clamp(Cfg.BeamSweepStartFraction, 0.f, 1.f))), Out.Beams); // charge aiming near the golem
+		}
+		else
+			BuildBeams(Cfg, -Cfg.BeamSweepAngle * 0.5f, Out.Beams);
 		break;
 	}
 	case EGolemHazardShape::Bombardment:
@@ -812,8 +838,20 @@ void UGolemBossComponent::DoStrike()
 		break;
 	case EGolemHazardShape::BeamSweep:
 	{
-		BuildBeams(Cfg, 0.f, CurrentTelegraph.Beams); // LOCK the aim onto the player at the instant it fires (stays fixed after)
+		if (Cfg.bBeamRiseFromGround)
+		{
+			const FVector Tgt = ResolveTargetLocation();
+			const FVector GolemLoc = OwnerCharacter ? OwnerCharacter->GetActorLocation() : ResolveArenaCentre();
+			BeamRiseGround = ProjectToGround(FMath::Lerp(GolemLoc, Tgt, FMath::Clamp(Cfg.BeamSweepStartFraction, 0.f, 1.f))); // start near the golem, on the ground
+			BeamRiseHigh   = Tgt + FVector(0.f, 0.f, Cfg.BeamRiseExtraHeight);                                                // sweep OUT to the player
+			BuildBeamsToPoint(Cfg, BeamRiseGround, CurrentTelegraph.Beams);
+		}
+		else
+		{
+			BuildBeams(Cfg, 0.f, CurrentTelegraph.Beams); // LOCK the aim onto the player at the instant it fires (stays fixed after)
+		}
 		SpawnBeamVFX(Cfg, CurrentTelegraph.Beams);    // auto-spawn the beam VFX (if BeamVFX is set)
+		SpawnBeamMesh(Cfg, CurrentTelegraph.Beams);   // auto-spawn the reliable mesh beam (if bUseMeshBeam)
 		// One-shot full-screen / impact VFX — instant, or after BeamFireVFXDelay to line it up with the montage.
 		if (Cfg.BeamFireVFX)
 		{
@@ -921,7 +959,14 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	}
 	case EGolemHazardShape::BeamSweep:
 	{
-		if (Cfg.BeamSweepAngle > KINDA_SMALL_NUMBER)
+		if (Cfg.bBeamRiseFromGround)
+		{
+			// Hold aiming at the ground, then SUDDENLY climb up through the player over the rest of the window.
+			const float Hold = FMath::Clamp(Cfg.BeamRiseHoldFraction, 0.f, 0.95f);
+			const float RiseAlpha = (Alpha <= Hold) ? 0.f : (Alpha - Hold) / FMath::Max(0.01f, 1.f - Hold);
+			BuildBeamsToPoint(Cfg, FMath::Lerp(BeamRiseGround, BeamRiseHigh, RiseAlpha), S.Beams);
+		}
+		else if (Cfg.BeamSweepAngle > KINDA_SMALL_NUMBER)
 		{
 			const float Rotate = FMath::Lerp(-Cfg.BeamSweepAngle * 0.5f, Cfg.BeamSweepAngle * 0.5f, Alpha);
 			BuildBeams(Cfg, Rotate, S.Beams); // sweeping laser (rotates over the active window)
@@ -930,7 +975,8 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 		{
 			S.Beams = CurrentTelegraph.Beams; // FIXED laser: locked on the player at the fire moment, no sweep, no tracking
 		}
-		UpdateBeamVFX(S.Beams); // drive the auto-spawned beam VFX (start/end/width) this frame
+		UpdateBeamVFX(S.Beams);  // drive the Niagara beam VFX (start/end/width) this frame
+		UpdateBeamMesh(S.Beams); // stretch/orient the mesh beam from the eye to the target this frame
 		if (bDamageTick)
 			for (const FGolemBeamSegment& Beam : S.Beams)
 				ApplyLineDamage(Beam.Origin, Beam.End, Cfg.BeamWidth, Cfg.Damage, /*bAirborneIsSafe=*/false, /*b3D=*/true, Cfg.KnockbackForce, Cfg.AttackId);
@@ -1112,6 +1158,31 @@ void UGolemBossComponent::BuildBeams(const FGolemAttackConfig& Cfg, float Rotate
 	}
 }
 
+void UGolemBossComponent::BuildBeamsToPoint(const FGolemAttackConfig& Cfg, const FVector& EndPoint, TArray<FGolemBeamSegment>& Out) const
+{
+	Out.Reset();
+	TArray<FVector> Eyes;
+	GetEyeOrigins(Eyes);
+	if (Eyes.Num() == 0) return;
+
+	// All eyes converge on EndPoint (used by the rise-from-ground laser, where EndPoint climbs from the floor to the player).
+	const int32 Count = FMath::Max(1, Cfg.BeamCount);
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FVector Origin = Eyes[i % Eyes.Num()];
+		FVector Dir = (EndPoint - Origin).GetSafeNormal();
+		if (Dir.IsNearlyZero()) Dir = OwnerCharacter ? OwnerCharacter->GetActorForwardVector() : FVector::ForwardVector;
+
+		FGolemBeamSegment Beam;
+		Beam.Origin = Origin;
+		Beam.Direction = Dir;
+		Beam.End = EndPoint;
+		Beam.Length = (EndPoint - Origin).Size();
+		Beam.Width = Cfg.BeamWidth;
+		Out.Add(Beam);
+	}
+}
+
 void UGolemBossComponent::SpawnBeamVFX(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams)
 {
 	ClearBeamVFX();
@@ -1124,12 +1195,7 @@ void UGolemBossComponent::SpawnBeamVFX(const FGolemAttackConfig& Cfg, const TArr
 		UNiagaraComponent* Comp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			W, Cfg.BeamVFX, B.Origin, B.Direction.Rotation(), FVector(1.f), /*bAutoDestroy=*/false, /*bAutoActivate=*/true);
 		if (!Comp) continue;
-		// Set both Vector and Position variants so it works whichever type the user's "BeamStart"/"BeamEnd" user params are.
-		Comp->SetVariableVec3(TEXT("BeamStart"), B.Origin);
-		Comp->SetVariablePosition(TEXT("BeamStart"), B.Origin);
-		Comp->SetVariableVec3(TEXT("BeamEnd"), B.End);
-		Comp->SetVariablePosition(TEXT("BeamEnd"), B.End);
-		Comp->SetVariableFloat(TEXT("BeamWidth"), B.Width);
+		ApplyBeamParams(Comp, B);
 		BeamVFXComps.Add(Comp);
 	}
 }
@@ -1141,12 +1207,7 @@ void UGolemBossComponent::UpdateBeamVFX(const TArray<FGolemBeamSegment>& Beams)
 	{
 		UNiagaraComponent* Comp = BeamVFXComps[i];
 		if (!IsValid(Comp)) continue;
-		Comp->SetWorldLocation(Beams[i].Origin); // for systems that emit from the component location
-		Comp->SetVariableVec3(TEXT("BeamStart"), Beams[i].Origin);
-		Comp->SetVariablePosition(TEXT("BeamStart"), Beams[i].Origin);
-		Comp->SetVariableVec3(TEXT("BeamEnd"), Beams[i].End);
-		Comp->SetVariablePosition(TEXT("BeamEnd"), Beams[i].End);
-		Comp->SetVariableFloat(TEXT("BeamWidth"), Beams[i].Width);
+		ApplyBeamParams(Comp, Beams[i]);
 	}
 }
 
@@ -1156,6 +1217,7 @@ void UGolemBossComponent::ClearBeamVFX()
 	for (UNiagaraComponent* Comp : BeamVFXComps)
 		if (IsValid(Comp)) { Comp->Deactivate(); Comp->DestroyComponent(); }
 	BeamVFXComps.Reset();
+	ClearBeamMesh();
 }
 
 void UGolemBossComponent::SpawnBeamFireVFX(UNiagaraSystem* System)
@@ -1172,6 +1234,58 @@ void UGolemBossComponent::SpawnBeamFireVFX(UNiagaraSystem* System)
 		if (APlayerCameraManager* Cam = UGameplayStatics::GetPlayerCameraManager(this, 0))
 			UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), System,
 				Cam->GetCameraLocation() + Cam->GetCameraRotation().Vector() * 120.f, Cam->GetCameraRotation(), FVector(1.f), true, true);
+}
+
+void UGolemBossComponent::SpawnBeamMesh(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams)
+{
+	ClearBeamMesh();
+	if (!Cfg.bUseMeshBeam || !OwnerCharacter) return;
+
+	UStaticMesh* Mesh = Cfg.BeamMesh ? Cfg.BeamMesh.Get() : LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")); // default box if none
+	if (!Mesh) return;
+
+	for (int32 i = 0; i < Beams.Num(); ++i)
+	{
+		UStaticMeshComponent* MC = NewObject<UStaticMeshComponent>(OwnerCharacter);
+		if (!MC) continue;
+		MC->SetStaticMesh(Mesh);
+		if (Cfg.BeamMeshMaterial) MC->SetMaterial(0, Cfg.BeamMeshMaterial); // your laser look
+		MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		MC->SetCastShadow(false);
+		MC->RegisterComponent();
+		BeamMeshComps.Add(MC);
+	}
+	UpdateBeamMesh(Beams);
+}
+
+void UGolemBossComponent::UpdateBeamMesh(const TArray<FGolemBeamSegment>& Beams)
+{
+	const int32 N = FMath::Min(BeamMeshComps.Num(), Beams.Num());
+	for (int32 i = 0; i < N; ++i)
+	{
+		UStaticMeshComponent* MC = BeamMeshComps[i];
+		if (!IsValid(MC)) continue;
+
+		const FVector Origin = Beams[i].Origin;
+		const FVector End = Beams[i].End;
+		const float Length = (End - Origin).Size();
+
+		// Mesh authored along +X (the engine cube works): X spans the length, Y/Z span the width (diameter).
+		const FVector MeshSize = MC->GetStaticMesh() ? MC->GetStaticMesh()->GetBoundingBox().GetSize() : FVector(100.f);
+		const float SX = MeshSize.X > 1.f ? Length / MeshSize.X : Length;
+		const float SYZ = MeshSize.Y > 1.f ? (Beams[i].Width * 2.f) / MeshSize.Y : (Beams[i].Width * 2.f);
+
+		MC->SetWorldLocation((Origin + End) * 0.5f);          // centre between eye and target
+		MC->SetWorldRotation((End - Origin).Rotation());      // +X points at the target
+		MC->SetWorldScale3D(FVector(SX, SYZ, SYZ));
+	}
+}
+
+void UGolemBossComponent::ClearBeamMesh()
+{
+	for (UStaticMeshComponent* MC : BeamMeshComps)
+		if (IsValid(MC)) MC->DestroyComponent();
+	BeamMeshComps.Reset();
 }
 
 /* ═══════════ Arena helpers ═══════════ */
