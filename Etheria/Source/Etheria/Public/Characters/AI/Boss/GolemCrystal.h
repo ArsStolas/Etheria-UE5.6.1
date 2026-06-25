@@ -47,9 +47,19 @@ public:
 	bool IsBigCrystal() const { return bIsBig; }
 
 protected:
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+
 	/** Visible crystal mesh. In a child BP, select this component and set its Static Mesh. Collides on ECC_Pawn so
 	 *  the player's melee object-trace finds it, but blocks nothing (it never shoves the player or movement). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Golem") TObjectPtr<UStaticMeshComponent> MeshComp;
+
+	/** Rise OUT of the ground on spawn (smooth climb, not a pop-in): the crystal starts this far below its planted spot
+	 *  and eases up to it. 0 = appear in place (or drive your own rise from OnCrystalSpawned). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystal", meta = (ClampMin = "0")) float RiseHeight = 250.f;
+
+	/** Seconds the rise-from-ground takes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystal", meta = (ClampMin = "0.01")) float RiseDuration = 0.5f;
 
 	/** How long the shattered actor lingers (so your break anim/VFX can finish) before it self-destructs. Match your shatter anim. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Crystal", meta = (ClampMin = "0.05")) float ShatterLifetime = 2.f;
@@ -71,4 +81,8 @@ private:
 	int32 CrystalId = -1;
 	bool bIsBig = false;
 	bool bShattered = false;
+
+	FVector RiseTargetLoc = FVector::ZeroVector; // the planted spot the crystal climbs UP to
+	float RiseElapsed = 0.f;
+	bool bRising = false;
 };

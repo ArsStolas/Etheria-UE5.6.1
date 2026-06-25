@@ -32,6 +32,8 @@ class AGolemCrystal;
 class UGolemBossBarWidget;
 class UAudioComponent;
 class USoundBase;
+class UNiagaraComponent;
+class UNiagaraSystem;
 class AActor;
 
 /* ── Dispatchers — BIND THESE IN BP ── */
@@ -298,8 +300,19 @@ public:
 	/** Discourages (does not forbid) repeating the just-used attack. 1 = no anti-repeat, 0.3 = 70% less likely. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Pacing", meta = (ClampMin = "0", ClampMax = "1")) float RepeatPenalty = 0.35f;
 
-	/** Begin the fight automatically the first time the owner acquires a target. */
+	/** Begin the fight automatically the first time the owner sees the player. UNCHECK for a scripted encounter:
+	 *  the boss then stays dormant (won't face/attack) until you call ActivateBoss() from a trigger / after an intro. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Pacing") bool bAutoActivateOnTarget = true;
+
+	/* ── Encounter intro ── */
+
+	/** Optional wake-up montage played when ActivateBoss() fires. The boss holds still (no facing/attacks) until it ends
+	 *  (or for IntroDuration), then the fight begins. Leave empty for an instant start. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Encounter") TObjectPtr<UAnimMontage> IntroMontage;
+
+	/** Seconds the boss waits (idle, playing the intro) after activation before its first attack. 0 = use the IntroMontage's
+	 *  length, or start instantly if there's no montage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Encounter", meta = (ClampMin = "0")) float IntroDuration = 0.f;
 
 	/** Interval (s) of the cheap "brain" timer: activation / phase / air-zone / facing / idle housekeeping.
 	 *  The boss does NOT tick per-frame except during a live moving hazard, so this is its main heartbeat. */
@@ -458,6 +471,10 @@ public:
 	/** Advanced: spawn THIS actor for rocks instead of the built-in mesh flyer (e.g. your own BP rock with physics). If set, overrides RockMeshes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Rocks") TSubclassOf<AActor> RockActorClass;
 
+	/** THROWN rock flight time (s): the rock flies over this long and the strike WAITS for it to land (stays synced), so a
+	 *  bigger value = a slower, more readable throw. 0 = auto (lands exactly when the wind-up ends — the fastest). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Golem|Rocks", meta = (ClampMin = "0")) float RockThrowTravelTime = 1.2f;
+
 	/* ── Boss UI (health bar) ── */
 
 	/** Widget shown while the fight is on (boss name + HP bar). Reparent a WBP to UGolemBossBarWidget and assign it here;
@@ -529,6 +546,12 @@ private:
 	void SpawnHeldRock();
 	void ApplyRockImpactDecal(AGolemFallingRock* Rock, const FVector& Target, float Radius, float StaticLifeSpan);
 	void BuildBeams(const FGolemAttackConfig& Cfg, float RotateDeg, TArray<FGolemBeamSegment>& Out) const;
+
+	/* ── Beam VFX (auto-spawned + driven Niagara, one per beam) ── */
+	void SpawnBeamVFX(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams); // at the fire moment
+	void UpdateBeamVFX(const TArray<FGolemBeamSegment>& Beams);                                // per frame: drive start/end/width
+	void ClearBeamVFX();                                                                       // beam off (active ends / interrupt / endplay)
+	void SpawnBeamFireVFX(UNiagaraSystem* System);                                             // one-shot full-screen impact at the camera
 	FVector ResolveArenaCentre() const;
 	FVector ClampToArena(const FVector& P, float Margin = 0.f) const;
 	FVector RandomArenaPoint(float SpreadFraction) const;
@@ -585,6 +608,7 @@ private:
 	UPROPERTY() TObjectPtr<UHealthComponent> OwnerHealth;
 	UPROPERTY(Transient) TObjectPtr<UGolemBossBarWidget> BossBar;
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> CombatMusicComp;
+	UPROPERTY(Transient) TArray<TObjectPtr<UNiagaraComponent>> BeamVFXComps; // live laser beam VFX, one per beam
 
 	EGolemAttackState State = EGolemAttackState::Idle;
 	bool bActivated = false;
@@ -598,6 +622,7 @@ private:
 	float ActiveDurationCache = 0.f;  // the attack's full active duration (for Alpha)
 	float DamageTickAccum = 0.f;
 	float NextAttackReadyTime = 0.f;  // world time the global cooldown lets the next attack start
+	float IntroEndTime = 0.f;         // world time the intro anim ends and the boss may start facing/attacking
 	float NextRepulsionTime = 0.f;    // world time the next contact shove is allowed
 	TArray<float> AttackReadyTimes;   // per-attack world time it comes off cooldown (parallel to Attacks)
 
@@ -627,4 +652,5 @@ private:
 	FTimerHandle ToppleTimerHandle;
 	FTimerHandle ExposeLingerTimerHandle;
 	FTimerHandle RockReleaseTimerHandle;
+	FTimerHandle BeamFireVFXTimerHandle; // delayed BeamFireVFX spawn
 };

@@ -24,6 +24,12 @@
 #include "Components/AudioComponent.h"
 #include "Sound/SoundBase.h"
 #include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraComponent.h"
+#include "Engine/Engine.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 #include "Engine/StaticMesh.h"
 
 #include "GameFramework/Character.h"
@@ -132,6 +138,7 @@ void UGolemBossComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	if (OwnerHealth) OwnerHealth->OnHealthChanged.RemoveDynamic(this, &UGolemBossComponent::HandleBossHealthChanged);
 	HideBossUIAndMusic(); // remove the bar + stop the music
+	ClearBeamVFX();       // kill any live laser beam VFX
 	ClearAirZones();
 	EndBigCrystal();      // despawn the big crystal actor if one is open
 	ClearArenaCrystals(); // despawn any planted crystal actors
@@ -162,7 +169,7 @@ void UGolemBossComponent::BrainTick()
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
 
 	TickAirZones(BrainInterval);
-	TickContactRepulsion();
+	if (bActivated) TickContactRepulsion(); // a DORMANT boss doesn't shove the player — you can walk up for the intro
 
 	if (!bActivated)
 	{
@@ -175,7 +182,7 @@ void UGolemBossComponent::BrainTick()
 	else if (!OwnerCharacter->IsDead())
 	{
 		UpdatePhaseFromHealth();
-		if (State == EGolemAttackState::Idle && !bToppled) // a toppled boss neither faces nor attacks
+		if (State == EGolemAttackState::Idle && !bToppled && Now >= IntroEndTime) // hold still while the intro plays
 		{
 			TickFacing(BrainInterval);
 			if (Now >= NextAttackReadyTime)
@@ -202,12 +209,22 @@ void UGolemBossComponent::ActivateBoss()
 	CurrentPhase = 0;
 	const UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
-	NextAttackReadyTime = Now + FMath::FRandRange(0.4f, 0.4f + GlobalCooldownRandom);
+
+	// Optional wake-up intro: play the montage and hold the boss still (no facing / no attacks) until it finishes.
+	float IntroDelay = FMath::Max(0.f, IntroDuration);
+	if (IntroMontage)
+	{
+		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+			Anim->PlayActionMontage(IntroMontage);
+		if (IntroDelay <= 0.f) IntroDelay = IntroMontage->GetPlayLength();
+	}
+	IntroEndTime = Now + IntroDelay;
+	NextAttackReadyTime = FMath::Max(IntroEndTime, Now + FMath::FRandRange(0.4f, 0.4f + GlobalCooldownRandom));
 
 	if (UAICombatComponent* Combat = OwnerCharacter->GetAICombat())
 		Combat->EnterCombat();
 
-	OnGolemActivated.Broadcast();
+	OnGolemActivated.Broadcast(); // fight triggered — start the bar/music; bind this in BP to play your intro cinematic
 }
 
 void UGolemBossComponent::DeactivateBoss()
@@ -262,6 +279,13 @@ void UGolemBossComponent::LaunchRockNow()
 	{
 		const float Rem = W->GetTimerManager().GetTimerRemaining(WindupTimerHandle);
 		if (Rem > 0.f) Travel = Rem; // land exactly when the strike fires
+
+		// Slower, more readable throw: fly over RockThrowTravelTime and PUSH the strike to fire when the rock LANDS (stays synced).
+		if (RockThrowTravelTime > 0.f)
+		{
+			Travel = RockThrowTravelTime;
+			W->GetTimerManager().SetTimer(WindupTimerHandle, this, &UGolemBossComponent::OnWindupElapsed, Travel, false);
+		}
 	}
 
 	FGolemProjectileLaunch L;
@@ -464,6 +488,7 @@ void UGolemBossComponent::TickActive(float DeltaTime)
 void UGolemBossComponent::EnterRecovery()
 {
 	SetComponentTickEnabled(false);
+	ClearBeamVFX(); // the active hazard just ended -> turn the laser beam off
 	if (!Attacks.IsValidIndex(CurrentAttackIndex)) { FinishAttack(false); return; }
 	const FGolemAttackConfig& Cfg = Attacks[CurrentAttackIndex];
 
@@ -509,6 +534,7 @@ void UGolemBossComponent::FinishAttack(bool bInterrupted)
 {
 	SetComponentTickEnabled(false);
 	ClearSequenceTimers();
+	ClearBeamVFX(); // ensure the beam is off (e.g. attack interrupted mid-fire)
 
 	if (HeldRock) { HeldRock->Destroy(); HeldRock = nullptr; } // unreleased rock (attack interrupted mid-wind-up)
 
@@ -786,6 +812,22 @@ void UGolemBossComponent::DoStrike()
 		break;
 	case EGolemHazardShape::BeamSweep:
 	{
+		BuildBeams(Cfg, 0.f, CurrentTelegraph.Beams); // LOCK the aim onto the player at the instant it fires (stays fixed after)
+		SpawnBeamVFX(Cfg, CurrentTelegraph.Beams);    // auto-spawn the beam VFX (if BeamVFX is set)
+		// One-shot full-screen / impact VFX — instant, or after BeamFireVFXDelay to line it up with the montage.
+		if (Cfg.BeamFireVFX)
+		{
+			if (Cfg.BeamFireVFXDelay > 0.f)
+			{
+				UNiagaraSystem* const Sys = Cfg.BeamFireVFX;
+				if (UWorld* W = GetWorld())
+					W->GetTimerManager().SetTimer(BeamFireVFXTimerHandle, [this, Sys]() { SpawnBeamFireVFX(Sys); }, Cfg.BeamFireVFXDelay, false);
+			}
+			else
+			{
+				SpawnBeamFireVFX(Cfg.BeamFireVFX);
+			}
+		}
 		const FVector Origin = CurrentTelegraph.Beams.Num() > 0 ? CurrentTelegraph.Beams[0].Origin : ResolveArenaCentre();
 		Broadcast(Origin, Cfg.BeamWidth, 0, 1); // laser fire moment
 		break;
@@ -879,8 +921,16 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	}
 	case EGolemHazardShape::BeamSweep:
 	{
-		const float Rotate = FMath::Lerp(-Cfg.BeamSweepAngle * 0.5f, Cfg.BeamSweepAngle * 0.5f, Alpha);
-		BuildBeams(Cfg, Rotate, S.Beams);
+		if (Cfg.BeamSweepAngle > KINDA_SMALL_NUMBER)
+		{
+			const float Rotate = FMath::Lerp(-Cfg.BeamSweepAngle * 0.5f, Cfg.BeamSweepAngle * 0.5f, Alpha);
+			BuildBeams(Cfg, Rotate, S.Beams); // sweeping laser (rotates over the active window)
+		}
+		else
+		{
+			S.Beams = CurrentTelegraph.Beams; // FIXED laser: locked on the player at the fire moment, no sweep, no tracking
+		}
+		UpdateBeamVFX(S.Beams); // drive the auto-spawned beam VFX (start/end/width) this frame
 		if (bDamageTick)
 			for (const FGolemBeamSegment& Beam : S.Beams)
 				ApplyLineDamage(Beam.Origin, Beam.End, Cfg.BeamWidth, Cfg.Damage, /*bAirborneIsSafe=*/false, /*b3D=*/true, Cfg.KnockbackForce, Cfg.AttackId);
@@ -1044,7 +1094,7 @@ void UGolemBossComponent::BuildBeams(const FGolemAttackConfig& Cfg, float Rotate
 	for (int32 i = 0; i < Count; ++i)
 	{
 		const FVector Origin = Eyes[i % Eyes.Num()];
-		FVector Base = ResolveArenaCentre() - Origin;
+		FVector Base = ResolveTargetLocation() - Origin; // aim from the eye straight AT THE PLAYER (in front of the golem)
 		if (Base.IsNearlyZero()) Base = OwnerCharacter ? OwnerCharacter->GetActorForwardVector() : FVector::ForwardVector;
 		Base = Base.GetSafeNormal();
 
@@ -1057,8 +1107,71 @@ void UGolemBossComponent::BuildBeams(const FGolemAttackConfig& Cfg, float Rotate
 		Beam.Direction = Dir;
 		Beam.Length = Cfg.BeamLength;
 		Beam.End = Origin + Dir * Cfg.BeamLength;
+		Beam.Width = Cfg.BeamWidth; // carry the radius so the BP can scale the beam VFX to match the hit width
 		Out.Add(Beam);
 	}
+}
+
+void UGolemBossComponent::SpawnBeamVFX(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams)
+{
+	ClearBeamVFX();
+	UWorld* const W = GetWorld();
+	if (!Cfg.BeamVFX || !W) return;
+
+	// One Niagara system per beam; drive its "BeamStart"/"BeamEnd" (Vector) + "BeamWidth" (float) user params.
+	for (const FGolemBeamSegment& B : Beams)
+	{
+		UNiagaraComponent* Comp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			W, Cfg.BeamVFX, B.Origin, B.Direction.Rotation(), FVector(1.f), /*bAutoDestroy=*/false, /*bAutoActivate=*/true);
+		if (!Comp) continue;
+		// Set both Vector and Position variants so it works whichever type the user's "BeamStart"/"BeamEnd" user params are.
+		Comp->SetVariableVec3(TEXT("BeamStart"), B.Origin);
+		Comp->SetVariablePosition(TEXT("BeamStart"), B.Origin);
+		Comp->SetVariableVec3(TEXT("BeamEnd"), B.End);
+		Comp->SetVariablePosition(TEXT("BeamEnd"), B.End);
+		Comp->SetVariableFloat(TEXT("BeamWidth"), B.Width);
+		BeamVFXComps.Add(Comp);
+	}
+}
+
+void UGolemBossComponent::UpdateBeamVFX(const TArray<FGolemBeamSegment>& Beams)
+{
+	const int32 N = FMath::Min(BeamVFXComps.Num(), Beams.Num());
+	for (int32 i = 0; i < N; ++i)
+	{
+		UNiagaraComponent* Comp = BeamVFXComps[i];
+		if (!IsValid(Comp)) continue;
+		Comp->SetWorldLocation(Beams[i].Origin); // for systems that emit from the component location
+		Comp->SetVariableVec3(TEXT("BeamStart"), Beams[i].Origin);
+		Comp->SetVariablePosition(TEXT("BeamStart"), Beams[i].Origin);
+		Comp->SetVariableVec3(TEXT("BeamEnd"), Beams[i].End);
+		Comp->SetVariablePosition(TEXT("BeamEnd"), Beams[i].End);
+		Comp->SetVariableFloat(TEXT("BeamWidth"), Beams[i].Width);
+	}
+}
+
+void UGolemBossComponent::ClearBeamVFX()
+{
+	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(BeamFireVFXTimerHandle); // cancel a pending delayed fire VFX
+	for (UNiagaraComponent* Comp : BeamVFXComps)
+		if (IsValid(Comp)) { Comp->Deactivate(); Comp->DestroyComponent(); }
+	BeamVFXComps.Reset();
+}
+
+void UGolemBossComponent::SpawnBeamFireVFX(UNiagaraSystem* System)
+{
+	if (!System) return;
+
+	// Attach to the player camera (in front of the view) so a screen/world FX is visible — spawning AT the camera clips it.
+	UNiagaraComponent* FireFX = nullptr;
+	if (APawn* P = UGameplayStatics::GetPlayerPawn(this, 0))
+		if (UCameraComponent* CamComp = P->FindComponentByClass<UCameraComponent>())
+			FireFX = UNiagaraFunctionLibrary::SpawnSystemAttached(System, CamComp, NAME_None,
+				FVector(120.f, 0.f, 0.f), FRotator::ZeroRotator, EAttachLocation::SnapToTarget, /*bAutoDestroy=*/true);
+	if (!FireFX) // fallback: in front of the camera-manager view
+		if (APlayerCameraManager* Cam = UGameplayStatics::GetPlayerCameraManager(this, 0))
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), System,
+				Cam->GetCameraLocation() + Cam->GetCameraRotation().Vector() * 120.f, Cam->GetCameraRotation(), FVector(1.f), true, true);
 }
 
 /* ═══════════ Arena helpers ═══════════ */
@@ -1113,20 +1226,27 @@ FVector UGolemBossComponent::ProjectToGround(const FVector& P) const
 	const UWorld* W = GetWorld();
 	if (!W) return P;
 
-	// Trace a tall vertical line through P and snap to the floor (static/dynamic world geometry, not pawns).
-	// Keeps crystals/debug on the ground no matter the Golem's scale or the (possibly elevated) arena-centre Z.
-	const FVector Start = P + FVector(0.f, 0.f, 20000.f);
-	const FVector End   = P - FVector(0.f, 0.f, 20000.f);
-
+	// Snap to the REAL floor under this XY (handles uneven arenas — each point finds its own ground Z). Robust order:
+	// static/dynamic geometry → a Visibility trace (pawns ignore Visibility) → the arena-centre floor, so a crystal is
+	// never left floating no matter the Golem's scale or the (possibly elevated) arena-centre Z.
 	FCollisionObjectQueryParams ObjParams;
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	ObjParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(GolemGround), false, OwnerCharacter);
 
-	FHitResult Hit;
-	if (W->LineTraceSingleByObjectType(Hit, Start, End, ObjParams, Params))
-		return FVector(P.X, P.Y, Hit.ImpactPoint.Z);
+	auto TraceFloor = [&](const FVector& At, float& OutZ) -> bool
+	{
+		const FVector Start = At + FVector(0.f, 0.f, 20000.f);
+		const FVector End   = At - FVector(0.f, 0.f, 20000.f);
+		FHitResult Hit;
+		if (W->LineTraceSingleByObjectType(Hit, Start, End, ObjParams, Params)) { OutZ = Hit.ImpactPoint.Z; return true; }
+		if (W->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params)) { OutZ = Hit.ImpactPoint.Z; return true; }
+		return false;
+	};
+
+	float Z = 0.f;
+	if (TraceFloor(P, Z))                 return FVector(P.X, P.Y, Z);
+	if (TraceFloor(GetArenaCentre(), Z))  return FVector(P.X, P.Y, Z); // last resort so it's never left in the air
 	return P;
 }
 

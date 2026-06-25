@@ -13,7 +13,8 @@
 
 AGolemCrystal::AGolemCrystal()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false; // only ticks while rising out of the ground
 
 	MeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComp"));
 	RootComponent = MeshComp;
@@ -27,6 +28,37 @@ AGolemCrystal::AGolemCrystal()
 	MeshComp->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 	MeshComp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 	MeshComp->SetGenerateOverlapEvents(false);
+}
+
+void AGolemCrystal::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Climb out of the ground instead of popping in: start buried, then ease up to the planted spot in Tick.
+	if (RiseHeight > 0.f && RiseDuration > 0.f)
+	{
+		RiseTargetLoc = GetActorLocation();
+		SetActorLocation(RiseTargetLoc - FVector(0.f, 0.f, RiseHeight));
+		RiseElapsed = 0.f;
+		bRising = true;
+		SetActorTickEnabled(true);
+	}
+}
+
+void AGolemCrystal::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!bRising) return;
+
+	RiseElapsed += DeltaSeconds;
+	const float Alpha = FMath::Clamp(RiseElapsed / FMath::Max(0.01f, RiseDuration), 0.f, 1.f);
+	const float Eased = FMath::InterpEaseOut(0.f, 1.f, Alpha, 2.f); // fast out of the ground, settle at the top
+
+	FVector Loc = RiseTargetLoc;
+	Loc.Z = FMath::Lerp(RiseTargetLoc.Z - RiseHeight, RiseTargetLoc.Z, Eased);
+	SetActorLocation(Loc);
+
+	if (Alpha >= 1.f) { bRising = false; SetActorTickEnabled(false); }
 }
 
 void AGolemCrystal::InitAsArenaCrystal(UGolemBossComponent* InOwnerComp, int32 InCrystalId)

@@ -16,6 +16,7 @@
 #include "GolemBoss_Types.generated.h"
 
 class UAnimMontage;
+class UNiagaraSystem;
 class AActor;
 
 /** Behavioural archetype of a Golem attack — drives C++ damage geometry AND the data handed to BP. */
@@ -71,6 +72,9 @@ struct FGolemBeamSegment
 
 	/** Convenient end point (Origin + Direction * Length). */
 	UPROPERTY(BlueprintReadWrite, Category = "Golem") FVector End = FVector::ZeroVector;
+
+	/** Radius (half-width) of the damaging tube. Drive your beam VFX's thickness from this so it matches the hit radius. */
+	UPROPERTY(BlueprintReadWrite, Category = "Golem") float Width = 160.f;
 };
 
 /**
@@ -186,6 +190,17 @@ struct FGolemAttackConfig
 
 	/** How far the whole beam fan rotates across ActiveDuration (the sweep), in degrees. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", ClampMax = "180")) float BeamSweepAngle = 50.f;
+
+	/** Beam VFX (Niagara) the component AUTO-spawns (one per beam) and drives every frame — no BP wiring. Expose Vector user
+	 *  params "BeamStart" / "BeamEnd" and a float "BeamWidth" in your system; the component sets them (BeamWidth = the radius,
+	 *  so the VFX scales with BeamWidth). Empty = no built-in beam VFX (wire it yourself from the dispatchers instead). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") TObjectPtr<UNiagaraSystem> BeamVFX;
+
+	/** One-shot impact / full-screen VFX played ONCE the instant the beam FIRES (spawned at the player camera). Empty = none. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") TObjectPtr<UNiagaraSystem> BeamFireVFX;
+
+	/** Delay (s) after the beam fires before BeamFireVFX plays — use it to line the screen impact up with your montage. 0 = instant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0")) float BeamFireVFXDelay = 0.f;
 
 	/* ── Geometry: Bombardment (Bombardment) ── */
 

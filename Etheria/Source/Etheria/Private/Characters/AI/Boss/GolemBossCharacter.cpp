@@ -183,7 +183,7 @@ void AGolemBossCharacter::BuildDefaultAttacks()
 		A.TargetMode = EGolemTargetMode::EyeSockets;
 		A.WindupDuration = 1.3f; A.ActiveDuration = 1.6f; A.RecoveryDuration = 1.0f; A.Cooldown = 9.f;
 		A.Damage = 20.f; A.DamageInterval = 0.15f;
-		A.BeamCount = 2; A.BeamLength = 3500.f; A.BeamWidth = 160.f; A.BeamSpreadAngle = 70.f; A.BeamSweepAngle = 50.f;
+		A.BeamCount = 2; A.BeamLength = 3500.f; A.BeamWidth = 200.f; A.BeamSpreadAngle = 0.f; A.BeamSweepAngle = 0.f; // fixed beam from the eyes, aimed at the player
 		A.SelectionWeight = 0.9f;
 		Atk.Add(A);
 	}
