@@ -38,6 +38,11 @@
 			"Name": "UltimateLevelArtTool",
 			"Enabled": true,
 			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/ec0988f250ef49ebaf7852cdfe3e6516"
+		},
+		{
+			"Name": "OrionRPG",
+			"Enabled": true,
+			"MarketplaceURL": "com.epicgames.launcher://ue/Fab/product/eab00427-3d38-42b0-adb0-d057883d4c3c"
 		}
 	]
 }
