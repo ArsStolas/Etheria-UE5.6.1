@@ -272,13 +272,43 @@ bool UAIMovementComponent::FleeFrom(AActor* Threat)
 		if (Score > CurDistSq && Score > BestScore) { BestScore = Score; BestTarget = Cand; bFound = true; }
 	}
 
-	if (!bFound)
-		return false; // cornered — no reachable point increases distance; let the caller face/hold the threat
+	// Nothing in the fan: retry straight along the away-vector with a WIDER projection extent before giving up
+	// (rescues prey sitting on a thin/edge navmesh tile that the tight extent above missed).
+	if (!bFound && NavSys)
+	{
+		FNavLocation NavRes;
+		if (NavSys->ProjectPointToNavigation(MyLoc + AwayDir * FleeDistance, NavRes, FVector(800.f, 800.f, 500.f))
+			&& FVector::DistSquared2D(NavRes.Location, ThreatLoc) > CurDistSq)
+		{ BestTarget = NavRes.Location; bFound = true; }
+	}
 
-	DesiredMaxSpeed = FleeSpeed;
-	if (MovementComp) MovementComp->MaxWalkSpeed = FleeSpeed;
-	MoveToLocation(BestTarget);
-	return true;
+	if (bFound)
+	{
+		DesiredMaxSpeed = FleeSpeed;
+		if (MovementComp) MovementComp->MaxWalkSpeed = FleeSpeed;
+		MoveToLocation(BestTarget);
+		return true;
+	}
+
+	// No reachable nav point. Tell "genuinely cornered on a working navmesh" (let the caller face/hold the threat)
+	// apart from "no usable navmesh here at all" (nav not baked/streamed): in the latter, degrade to a DIRECT,
+	// non-pathfinding flee so prey still visibly bolts away instead of freezing and staring at the threat.
+	FNavLocation Here;
+	const bool bNavUsableHere = NavSys && NavSys->ProjectPointToNavigation(MyLoc, Here, FVector(200.f, 200.f, 300.f));
+	if (bNavUsableHere) return false; // cornered on a real navmesh — let the caller face/hold
+
+	if (AAIController* AIC = Cast<AAIController>(OwnerCharacter->GetController()))
+	{
+		DesiredMaxSpeed = FleeSpeed;
+		if (MovementComp) MovementComp->MaxWalkSpeed = FleeSpeed;
+		CurrentDestination = MyLoc + AwayDir * FleeDistance;
+		OnMovementTargetUpdated.Broadcast(CurrentDestination);
+		AIC->MoveToLocation(CurrentDestination, AcceptanceRadius, true,
+			/*bUsePathfinding=*/false, /*bProjectDestinationToNavigation=*/false, true,
+			TSubclassOf<UNavigationQueryFilter>(), true);
+		return true;
+	}
+	return false;
 }
 
 FVector UAIMovementComponent::GetNextPatrolPoint()

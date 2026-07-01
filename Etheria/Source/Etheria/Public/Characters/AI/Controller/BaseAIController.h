@@ -338,8 +338,13 @@ private:
 	/** Stamp the group attack window — call only when an attack actually fires. */
 	void NotifyAttackStarted(AActor* Target);
 
-	/** Deferred patrol kickoff. Called via timer after OnPossess so the character has finished its own BeginPlay. */
+	/** Deferred patrol kickoff. Called via timer after OnPossess so the character has finished its own BeginPlay.
+	 *  Re-arms itself (bounded) until a navmesh is ready near the pawn, so a cooked/streamed nav that arrives a beat
+	 *  late doesn't leave the AI stuck idle forever. */
 	void TryStartInitialPatrol();
+
+	/** True if there is navigable navmesh near Loc right now (used to defer patrol until the nav data is ready). */
+	bool IsNavmeshReadyNear(const FVector& Loc) const;
 
 	UPROPERTY() TObjectPtr<ABaseAICharacter> AICharacter;
 	UPROPERTY() TObjectPtr<UAISenseConfig_Sight> SightConfig;
@@ -388,4 +393,6 @@ private:
 	TWeakObjectPtr<AActor> TokenTarget;
 
 	FTimerHandle InitialPatrolTimerHandle;
+	int32 InitialPatrolAttempts = 0; // bounded nav-ready retries before patrolling anyway
+	static constexpr int32 MaxInitialPatrolAttempts = 40; // ~20s at 0.5s intervals
 };

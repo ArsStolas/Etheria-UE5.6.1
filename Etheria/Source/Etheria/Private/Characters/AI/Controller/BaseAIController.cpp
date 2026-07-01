@@ -188,7 +188,18 @@ void ABaseAIController::HandleDormancyChanged()
 		if (S == EAIState::Staggered && C && C->IsStaggered()) return; // genuinely still staggered — let it drain
 		AICharacter->SetAIState((AICharacter->GetCurrentTarget() && AICharacter->ShouldEngageTargets())
 			? EAIState::Chasing : EAIState::Returning);
+		return;
 	}
+
+	// Woke up idle/patrolling with a route to walk → make sure the patrol loop is actually running. It may have
+	// been stopped while dormant, or never started because the AI was dormant at the initial-patrol kickoff.
+	if (S == EAIState::Idle || S == EAIState::Patrolling)
+		if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
+			if (MC->PatrolMode != EPatrolMode::Stationary && !MC->IsPatrolling())
+			{
+				AICharacter->SetAIState(EAIState::Patrolling);
+				MC->StartPatrol();
+			}
 }
 
 UAICombatDirectorSubsystem* ABaseAIController::GetCombatDirector() const
@@ -243,18 +254,35 @@ bool ABaseAIController::HasUsableAttack(const UAICombatComponent* Combat, float 
 	return false;
 }
 
+bool ABaseAIController::IsNavmeshReadyNear(const FVector& Loc) const
+{
+	const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	if (!Nav) return false;
+	FNavLocation Proj;
+	return Nav->ProjectPointToNavigation(Loc, Proj, FVector(300.f, 300.f, 500.f));
+}
+
 void ABaseAIController::TryStartInitialPatrol()
 {
+	// Dormant at kickoff → don't start now; HandleDormancyChanged restarts patrol when the AI wakes.
 	if (!AICharacter || AICharacter->IsDead() || AICharacter->IsDormant()) return;
 
 	UAIMovementComponent* MC = AICharacter->GetAIMovement();
-	if (!MC) return;
+	if (!MC || MC->PatrolMode == EPatrolMode::Stationary) return;
 
 	// Don't override an active state (e.g. AI was already alerted during the delay window).
 	const EAIState State = AICharacter->GetCurrentAIState();
 	if (State != EAIState::Idle && State != EAIState::Patrolling) return;
 
-	if (MC->PatrolMode == EPatrolMode::Stationary) return;
+	// A cooked/streamed navmesh can arrive a beat after possession. Wait for it (bounded) instead of kicking off a
+	// patrol that silently can't path and then never re-arming. Once the navmesh is up, patrol starts immediately.
+	if (!IsNavmeshReadyNear(AICharacter->GetActorLocation()) && InitialPatrolAttempts++ < MaxInitialPatrolAttempts)
+	{
+		if (UWorld* W = GetWorld())
+			W->GetTimerManager().SetTimer(InitialPatrolTimerHandle, this,
+				&ABaseAIController::TryStartInitialPatrol, 0.5f, false);
+		return;
+	}
 
 	AICharacter->SetAIState(EAIState::Patrolling);
 	MC->StartPatrol();
