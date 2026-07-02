@@ -33,6 +33,7 @@ class UInventoryComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
 class USwimComponent;
+class UDialogBuilderGraph;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -61,6 +62,13 @@ struct FAxisPressState
     void OnPosStarted(double Time) { bPosPressed = true;  PosLastTime = Time; }
     void OnNegCompleted()          { bNegPressed = false; }
     void OnPosCompleted()          { bPosPressed = false; }
+    void Reset()
+    {
+        bNegPressed = false;
+        bPosPressed = false;
+        NegLastTime = -DBL_MAX;
+        PosLastTime = -DBL_MAX;
+    }
 };
 
 // ============================================================
@@ -213,6 +221,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Glider")
     UInputAction* DiveAction;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightMode|Dive")
+    bool bEnableDive = true;
+
     // --- INVENTORY ---
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Inventory")
     UInputAction* NextItemAction;
@@ -337,6 +348,10 @@ private:
 
     // --- Movement State ---
     bool IsGrapplingAnimationLocked() const;
+    const UDialogBuilderGraph* GetActiveDialog() const;
+    bool IsDialogInputBlocked() const;
+    bool IsDialogMovementBlocked() const;
+    void ClearGameplayInputState();
     void HandleMovementInput();
     void UpdateMovementState();
     void HandleAirborneState();

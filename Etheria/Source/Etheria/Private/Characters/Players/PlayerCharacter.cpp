@@ -33,6 +33,8 @@
 #include "Components/Characters/Player/Movements/Swim/SwimComponent.h"
 #include "Components/Characters/Player/Rope/URopeCameraComponent.h"
 #include "Components/Characters/Player/Rope/Pulling/RopePullComponent.h"
+#include "DialogBuilderGraph.h"
+#include "DialogComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -154,6 +156,13 @@ void APlayerCharacter::Tick(float DeltaTime)
     if (bInGrapplingAnimation && StateComponent)
     {
         StateComponent->SetMovementState(EtheriaTags::State_Movement_IsGrappling);
+    }
+
+    if (IsDialogMovementBlocked())
+    {
+        ClearGameplayInputState();
+        UpdateMovementState();
+        return;
     }
     
     HandleMovementInput();
@@ -460,17 +469,18 @@ void APlayerCharacter::OnAimReleased()
 
 #pragma region "MOVEMENT INPUTS"
 
-void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnForwardStarted(const FInputActionValue&)   { if (!IsDialogMovementBlocked()) { Vertical.OnPosStarted(GetWorld()->GetTimeSeconds()); } }
 void APlayerCharacter::OnForwardCompleted(const FInputActionValue&){ Vertical.OnPosCompleted(); }
-void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnBackStarted(const FInputActionValue&)      { if (!IsDialogMovementBlocked()) { Vertical.OnNegStarted(GetWorld()->GetTimeSeconds()); } }
 void APlayerCharacter::OnBackCompleted(const FInputActionValue&)    { Vertical.OnNegCompleted(); }
-void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnLeftStarted(const FInputActionValue&)      { if (!IsDialogMovementBlocked()) { Horizontal.OnNegStarted(GetWorld()->GetTimeSeconds()); } }
 void APlayerCharacter::OnLeftCompleted(const FInputActionValue&)    { Horizontal.OnNegCompleted(); }
-void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); }
+void APlayerCharacter::OnRightStarted(const FInputActionValue&)     { if (!IsDialogMovementBlocked()) { Horizontal.OnPosStarted(GetWorld()->GetTimeSeconds()); } }
 void APlayerCharacter::OnRightCompleted(const FInputActionValue&)   { Horizontal.OnPosCompleted(); }
     
 void APlayerCharacter::StartSprint()
 {
+    if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
     if (!StateComponent) return;
     
@@ -525,6 +535,7 @@ void APlayerCharacter::StopSprint()
 
 void APlayerCharacter::OnJumpPressed()
 {
+    if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!CombatComponent)
@@ -613,6 +624,7 @@ void APlayerCharacter::Landed(const FHitResult& Hit)
 
 void APlayerCharacter::OnCrouchPressed()
 {
+    if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!CombatComponent) { Crouch(); return; }
@@ -657,6 +669,7 @@ void APlayerCharacter::HandleMovementInput()
 {
     if (!Controller) return;
 
+    if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
     
     if (bEnableRopeSystem && RopeSwingComponent && RopeSwingComponent->IsSwinging())
@@ -786,6 +799,8 @@ void APlayerCharacter::HandleAirborneState()
 #pragma region "CAMERA INPUTS"
 void APlayerCharacter::Look(const FInputActionValue& Value)
 {
+    if (IsDialogMovementBlocked()) return;
+
     const FVector2D LookAxis = Value.Get<FVector2D>();
     if (Controller)
     {
@@ -799,6 +814,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 
 void APlayerCharacter::ToggleGlideMode()
 {
+    if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!FlightComponent || (bEnableRopeSystem && RopeAttachComponent && RopeAttachComponent->IsAttached())) return;
@@ -820,6 +836,8 @@ void APlayerCharacter::ToggleGlideMode()
 
 void APlayerCharacter::ToggleDiveMode()
 {
+    if (!bEnableDive) return;
+    if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!FlightComponent || (bEnableRopeSystem && RopeAttachComponent && RopeAttachComponent->IsAttached())) return;
@@ -884,8 +902,68 @@ void APlayerCharacter::OnDiveStop()
 
 #pragma region "COMBAT INPUTS"
 
+const UDialogBuilderGraph* APlayerCharacter::GetActiveDialog() const
+{
+    const auto FindActiveDialog = [](const AActor* Actor) -> const UDialogBuilderGraph*
+    {
+        const UDialogComponent* DialogComponent = Actor ? Actor->FindComponentByClass<UDialogComponent>() : nullptr;
+        return DialogComponent ? DialogComponent->CurrentActiveDialog.Get() : nullptr;
+    };
+
+    if (const UDialogBuilderGraph* ActiveDialog = FindActiveDialog(this))
+    {
+        return ActiveDialog;
+    }
+
+    if (const AController* OwningController = GetController())
+    {
+        return FindActiveDialog(OwningController);
+    }
+
+    return nullptr;
+}
+
+bool APlayerCharacter::IsDialogInputBlocked() const
+{
+    return GetActiveDialog() != nullptr;
+}
+
+bool APlayerCharacter::IsDialogMovementBlocked() const
+{
+    const UDialogBuilderGraph* ActiveDialog = GetActiveDialog();
+    return ActiveDialog && ActiveDialog->DialogType == EDialogType::E_CinematicDialog;
+}
+
+void APlayerCharacter::ClearGameplayInputState()
+{
+    Horizontal.Reset();
+    Vertical.Reset();
+    bJumpBuffered = false;
+
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        MoveComp->MaxWalkSpeed = WalkSpeed;
+    }
+
+    if (SwimComponent)
+    {
+        SwimComponent->SetSwimSprinting(false);
+    }
+
+    if (RopeLengthControllerComponent)
+    {
+        RopeLengthControllerComponent->SetRopeLengthInput(0.f);
+    }
+
+    if (CombatComponent)
+    {
+        CombatComponent->SetParryHeld(false);
+    }
+}
+
 void APlayerCharacter::OnAttackLightPressed()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!CombatComponent || !StateComponent) return;
@@ -922,6 +1000,7 @@ void APlayerCharacter::OnAttackLightReleased()
 
 void APlayerCharacter::OnAttackHeavyPressed()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!CombatComponent || !StateComponent) return;
@@ -974,6 +1053,7 @@ void APlayerCharacter::OnAttackHeavyCanceled()
 
 void APlayerCharacter::OnParryPressed()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!CombatComponent || !StateComponent) return;
@@ -996,6 +1076,7 @@ void APlayerCharacter::OnParryReleased()
 
 void APlayerCharacter::OnDodgePressed()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (!CombatComponent || !StateComponent) return;
@@ -1072,6 +1153,7 @@ void APlayerCharacter::HandleAttackEnd(FName)
 #pragma region "LOCK TARGET INPUTS"
 void APlayerCharacter::OnLockToggle()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (LockTargetComponent)
@@ -1082,6 +1164,7 @@ void APlayerCharacter::OnLockToggle()
 
 void APlayerCharacter::OnLockSwitchLeft()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (LockTargetComponent)
@@ -1092,6 +1175,7 @@ void APlayerCharacter::OnLockSwitchLeft()
 
 void APlayerCharacter::OnLockSwitchRight()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     if (LockTargetComponent)
@@ -1104,10 +1188,10 @@ void APlayerCharacter::OnLockSwitchRight()
 #pragma region "INVENTORY INPUTS"
 
 // INVENTORY INPUTS
-void APlayerCharacter::Input_SelectNext() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->SelectNext(); } }
-void APlayerCharacter::Input_SelectPrev() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->SelectPrevious(); } }
-void APlayerCharacter::Input_UseItem() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->UseSelected(); } }
-void APlayerCharacter::Input_DropItem() { if (!IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
+void APlayerCharacter::Input_SelectNext() { if (!IsDialogInputBlocked() && !IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->SelectNext(); } }
+void APlayerCharacter::Input_SelectPrev() { if (!IsDialogInputBlocked() && !IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->SelectPrevious(); } }
+void APlayerCharacter::Input_UseItem() { if (!IsDialogInputBlocked() && !IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->UseSelected(); } }
+void APlayerCharacter::Input_DropItem() { if (!IsDialogInputBlocked() && !IsGrapplingAnimationLocked() && InventoryComponent) { InventoryComponent->DropSelected(true, 1); } }
 
 #pragma endregion
 
@@ -1116,6 +1200,7 @@ void APlayerCharacter::Input_DropItem() { if (!IsGrapplingAnimationLocked() && I
 // INTERACTION INPUT
 void APlayerCharacter::Input_Interact()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     //UE_LOG(LogTemp, Warning, TEXT("Interact pressed"));
@@ -1133,6 +1218,7 @@ void APlayerCharacter::Input_Interact()
 
 void APlayerCharacter::OnRopeAttachPressed()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
     if (!bEnableRopeSystem) return;
     if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
@@ -1159,6 +1245,7 @@ void APlayerCharacter::OnRopeAttachPressed()
 
 void APlayerCharacter::CheckRopeAttachMode()
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
     if (!bEnableRopeSystem) return;
     if (!RopeLockComponent || !RopeSwingComponent || !RopeAttachComponent) return;
@@ -1184,6 +1271,7 @@ void APlayerCharacter::CheckRopeAttachMode()
 
 void APlayerCharacter::RopeLengthInput(const FInputActionValue& Value)
 {
+    if (IsDialogInputBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
     if (!bEnableRopeSystem) return;
 
@@ -1228,6 +1316,8 @@ void APlayerCharacter::StopRopeLengthInput(const FInputActionValue& Value)
 #pragma region "SWIM INPUTS"
 void APlayerCharacter::OnDiveInputPressed()
 {
+    if (!bEnableDive) return;
+    if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 
     // If we're in water (or currently swimming), this input is for Swim
