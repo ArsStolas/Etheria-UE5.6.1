@@ -24,6 +24,8 @@ class ETHERIA_API UItemDefinition : public UDataAsset
 public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item") FName itemId = NAME_None;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item") FText displayName;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item") FText description;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item") EItemType type = EItemType::Consumable;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Stack") bool bStackable = true;
