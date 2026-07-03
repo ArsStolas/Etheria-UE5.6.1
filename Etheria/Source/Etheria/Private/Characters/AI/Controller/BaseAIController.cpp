@@ -24,6 +24,10 @@
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
+#include "HAL/IConsoleManager.h"
+
+static TAutoConsoleVariable<int32> CVarAIDebug(TEXT("ai.Debug"), 0,
+	TEXT("1 = per-AI on-screen overlay: state, awareness, detection, token, strike distances."));
 
 ABaseAIController::ABaseAIController(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UCrowdFollowingComponent>(TEXT("PathFollowingComponent")))
@@ -127,6 +131,7 @@ void ABaseAIController::HandleAIStateChanged(EAIState OldState, EAIState NewStat
 	if ((OldState == EAIState::Attacking && NewState != EAIState::Attacking) || NewState == EAIState::Dead)
 		ReleaseAttackTokenHeld();
 
+	bIdleAnchorSet = false;
 	if (NewState == EAIState::Returning) ReturnTimer = 0.f;
 	if (NewState == EAIState::Fleeing) { bFleeCornered = false; FleeReevalTimer = 0.f; bFleeingHome = false; FleeCalmTimer = 0.f; FleeLostSightTimer = -1.f; }
 
@@ -141,6 +146,7 @@ void ABaseAIController::HandleAIStateChanged(EAIState OldState, EAIState NewStat
 		bSteerSettled = false;
 		bStallRepath = false;
 		StallRepathTime = 0.f;
+		HarassRetreatTimer = 0.f;
 		if (AICharacter)
 			if (UCharacterMovementComponent* Move = AICharacter->GetCharacterMovement())
 				Move->bCanWalkOffLedges = true;
@@ -151,7 +157,21 @@ void ABaseAIController::HandleAIStateChanged(EAIState OldState, EAIState NewStat
 	{ EngagedTarget = nullptr; EngageReactionTimer = 0.f; }
 
 	if (NewState == EAIState::Returning || NewState == EAIState::Idle || NewState == EAIState::Patrolling)
-	{ LastKnownActor = nullptr; LastKnownLocation = FVector::ZeroVector; LastKnownVelocity = FVector::ZeroVector; }
+	{
+		LastKnownActor = nullptr; LastKnownLocation = FVector::ZeroVector; LastKnownVelocity = FVector::ZeroVector;
+		ScentTimer = -1.f; ScentTrail.Reset();
+		if ((bPackEnraged || bPackDemoralized) && BasePackAttackInterval > 0.f)
+		{
+			AttackInterval = BasePackAttackInterval;
+			StrafeSpeed = BasePackStrafeSpeed;
+			EvadeChance = BasePackEvadeChance;
+			if (BasePackChaseSpeed > 0.f && AICharacter)
+				if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
+					MC->ChaseSpeed = BasePackChaseSpeed;
+			bPackEnraged = false;
+			bPackDemoralized = false;
+		}
+	}
 
 	if (AICharacter)
 		if (UCharacterMovementComponent* MC = AICharacter->GetCharacterMovement())
@@ -287,19 +307,57 @@ void ABaseAIController::Tick(float DeltaTime)
 		if (LostSightTimer <= 0.f)
 		{
 			const EAIState Cur = AICharacter->GetCurrentAIState();
-			if (Cur == EAIState::Chasing || Cur == EAIState::Attacking) StartSearchAtLastKnown();
+			if ((Cur == EAIState::Chasing || Cur == EAIState::Attacking)
+				&& ScentTrackDuration > 0.f && AICharacter->GetCurrentTarget())
+			{
+				LostSightTimer = -1.f;
+				ScentTimer = ScentTrackDuration;
+			}
+			else if (Cur == EAIState::Chasing || Cur == EAIState::Attacking) StartSearchAtLastKnown();
 			else { LostSightTimer = -1.f; AICharacter->ClearTarget(); }
+		}
+	}
+
+	if (ScentTimer > 0.f)
+	{
+		ScentTimer -= DeltaTime;
+		if (ScentTimer <= 0.f)
+		{
+			ScentTimer = -1.f;
+			if (ScentTrail.Num() > 0) LastKnownLocation = ScentTrail.Last().Value;
+			const EAIState Cur = AICharacter->GetCurrentAIState();
+			if (Cur == EAIState::Chasing || Cur == EAIState::Attacking) StartSearchAtLastKnown();
 		}
 	}
 
 	UpdateDetection(DeltaTime);
 
+#if ENABLE_DRAW_DEBUG
+	if (CVarAIDebug.GetValueOnGameThread() != 0)
+	{
+		const AActor* DbgT = AICharacter->GetCurrentTarget();
+		const float DbgSurf = DbgT
+			? FMath::Max(0.f, FVector::Dist(AICharacter->GetActorLocation(), DbgT->GetActorLocation()) - GetCombatReach(DbgT))
+			: -1.f;
+		DrawDebugString(GetWorld(), AICharacter->GetActorLocation() + FVector(0.f, 0.f, 130.f),
+			FString::Printf(TEXT("%s | %s%s\nDet %.0f%%  Surf %.0f  Plan %.0f%s%s"),
+				*UEnum::GetDisplayValueAsText(AICharacter->GetCurrentAIState()).ToString(),
+				*UEnum::GetDisplayValueAsText(AICharacter->GetAwarenessLevel()).ToString(),
+				bHoldingAttackToken ? TEXT(" [TOKEN]") : TEXT(""),
+				DetectionProgress * 100.f, DbgSurf, PlannedAttackRange,
+				bSteerCombat ? TEXT(" STEER") : TEXT(""),
+				ScentTimer > 0.f ? TEXT(" SCENT") : TEXT("")),
+			nullptr, FColor::Yellow, 0.f, true);
+	}
+#endif
+
 	if (NoticedActor.IsValid() && NoticeTimer > 0.f)
 	{
 		const EAIState St = AICharacter->GetCurrentAIState();
-		if (St == EAIState::Idle || St == EAIState::Patrolling)
+		const bool bWalkedAway = FVector::DistSquared(AICharacter->GetActorLocation(), NoticedActor->GetActorLocation())
+			> FMath::Square(NoticeDistance * 1.4f);
+		if ((St == EAIState::Idle || St == EAIState::Patrolling) && !bWalkedAway)
 		{
-
 			if (AICharacter->GetVelocity().SizeSquared2D() < 10000.f)
 				FaceTargetYawOnly(NoticedActor.Get(), DeltaTime);
 			NoticeTimer -= DeltaTime;
@@ -310,7 +368,13 @@ void ABaseAIController::Tick(float DeltaTime)
 					AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
 			}
 		}
-		else { NoticedActor = nullptr; NoticeTimer = 0.f; }
+		else
+		{
+			NoticedActor = nullptr;
+			NoticeTimer = 0.f;
+			if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Suspicious)
+				AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+		}
 	}
 
 	if (SuspicionTimer > 0.f)
@@ -487,22 +551,34 @@ AActor* ABaseAIController::FindPerceptibleTarget(float Radius) const
 void ABaseAIController::UpdateDetection(float DeltaTime)
 {
 	if (!AICharacter || AICharacter->IsDormant() || AICharacter->GetCurrentAIState() == EAIState::Dead) return;
-	if (!AICharacter->CanReactToPerception()) return;
 
 	if (AActor* Cur = AICharacter->GetCurrentTarget())
 	{
 		const EAIState State = AICharacter->GetCurrentAIState();
+		if (ScentTrackDuration > 0.f && GetWorld())
+		{
+			if (LastScentTarget.Get() != Cur)
+			{
+				ScentTrail.Reset();
+				LastScentTarget = Cur;
+			}
+			const float Now = GetWorld()->GetTimeSeconds();
+			ScentTrail.Add(TPair<float, FVector>(Now, Cur->GetActorLocation()));
+			while (ScentTrail.Num() > 0 && ScentTrail[0].Key < Now - (ScentTrailDelay + 3.f))
+				ScentTrail.RemoveAt(0);
+		}
 		if (IsTargetCurrentlySeen(Cur))
 		{
 			LostSightTimer = -1.f;
 			FleeLostSightTimer = -1.f;
+			ScentTimer = -1.f;
 			LastKnownLocation = Cur->GetActorLocation();
 			LastKnownVelocity = Cur->GetVelocity();
 			LastKnownActor = Cur;
 		}
 		else if (State == EAIState::Chasing || State == EAIState::Attacking)
 		{
-			if (TargetMemoryDuration > 0.f && LostSightTimer < 0.f)
+			if (TargetMemoryDuration > 0.f && LostSightTimer < 0.f && ScentTimer <= 0.f)
 				LostSightTimer = TargetMemoryDuration;
 		}
 		else if (State == EAIState::Fleeing)
@@ -521,6 +597,8 @@ void ABaseAIController::UpdateDetection(float DeltaTime)
 		CachedDetectionCandidate = nullptr;
 		return;
 	}
+
+	if (!AICharacter->CanReactToPerception()) return;
 
 	DetectionScanTimer -= DeltaTime;
 	if (DetectionScanTimer <= 0.f)
@@ -626,15 +704,69 @@ void ABaseAIController::StartSearchAtLastKnown()
 void ABaseAIController::InvestigateThreat(AActor* Threat)
 {
 	if (!AICharacter || !Threat) return;
-	if (AICharacter->GetCurrentAIState() == EAIState::Dead || AICharacter->IsDormant()) return;
+	const EAIState S = AICharacter->GetCurrentAIState();
+	if (S == EAIState::Dead || S == EAIState::Staggered || S == EAIState::Interacting || AICharacter->IsDormant()) return;
 	BeginInvestigate(Threat->GetActorLocation());
 }
 
 void ABaseAIController::NoticeActor(AActor* Actor)
 {
-	if (!Actor) return;
+	if (!Actor || !AICharacter) return;
+	if (FVector::DistSquared(AICharacter->GetActorLocation(), Actor->GetActorLocation()) > FMath::Square(NoticeDistance)) return;
 	NoticedActor = Actor;
 	NoticeTimer = NoticeDuration;
+	AICharacter->TryPlayGreeting();
+}
+
+void ABaseAIController::NotifyPackMateDied(bool bAlphaDied, bool bLastSurvivor)
+{
+	if (!AICharacter || AICharacter->GetCurrentAIState() == EAIState::Dead || AICharacter->IsDormant()) return;
+
+	AActor* T = AICharacter->GetCurrentTarget();
+	if (!T) return;
+
+	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+
+	auto CacheBaselines = [&]()
+	{
+		if (BasePackAttackInterval > 0.f) return;
+		BasePackAttackInterval = AttackInterval;
+		BasePackStrafeSpeed = StrafeSpeed;
+		BasePackEvadeChance = EvadeChance;
+		BasePackChaseSpeed = MC ? MC->ChaseSpeed : -1.f;
+	};
+
+	if (bLastSurvivor)
+	{
+		if (AICharacter->GetHealthFraction() < 0.5f)
+		{
+			ReleaseAttackTokenHeld();
+			AICharacter->ForcePanicFlee(T);
+			return;
+		}
+		if (bPackEnraged) return;
+		CacheBaselines();
+		bPackEnraged = true;
+		if (MC && BasePackChaseSpeed > 0.f) MC->ChaseSpeed = BasePackChaseSpeed * 1.15f;
+		StrafeSpeed = BasePackStrafeSpeed * 1.15f;
+		AttackInterval = BasePackAttackInterval * 0.7f;
+		EvadeChance = FMath::Min(BasePackEvadeChance + 0.15f, 0.9f);
+		return;
+	}
+
+	if (bAlphaDied)
+	{
+		if (AICharacter->GetHealthFraction() < 0.6f)
+		{
+			ReleaseAttackTokenHeld();
+			AICharacter->ForcePanicFlee(T);
+			return;
+		}
+		if (bPackDemoralized || bPackEnraged) return;
+		CacheBaselines();
+		bPackDemoralized = true;
+		AttackInterval = BasePackAttackInterval * 1.4f;
+	}
 }
 
 void ABaseAIController::Investigate(const FVector& Location)
@@ -642,7 +774,8 @@ void ABaseAIController::Investigate(const FVector& Location)
 	if (!AICharacter || AICharacter->GetCurrentAIState() == EAIState::Dead || AICharacter->IsDormant()) return;
 
 	const EAIState S = AICharacter->GetCurrentAIState();
-	if (S == EAIState::Chasing || S == EAIState::Attacking || S == EAIState::Fleeing) return;
+	if (S == EAIState::Chasing || S == EAIState::Attacking || S == EAIState::Fleeing
+		|| S == EAIState::Staggered || S == EAIState::Interacting) return;
 	BeginInvestigate(Location);
 }
 
@@ -859,7 +992,7 @@ void ABaseAIController::HandleIdleState(float DeltaTime)
 	{
 		IdleTimer = 0.f;
 		NextIdleAnimTime = IdleAnimInterval + FMath::FRandRange(0.f, IdleAnimRandomDeviation);
-		if (Anim) Anim->PlayRandomIdle();
+		if (Anim && !Anim->IsPlayingAction()) Anim->PlayRandomIdle();
 	}
 
 	if (AICharacter->GetAwarenessLevel() > EAIAwarenessLevel::Unaware
@@ -870,12 +1003,18 @@ void ABaseAIController::HandleIdleState(float DeltaTime)
 		&& !NoticedActor.IsValid() && !PendingDetectTarget.IsValid()
 		&& AICharacter->GetVelocity().SizeSquared2D() < 10000.f)
 	{
+		if (!bIdleAnchorSet)
+		{
+			IdleAnchorYaw = AICharacter->GetActorRotation().Yaw;
+			bIdleAnchorSet = true;
+			ScanGoalYaw = IdleAnchorYaw;
+		}
 		ScanTimer -= DeltaTime;
 		if (ScanTimer <= 0.f)
 		{
 			ScanTimer = FMath::FRandRange(2.5f, 5.f);
 			const float Sign = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
-			ScanGoalYaw = AICharacter->GetActorRotation().Yaw + Sign * FMath::FRandRange(30.f, 70.f);
+			ScanGoalYaw = IdleAnchorYaw + Sign * FMath::FRandRange(15.f, 50.f);
 		}
 		const FRotator Cur = AICharacter->GetActorRotation();
 		AICharacter->SetActorRotation(FMath::RInterpTo(Cur, FRotator(Cur.Pitch, ScanGoalYaw, Cur.Roll), DeltaTime, 2.f));
@@ -887,10 +1026,27 @@ void ABaseAIController::HandlePatrolState(float DeltaTime)
 	UAIAnimationComponent* Anim = AICharacter->GetAIAnimation();
 	if (Anim && Anim->IsPlayingIdleVariation()) return;
 
+	if (!AICharacter->ShouldEngageTargets() && AICharacter->GetVelocity().SizeSquared2D() > 2500.f)
+		if (const APawn* P = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+		{
+			FVector To = P->GetActorLocation() - AICharacter->GetActorLocation();
+			To.Z = 0.f;
+			const float R = GetCombatReach(P) + 60.f;
+			if (To.SizeSquared() < R * R)
+			{
+				const FVector Fwd = AICharacter->GetActorForwardVector().GetSafeNormal2D();
+				if (FVector::DotProduct(Fwd, To.GetSafeNormal()) > 0.35f)
+				{
+					const float Side = (FVector::CrossProduct(Fwd, To).Z > 0.f) ? -1.f : 1.f;
+					AICharacter->AddMovementInput(FVector::CrossProduct(FVector::UpVector, Fwd).GetSafeNormal() * Side, 0.6f);
+				}
+			}
+		}
+
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
 	{
 		if (MC->HasReachedDestination()) HandleIdleState(DeltaTime);
-		else IdleTimer = 0.f;
+		else { IdleTimer = 0.f; bIdleAnchorSet = false; }
 	}
 }
 
@@ -903,7 +1059,12 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 	if (!bUseCustomAttackLogic && CheckLeashAndReturn()) return;
 
 	if (UAIAnimationComponent* Anim = AICharacter->GetAIAnimation())
-		if (Anim->IsPlayingHitReact()) return;
+		if (Anim->IsPlayingAction())
+		{
+			if (!Anim->IsPlayingHitReact())
+				if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
+			return;
+		}
 
 	if (bUseCustomAttackLogic)
 	{
@@ -929,6 +1090,24 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 		AICharacter->SetAIState(EAIState::Attacking);
 		if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
 		return;
+	}
+
+	if (ScentTimer > 0.f)
+	{
+		if (IsTargetCurrentlySeen(Target)) ScentTimer = -1.f;
+		else if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
+		{
+			const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+			FVector TrailPoint = ScentTrail.Num() > 0 ? ScentTrail[0].Value : LastKnownLocation;
+			for (const TPair<float, FVector>& S : ScentTrail)
+			{
+				if (S.Key <= Now - ScentTrailDelay) TrailPoint = S.Value;
+				else break;
+			}
+			MC->SetDesiredSpeed(GetChaseSpeed() * 0.85f);
+			MC->MoveToLocation(TrailPoint, MC->AcceptanceRadius, true);
+			return;
+		}
 	}
 
 	if (!IsTargetCurrentlySeen(Target) && LastKnownActor.Get() == Target && !LastKnownLocation.IsZero())
@@ -1075,6 +1254,19 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 		}
 	}
 
+	if (HarassRetreatTimer > 0.f && MC
+		&& (!Combat || (!Combat->IsAttacking() && !Combat->IsCharging() && !Combat->IsInRecovery())))
+	{
+		HarassRetreatTimer -= DeltaTime;
+		ReleaseAttackTokenHeld();
+		FVector Away = (AICharacter->GetActorLocation() - Target->GetActorLocation()).GetSafeNormal2D();
+		if (Away.IsNearlyZero()) Away = AICharacter->GetActorForwardVector().GetSafeNormal2D();
+		MC->CancelPathMove();
+		MC->SetDesiredSpeed(GetChaseSpeed());
+		AICharacter->AddMovementInput(Away, 1.f);
+		return;
+	}
+
 	if (MinComfortRange > 0.f && MC && Dist < MinComfortRange && (!Combat || !Combat->IsAttacking()))
 	{
 		ReleaseAttackTokenHeld();
@@ -1211,6 +1403,9 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 				CombatStallTimer = 0.f;
 				bStallRepath = false;
 				StallRepathTime = 0.f;
+				if (AICharacter->GetHarassBelowHealthFraction() > 0.f
+					&& AICharacter->GetHealthFraction() <= AICharacter->GetHarassBelowHealthFraction())
+					HarassRetreatTimer = FMath::FRandRange(1.f, 1.8f);
 				if (MC) MC->CancelPathMove();
 			}
 			else

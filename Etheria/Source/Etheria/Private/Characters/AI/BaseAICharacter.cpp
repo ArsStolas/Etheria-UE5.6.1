@@ -92,6 +92,13 @@ void ABaseAICharacter::BeginPlay()
 	if (AIMovementComponent && PatrolSpline)
 		AIMovementComponent->SetPatrolSpline(PatrolSpline);
 
+	if (AIMovementComponent && IndividualVariance > 0.f)
+	{
+		const float F = FMath::FRandRange(1.f - IndividualVariance, 1.f + IndividualVariance);
+		AIMovementComponent->PatrolSpeed *= F;
+		AIMovementComponent->ChaseSpeed *= F;
+	}
+
 	if (bShowDetectionDecal)
 		SetDetectionDecalVisible(true);
 
@@ -137,6 +144,7 @@ void ABaseAICharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		W->GetTimerManager().ClearTimer(DormancyCheckTimerHandle);
 		W->GetTimerManager().ClearTimer(RespawnTimerHandle);
 		W->GetTimerManager().ClearTimer(DeathVFXTimerHandle);
+		W->GetTimerManager().ClearTimer(PackAlertTimerHandle);
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -469,6 +477,16 @@ bool ABaseAICharacter::ReactToThreat(AActor* Threat, bool bFromDamage)
 			AIMovementComponent->SetDesiredSpeed(AIMovementComponent->ChaseSpeed);
 			AIMovementComponent->MoveToLocation(Threat->GetActorLocation());
 		}
+		const float HowlNow = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+		if (!bFromDamage && !bJoiningFromRally && RallyHowlMontage && AIAnimationComponent
+			&& HowlNow - LastHowlTime > 20.f)
+		{
+			if (AIAnimationComponent->PlayActionMontage(RallyHowlMontage))
+			{
+				LastHowlTime = HowlNow;
+				if (AIMovementComponent) AIMovementComponent->StopMovement();
+			}
+		}
 		if (PackID != NAME_None) AlertPack(Threat);
 		RallyNearbyAllies(Threat);
 		return true;
@@ -504,7 +522,7 @@ void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 	ReactToThreat(PerceivedActor, false);
 }
 
-void ABaseAICharacter::JoinHuntDelayed(AActor* Threat)
+void ABaseAICharacter::JoinHuntDelayed(AActor* Threat, float MinDelay, float MaxDelay)
 {
 	if (!Threat || IsDead() || bIsDormant || CurrentTarget) return;
 	UWorld* W = GetWorld();
@@ -517,10 +535,72 @@ void ABaseAICharacter::JoinHuntDelayed(AActor* Threat)
 		AActor* T = PendingPackThreat.Get();
 		PendingPackThreat = nullptr;
 		if (!T || IsDead() || bIsDormant || CurrentTarget) return;
+		if (CurrentState == EAIState::Staggered || CurrentState == EAIState::Interacting) return;
 		if (!IsValidTargetCandidate(T)) return;
 		SetAwarenessLevel(EAIAwarenessLevel::Alert);
+		bJoiningFromRally = true;
 		OnPerceiveTarget(T);
-	}, FMath::FRandRange(0.15f, 0.55f), false);
+		bJoiningFromRally = false;
+	}, FMath::FRandRange(MinDelay, MaxDelay), false);
+}
+
+float ABaseAICharacter::GetHealthFraction() const
+{
+	if (!CachedHealthComponent) return 1.f;
+	const float Max = CachedHealthComponent->GetMaxHealth();
+	return (Max > 0.f) ? CachedHealthComponent->GetHealth() / Max : 1.f;
+}
+
+void ABaseAICharacter::TryPlayGreeting()
+{
+	if (!GreetingMontage || !bIsInteractable || !AIAnimationComponent) return;
+	if (CurrentState != EAIState::Idle && CurrentState != EAIState::Patrolling) return;
+	if (GetVelocity().SizeSquared2D() > 2500.f) return;
+	if (AIAnimationComponent->IsPlayingAction()) return;
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	if (Now - LastGreetTime < GreetingCooldown) return;
+	LastGreetTime = Now;
+	AIAnimationComponent->PlayActionMontage(GreetingMontage);
+}
+
+void ABaseAICharacter::ForcePanicFlee(AActor* Threat)
+{
+	if (!Threat || CurrentState == EAIState::Dead || CurrentState == EAIState::Fleeing || bIsDormant) return;
+	SetAwarenessLevel(EAIAwarenessLevel::Alert);
+	SetTarget(Threat);
+	SetAIState(EAIState::Fleeing);
+	if (GetWorld()) MoraleBreakUntil = GetWorld()->GetTimeSeconds() + MoraleBreakCooldown;
+	if (AIAnimationComponent) AIAnimationComponent->PlayStartle();
+	if (AIMovementComponent) { AIMovementComponent->StopPatrol(); AIMovementComponent->FleeFrom(Threat); }
+}
+
+void ABaseAICharacter::NotifyPackOfDeath()
+{
+	if (!ShouldEngageTargets()) return;
+	UWorld* W = GetWorld();
+	if (!W) return;
+
+	TArray<FOverlapResult> Overlaps;
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this);
+	W->OverlapMultiByObjectType(Overlaps, GetActorLocation(), FQuat::Identity,
+		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn),
+		FCollisionShape::MakeSphere(FMath::Max(CombatAlertRadius, 800.f)), Params);
+
+	TArray<ABaseAICharacter*> Allies;
+	for (const FOverlapResult& Ov : Overlaps)
+		if (ABaseAICharacter* O = Cast<ABaseAICharacter>(Ov.GetActor()))
+		{
+			if (O == this || O->IsDead() || O->IsDormant() || !O->ShouldEngageTargets()) continue;
+			if (O->GetClass() != GetClass()) continue;
+			if (PackID != NAME_None && O->PackID != PackID) continue;
+			Allies.AddUnique(O);
+		}
+
+	const bool bAlphaDied = (Rank >= EAIRank::Elite);
+	for (ABaseAICharacter* O : Allies)
+		if (ABaseAIController* AIC = Cast<ABaseAIController>(O->GetController()))
+			AIC->NotifyPackMateDied(bAlphaDied, Allies.Num() == 1);
 }
 
 void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmount)
@@ -673,10 +753,14 @@ void ABaseAICharacter::AlarmNearbyAllies(AActor* Threat)
 void ABaseAICharacter::RallyNearbyAllies(AActor* Threat)
 {
 
-	if (!bCallForHelpOnEngage || CombatAlertRadius <= 0.f || !Threat || bSuppressRallyBroadcast) return;
+	if (!bCallForHelpOnEngage || CombatAlertRadius <= 0.f || !Threat) return;
 	if (!ShouldEngageTargets()) return;
 	UWorld* W = GetWorld();
 	if (!W) return;
+
+	const float Now = W->GetTimeSeconds();
+	if (Now - LastRallyTime < 2.f) return;
+	LastRallyTime = Now;
 
 	TArray<FOverlapResult> Overlaps;
 	FCollisionQueryParams Params;
@@ -685,18 +769,26 @@ void ABaseAICharacter::RallyNearbyAllies(AActor* Threat)
 		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn),
 		FCollisionShape::MakeSphere(CombatAlertRadius), Params);
 
+	const bool bHowling = RallyHowlMontage && AIAnimationComponent
+		&& AIAnimationComponent->GetCurrentActionMontage() == RallyHowlMontage;
+	const float JoinMin = bHowling ? 0.6f : 0.15f;
+	const float JoinMax = bHowling ? 1.4f : 0.55f;
 	for (const FOverlapResult& Ov : Overlaps)
 	{
 		ABaseAICharacter* O = Cast<ABaseAICharacter>(Ov.GetActor());
 		if (!O || O == this || O->IsDead() || O->IsDormant()) continue;
-		if (!O->ShouldEngageTargets()) continue;
+		if (!O->ShouldEngageTargets())
+		{
+			O->OnPerceiveTarget(Threat);
+			continue;
+		}
 		if (!O->IsValidTargetCandidate(Threat)) continue;
 
 		const EAIState S = O->GetCurrentAIState();
 		if (S == EAIState::Chasing || S == EAIState::Attacking || S == EAIState::Fleeing || S == EAIState::Dead) continue;
 
 		if (bRallyEngagesDirectly)
-			O->JoinHuntDelayed(Threat);
+			O->JoinHuntDelayed(Threat, JoinMin, JoinMax);
 		else if (ABaseAIController* AIC = Cast<ABaseAIController>(O->GetController()))
 			AIC->InvestigateThreat(Threat);
 	}
@@ -710,7 +802,8 @@ void ABaseAICharacter::RallyNearbyAllies(AActor* Threat)
 void ABaseAICharacter::OnPackAlert(ABaseAICharacter* Alerter, AActor* Threat)
 {
 	if (!Threat || CurrentState == EAIState::Dead || bIsDormant) return;
-	if (CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking || CurrentState == EAIState::Fleeing) return;
+	if (CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking || CurrentState == EAIState::Fleeing
+		|| CurrentState == EAIState::Staggered || CurrentState == EAIState::Interacting) return;
 	OnPackAlerted.Broadcast(Alerter, Threat);
 
 	if (HostilityType == EAIHostilityType::Aggressive)
@@ -883,6 +976,7 @@ void ABaseAICharacter::Die()
 			GetMesh()->AddImpulse(LastHitDirection.GetSafeNormal() * DeathRagdollImpulse, NAME_None, true);
 	}
 
+	NotifyPackOfDeath();
 	OnAIDied.Broadcast();
 
 	const float MontageLength = (DeathMontage ? DeathMontage->GetPlayLength() : 1.5f);
@@ -1134,6 +1228,14 @@ void ABaseAICharacter::UpdateDormancy()
 		SetDormant(true);
 	else if (bIsDormant && DistSq < WakeSq)
 		SetDormant(false);
+
+	if (!bIsDormant)
+		if (AController* AC = GetController())
+		{
+			const bool bCombatState = (CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking
+				|| CurrentState == EAIState::Fleeing);
+			AC->SetActorTickInterval((!bCombatState && DistSq > FMath::Square(DormantDistance * 0.6f)) ? 0.15f : 0.f);
+		}
 }
 
 void ABaseAICharacter::SetDetectionDecalVisible(bool bVisible)

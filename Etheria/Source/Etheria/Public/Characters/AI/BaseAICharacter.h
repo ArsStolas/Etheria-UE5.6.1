@@ -17,6 +17,7 @@
 
 class UAIMovementComponent;
 class UAIAnimationComponent;
+class UAnimMontage;
 class UAICombatComponent;
 class ABaseAIController;
 class USplineComponent;
@@ -73,6 +74,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="AI") bool ShouldEngageTargets() const;
 	UFUNCTION(BlueprintPure, Category="AI") bool WantsInfiniteSightPursuit() const { return bInfiniteSightPursuit; }
+	UFUNCTION(BlueprintPure, Category="AI") float GetHealthFraction() const;
+	UFUNCTION(BlueprintPure, Category="AI") float GetHarassBelowHealthFraction() const { return HarassBelowHealthFraction; }
+	UFUNCTION(BlueprintCallable, Category="AI") void TryPlayGreeting();
+	UFUNCTION(BlueprintCallable, Category="AI") void ForcePanicFlee(AActor* Threat);
 
 	UFUNCTION(BlueprintPure, Category="AI") bool CanReactToPerception() const;
 
@@ -212,6 +217,22 @@ protected:
 		meta=(ToolTip="Idle NPCs turn to look at the player when noticed. Pure ambient flavor."))
 	bool bNoticeReactions = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0", ClampMax="0.3",
+		ToolTip="Per-instance random variation (fraction) applied to movement speeds at spawn so packmates don't move in lockstep. 0.08 = each individual is up to 8% faster/slower. 0 = identical clones."))
+	float IndividualVariance = 0.08f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
+		meta=(ToolTip="Played once (with cooldown) when the player steps close to this interactable NPC — a wave/nod greeting. Optional."))
+	TObjectPtr<UAnimMontage> GreetingMontage = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="1",
+		ToolTip="Seconds before the same NPC greets again."))
+	float GreetingCooldown = 15.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Combat", meta=(ClampMin="0", ClampMax="1",
+		ToolTip="Below this health fraction, a hostile switches to hit-and-run: after each strike it darts back out instead of staying in the melee. 0 = never. Wolves feel great around 0.35."))
+	float HarassBelowHealthFraction = 0.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior", meta=(ClampMin="0",
 		ToolTip="How far this AI can go from its spawn before it teleports back."))
 	float LeashRange = 2000.f;
@@ -277,9 +298,12 @@ protected:
 	float PackAlertRadius = 3000.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack",
-		meta=(EditCondition="HostilityType==EAIHostilityType::Aggressive",
-		ToolTip="When this AI engages, rally nearby aggressive allies onto the same target (independent of PackID). The reason packmates join in when you hit one of them."))
+		meta=(ToolTip="When this AI engages, rally nearby hostile allies onto the same target (independent of PackID). The reason packmates join in when you hit one of them."))
 	bool bCallForHelpOnEngage = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(EditCondition="bCallForHelpOnEngage",
+		ToolTip="Played ONCE on the spot when this AI engages by sight and calls the pack (wolf howl). Allies join while it plays. Optional."))
+	TObjectPtr<UAnimMontage> RallyHowlMontage = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Pack", meta=(EditCondition="bCallForHelpOnEngage", ClampMin="0",
 		ToolTip="How far the 'call for help' reaches. Nearby aggressive allies within this distance join the fight."))
@@ -404,7 +428,8 @@ private:
 	void UpdatePackFollow(float DeltaTime);
 
 	bool ReactToThreat(AActor* Threat, bool bFromDamage);
-	void JoinHuntDelayed(AActor* Threat);
+	void JoinHuntDelayed(AActor* Threat, float MinDelay = 0.15f, float MaxDelay = 0.55f);
+	void NotifyPackOfDeath();
 	void AlarmNearbyAllies(AActor* Threat);
 
 	void RallyNearbyAllies(AActor* Threat);
@@ -474,4 +499,8 @@ private:
 	FTimerHandle DeathVFXTimerHandle;
 	FTimerHandle PackAlertTimerHandle;
 	TWeakObjectPtr<AActor> PendingPackThreat;
+	float LastGreetTime = -100.f;
+	float LastHowlTime = -100.f;
+	float LastRallyTime = -100.f;
+	bool bJoiningFromRally = false;
 };

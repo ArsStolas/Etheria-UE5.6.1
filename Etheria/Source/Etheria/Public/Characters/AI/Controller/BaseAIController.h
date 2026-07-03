@@ -42,6 +42,8 @@ public:
 
 	void NotifyTargetConfirmedByDamage(AActor* InstigatorActor);
 
+	void NotifyPackMateDied(bool bAlphaDied, bool bLastSurvivor);
+
 	UFUNCTION(BlueprintImplementableEvent, Category="AI|Combat|Custom")
 	void TickCustomAttackLogic(AActor* Target, float DistanceToTarget, float DeltaTime);
 
@@ -95,6 +97,14 @@ protected:
 		ToolTip="Seconds of the target's last velocity extrapolated past the last-seen point during a lost-sight pursuit."))
 	float LostSightPredictTime = 0.8f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception", meta=(ClampMin="0",
+		ToolTip="Scent tracking: after the sight memory expires, this AI follows the target's TRAIL (its position from a few seconds ago) for this many seconds before giving up. Softer than infinite sight, very predator-like. 0 = off."))
+	float ScentTrackDuration = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception", meta=(ClampMin="0.5", ClampMax="5",
+		ToolTip="How far BEHIND the target the scent trail is (seconds). Higher = the trail is colder, easier to escape."))
+	float ScentTrailDelay = 2.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Investigate",
 		meta=(ToolTip="When the AI hears a noise (and isn't already chasing), it walks to investigate the source instead of instantly locking on through walls."))
 	bool bInvestigateNoises = true;
@@ -110,6 +120,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Investigate", meta=(ClampMin="0.1",
 		ToolTip="Seconds an idle NPC keeps facing a noticed actor before losing interest."))
 	float NoticeDuration = 3.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Investigate", meta=(ClampMin="50",
+		ToolTip="Idle NPCs only turn to look at someone INSIDE this range (~1.8m). Farther away they keep their own facing (no across-the-plaza staring). They release the look when the actor walks back out."))
+	float NoticeDistance = 180.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Perception|Investigate", meta=(ClampMin="0.1",
 		ToolTip="How long an NPC stays edgy after hearing a noise, so a bark/posture (OnAwarenessChanged) can actually play."))
@@ -341,6 +355,8 @@ private:
 	float InvestigateTimer = 0.f;
 	TWeakObjectPtr<AActor> NoticedActor;
 	float NoticeTimer = 0.f;
+	float IdleAnchorYaw = 0.f;
+	bool bIdleAnchorSet = false;
 	float BaitTimer = 0.f;
 	bool bDefendObserved = false;
 	bool bBaitCommitted = false;
@@ -366,6 +382,16 @@ private:
 	float StallRepathTime = 0.f;
 	FVector EvadeDir = FVector::ZeroVector;
 	float PlannedMinRange = 0.f;
+	float HarassRetreatTimer = 0.f;
+	float ScentTimer = -1.f;
+	TArray<TPair<float, FVector>> ScentTrail;
+	TWeakObjectPtr<AActor> LastScentTarget;
+	bool bPackEnraged = false;
+	bool bPackDemoralized = false;
+	float BasePackAttackInterval = -1.f;
+	float BasePackStrafeSpeed = -1.f;
+	float BasePackEvadeChance = -1.f;
+	float BasePackChaseSpeed = -1.f;
 	float OrbitDir = 1.f;
 	float OrbitDirTimer = 0.f;
 
