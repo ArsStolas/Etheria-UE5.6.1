@@ -106,6 +106,23 @@ void UAIAnimationComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 	EnsureModeInitialized();
 
+	if (OwnerCharacter && DeltaTime > 0.f)
+	{
+		const float Yaw = OwnerCharacter->GetActorRotation().Yaw;
+		if (bHasLastYaw)
+		{
+			float RawYawSpeed = FMath::FindDeltaAngleDegrees(LastOwnerYaw, Yaw) / DeltaTime;
+			if (FMath::Abs(RawYawSpeed) > 720.f)
+			{
+				RawYawSpeed = 0.f;
+				SmoothedYawSpeed = 0.f;
+			}
+			SmoothedYawSpeed = FMath::FInterpTo(SmoothedYawSpeed, RawYawSpeed, DeltaTime, 10.f);
+		}
+		LastOwnerYaw = Yaw;
+		bHasLastYaw = true;
+	}
+
 	if (AnimationMode == EAIAnimationMode::AnimBlueprint)
 	{
 
@@ -145,6 +162,21 @@ void UAIAnimationComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 		if (!bLocomotionPaused && !bIsPlayingIdleVariation)
 		{
+			TurnMontageCooldown -= DeltaTime;
+			const EAIState OwnerState = OwnerCharacter ? OwnerCharacter->GetCurrentAIState() : EAIState::Idle;
+			if (CurrentLocomotionState == EAILocomotionState::Idle
+				&& (OwnerState == EAIState::Idle || OwnerState == EAIState::Patrolling || OwnerState == EAIState::Investigating)
+				&& TurnMontageCooldown <= 0.f
+				&& FMath::Abs(SmoothedYawSpeed) > TurnInPlaceYawSpeed
+				&& OwnerCharacter && OwnerCharacter->GetVelocity().SizeSquared2D() < FMath::Square(IdleSpeedThreshold * 2.f))
+			{
+				UAnimMontage* Turn = SmoothedYawSpeed > 0.f ? TurnRightMontage : TurnLeftMontage;
+				if (Turn && PlayActionMontage(Turn))
+				{
+					TurnMontageCooldown = Turn->GetPlayLength() + 0.2f;
+					return;
+				}
+			}
 			UpdateLocomotionDirect();
 			ApplyLocomotionSpeedMatch(DeltaTime);
 		}
@@ -208,6 +240,7 @@ void UAIAnimationComponent::UpdateABPVariables(float DeltaTime)
 		ResolvedGroundSpeedName = ResolveABPFloatName(C, ABP_GroundSpeedName, { TEXT("GroundSpeed"), TEXT("Speed"), TEXT("MoveSpeed"), TEXT("CurrentSpeed"), TEXT("WalkSpeed") });
 		ResolvedFallSpeedName   = ResolveABPFloatName(C, ABP_FallSpeedName, { TEXT("FallSpeed"), TEXT("VerticalVelocity"), TEXT("ZVelocity") });
 		ResolvedDirectionName   = ResolveABPFloatName(C, ABP_DirectionName, { TEXT("Direction"), TEXT("MovementDirection"), TEXT("MoveDirection") });
+		ResolvedYawSpeedName    = ResolveABPFloatName(C, ABP_YawSpeedName, { TEXT("YawDeltaSpeed"), TEXT("YawSpeed"), TEXT("TurnRate") });
 		ShouldMovePropCached = ResolveABPBoolProp(C, { TEXT("ShouldMove"), TEXT("bShouldMove"), TEXT("IsMoving"), TEXT("bIsMoving"), TEXT("IsAccelerating"), TEXT("bIsAccelerating") });
 		IsFallingPropCached  = ResolveABPBoolProp(C, { TEXT("IsFalling"), TEXT("bIsFalling"), TEXT("IsInAir"), TEXT("bIsInAir") });
 
@@ -221,6 +254,7 @@ void UAIAnimationComponent::UpdateABPVariables(float DeltaTime)
 	SetABPFloat(Anim, ResolvedGroundSpeedName, SmoothedGroundSpeed);
 	SetABPFloat(Anim, ResolvedFallSpeedName, Vel.Z);
 	SetABPFloat(Anim, ResolvedDirectionName, SmoothedDirection);
+	SetABPFloat(Anim, ResolvedYawSpeedName, SmoothedYawSpeed);
 
 	if (BoundAnimInstance.Get() != Anim)
 	{
@@ -426,8 +460,6 @@ UAnimMontage* UAIAnimationComponent::PlayDirectionalHitReaction(const FVector& W
 
 UAnimMontage* UAIAnimationComponent::PlayStartle()
 {
-
-	if (AnimationMode == EAIAnimationMode::DirectPlayback) return nullptr;
 	return StartleMontage ? PlayActionMontage(StartleMontage) : nullptr;
 }
 

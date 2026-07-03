@@ -22,6 +22,7 @@ AGolemBossCharacter::AGolemBossCharacter()
 
 	HostilityType = EAIHostilityType::Aggressive;
 	Rank = EAIRank::Boss;
+	RespawnCondition = EAIRespawnCondition::Never;
 
 	bCanReceiveDamage = false;
 

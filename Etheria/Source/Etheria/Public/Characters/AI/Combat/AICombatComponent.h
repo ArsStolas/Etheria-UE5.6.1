@@ -327,6 +327,7 @@ private:
 	bool bHitWindowActive = false;
 	float HitWindowActiveTimer = 0.f;
 	bool bHitConnectedThisSwing = false;
+	bool bImpactSoundPlayedThisSwing = false;
 	TSet<TWeakObjectPtr<AActor>> HitThisSwing;
 	int32 MultiTargetHitsThisSwing = 0;
 

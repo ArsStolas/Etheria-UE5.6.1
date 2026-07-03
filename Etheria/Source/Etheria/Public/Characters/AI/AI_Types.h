@@ -12,6 +12,8 @@
 #include "AI_Types.generated.h"
 
 class UAnimMontage;
+class USoundBase;
+class UNiagaraSystem;
 
 UENUM(BlueprintType)
 enum class EAIHostilityType : uint8
@@ -100,6 +102,15 @@ struct FAIAttackData
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Looping wind-up montage played during a charged attack's ChargeTime — the readable telegraph."))
 	TObjectPtr<UAnimMontage> ChargeLoopMontage = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Auto-played at the attacker's location when the swing STARTS — the audio telegraph. Crucial for attacks coming from behind the player."))
+	TObjectPtr<USoundBase> WindupSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Auto-played at the victim's location when the hit CONNECTS."))
+	TObjectPtr<USoundBase> ImpactSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Auto-spawned at the attacker when the swing starts (dust kick, glow...). Optional."))
+	TObjectPtr<UNiagaraSystem> WindupVFX = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ToolTip = "Cleave/AoE: hit all valid targets in the range+arc, not just the current one.")) bool bMultiTarget = false;
 

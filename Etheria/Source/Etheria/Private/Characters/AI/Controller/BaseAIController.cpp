@@ -20,6 +20,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Navigation/CrowdFollowingComponent.h"
 #include "NavigationSystem.h"
+#include "Animation/AnimInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
@@ -614,35 +615,59 @@ void ABaseAIController::UpdateDetection(float DeltaTime)
 	AActor* Cand = CachedDetectionCandidate.Get();
 	if (!Cand)
 	{
+		if (PendingDetectTarget.IsValid() && AICharacter->ShouldEngageTargets()
+			&& AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Alert
+			&& !LastCandidateLocation.IsZero())
+		{
+			PendingDetectTarget = nullptr;
+			SuspicionTimer = SuspicionDuration;
+			Investigate(LastCandidateLocation);
+			return;
+		}
 		if (DetectionProgress > 0.f)
-			DetectionProgress = FMath::Max(0.f, DetectionProgress - DeltaTime / FMath::Max(DetectionReactionTime, 0.05f));
+			DetectionProgress = FMath::Max(0.f, DetectionProgress - DeltaTime / (FMath::Max(DetectionReactionTime, 0.05f) * 3.5f));
 		if (DetectionProgress <= 0.f)
 		{
 			PendingDetectTarget = nullptr;
 
-			if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Alert)
-				AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
-			else if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Suspicious
-				&& SuspicionTimer <= 0.f && !NoticedActor.IsValid())
-				AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+			if (AICharacter->GetCurrentAIState() != EAIState::Investigating)
+			{
+				if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Alert)
+					AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+				else if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Suspicious
+					&& SuspicionTimer <= 0.f && !NoticedActor.IsValid())
+					AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+			}
 		}
 		return;
 	}
 
 	if (DetectionProgress <= 0.f) DetectionReactionScale = FMath::FRandRange(0.85f, 1.3f);
 	PendingDetectTarget = Cand;
+	LastCandidateLocation = Cand->GetActorLocation();
 	if (DetectionReactionTime <= 0.05f) { DetectionProgress = 0.f; PendingDetectTarget = nullptr; CachedDetectionCandidate = nullptr; AICharacter->OnPerceiveTarget(Cand); return; }
 
 	const float D = FVector::Dist(AICharacter->GetActorLocation(), Cand->GetActorLocation());
 	const float CloseScale = FMath::GetMappedRangeValueClamped(FVector2D(0.f, DetectionRadius), FVector2D(3.f, 1.f), D);
-	DetectionProgress += DeltaTime * CloseScale / (FMath::Max(DetectionReactionTime, 0.05f) * DetectionReactionScale);
+	const float SpeedScale = FMath::GetMappedRangeValueClamped(FVector2D(80.f, 550.f), FVector2D(0.6f, 1.5f), Cand->GetVelocity().Size2D());
+	DetectionProgress += DeltaTime * CloseScale * SpeedScale / (FMath::Max(DetectionReactionTime, 0.05f) * DetectionReactionScale);
+
+	if (AICharacter->ShouldEngageTargets()
+		&& AICharacter->GetAwarenessLevel() >= EAIAwarenessLevel::Suspicious
+		&& AICharacter->GetVelocity().SizeSquared2D() < 10000.f)
+	{
+		const EAIState FaceState = AICharacter->GetCurrentAIState();
+		if (FaceState == EAIState::Idle || FaceState == EAIState::Patrolling || FaceState == EAIState::Investigating)
+			FaceTargetYawOnly(Cand, DeltaTime, 3.f);
+	}
 
 	if (DetectionProgress >= SuspiciousThreshold && AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Suspicious)
 	{
 		AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
 		if (NoticedActor.Get() != Cand) NoticeActor(Cand);
 	}
-	if (DetectionProgress >= AlertThreshold && AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Alert)
+	if (DetectionProgress >= AlertThreshold && AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Alert
+		&& (AICharacter->ShouldEngageTargets() || AICharacter->CanFlee()))
 		AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert);
 
 	if (DetectionProgress >= 1.f)
@@ -696,7 +721,7 @@ void ABaseAIController::StartSearchAtLastKnown()
 	if (!LastKnownLocation.IsZero())
 	{
 		AICharacter->AlertPackSearch(LastKnownLocation);
-		BeginInvestigate(LastKnownLocation);
+		BeginInvestigate(LastKnownLocation, true);
 	}
 	else AICharacter->SetAIState(EAIState::Returning);
 }
@@ -798,15 +823,21 @@ void ABaseAIController::ReconcileHostility()
 	}
 }
 
-void ABaseAIController::BeginInvestigate(const FVector& Location)
+void ABaseAIController::BeginInvestigate(const FVector& Location, bool bUrgent)
 {
+	const EAIState S = AICharacter->GetCurrentAIState();
+	if (S == EAIState::Dead || S == EAIState::Staggered || S == EAIState::Interacting || S == EAIState::Fleeing) return;
+
 	InvestigateLocation = Location;
-	InvestigateTimer = InvestigateDuration;
-	AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+	InvestigateTimer = InvestigateDuration * (bUrgent ? 1.5f : 1.f);
+	bInvestigateUrgent = bUrgent;
+	bInvestigatePausing = false;
+	InvestigateScanPause = 0.f;
+	AICharacter->SetAwarenessLevel(bUrgent ? EAIAwarenessLevel::Alert : EAIAwarenessLevel::Suspicious);
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
 	{
 		MC->StopPatrol();
-		MC->SetDesiredSpeed(MC->PatrolSpeed);
+		MC->SetDesiredSpeed(bUrgent ? GetChaseSpeed() * 0.9f : MC->PatrolSpeed);
 		MC->MoveToLocation(Location);
 	}
 	ReacquireCooldown = 0.f;
@@ -843,11 +874,30 @@ void ABaseAIController::HandleInvestigateState(float DeltaTime)
 
 	if (MC->HasReachedDestination())
 	{
+		if (!bInvestigatePausing)
+		{
+			bInvestigatePausing = true;
+			InvestigateScanPause = FMath::FRandRange(0.8f, 1.6f);
+			ScanGoalYaw = AICharacter->GetActorRotation().Yaw + FMath::FRandRange(-140.f, 140.f);
+		}
+
+		InvestigateScanPause -= DeltaTime;
+		if (!PendingDetectTarget.IsValid())
+		{
+			const FRotator Cur = AICharacter->GetActorRotation();
+			AICharacter->SetActorRotation(FMath::RInterpTo(Cur, FRotator(Cur.Pitch, ScanGoalYaw, Cur.Roll), DeltaTime, 3.f));
+		}
+		if (InvestigateScanPause > 0.f) return;
+
+		bInvestigatePausing = false;
 		if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
 		{
 			FNavLocation NextPt;
 			if (Nav->GetRandomReachablePointInRadius(InvestigateLocation, InvestigateSearchRadius, NextPt))
-			{ MC->SetDesiredSpeed(MC->PatrolSpeed); MC->MoveToLocation(NextPt.Location); }
+			{
+				MC->SetDesiredSpeed(bInvestigateUrgent ? FMath::Min(MC->PatrolSpeed * 1.7f, GetChaseSpeed()) : MC->PatrolSpeed);
+				MC->MoveToLocation(NextPt.Location);
+			}
 		}
 	}
 }
@@ -1676,6 +1726,16 @@ void ABaseAIController::HandleInteractState(float DeltaTime)
 	}
 
 	FaceTargetYawOnly(Partner, DeltaTime);
+
+	InteractGestureTimer -= DeltaTime;
+	if (InteractGestureTimer <= 0.f)
+	{
+		InteractGestureTimer = FMath::FRandRange(4.f, 7.f);
+		UAnimInstance* MeshAnim = AICharacter->GetMesh() ? AICharacter->GetMesh()->GetAnimInstance() : nullptr;
+		if (MeshAnim && MeshAnim->Montage_IsPlaying(nullptr)) return;
+		if (UAIAnimationComponent* Anim = AICharacter->GetAIAnimation())
+			if (!Anim->IsPlayingAction()) Anim->PlayInteraction();
+	}
 }
 
 void ABaseAIController::HandleStaggerState(float DeltaTime)

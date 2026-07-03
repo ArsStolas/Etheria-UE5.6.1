@@ -196,6 +196,36 @@ void UGolemBossComponent::BrainTick()
 	}
 	else if (!OwnerCharacter->IsDead())
 	{
+		AActor* WatchT = OwnerCharacter->GetCurrentTarget();
+		if (!WatchT || OwnerCharacter->IsTargetDeadOrInvalid(WatchT))
+		{
+			if (bHadTargetThisActivation && Now >= IntroEndTime)
+			{
+				if (TargetInvalidTime < 0.f) TargetInvalidTime = Now;
+				else if (Now - TargetInvalidTime > 3.f)
+				{
+					ResetEncounter();
+					return;
+				}
+			}
+		}
+		else
+		{
+			bHadTargetThisActivation = true;
+			TargetInvalidTime = -1.f;
+			const float ArenaR = GetArenaRadius();
+			if (ArenaR > 0.f && FVector::Dist2D(WatchT->GetActorLocation(), ResolveArenaCentre()) > ArenaR * 1.6f)
+			{
+				if (TargetOutOfArenaTime < 0.f) TargetOutOfArenaTime = Now;
+				else if (Now - TargetOutOfArenaTime > 8.f)
+				{
+					ResetEncounter();
+					return;
+				}
+			}
+			else TargetOutOfArenaTime = -1.f;
+		}
+
 		UpdatePhaseFromHealth();
 		if (State == EGolemAttackState::Windup && !bToppled)
 		{
@@ -223,7 +253,15 @@ void UGolemBossComponent::BrainTick()
 					}
 				}
 
-				if (bFacingOK && (bHasTarget || PendingForcedAttack >= 0))
+				bool bTargetInArena = true;
+				if (bHasTarget && PendingForcedAttack < 0)
+				{
+					const float ArenaR = GetArenaRadius();
+					if (ArenaR > 0.f)
+						bTargetInArena = FVector::Dist2D(T->GetActorLocation(), ResolveArenaCentre()) <= ArenaR * 1.1f;
+				}
+
+				if (bFacingOK && bTargetInArena && (bHasTarget || PendingForcedAttack >= 0))
 				{
 					const int32 Idx = SelectNextAttack();
 					if (Idx >= 0) BeginAttack(Idx);
@@ -275,6 +313,9 @@ void UGolemBossComponent::ActivateBoss()
 	}
 	IntroEndTime = Now + IntroDelay;
 	NextAttackReadyTime = FMath::Max(IntroEndTime, Now + FMath::FRandRange(0.4f, 0.4f + GlobalCooldownRandom));
+	TargetInvalidTime = -1.f;
+	TargetOutOfArenaTime = -1.f;
+	bHadTargetThisActivation = false;
 
 	if (UAICombatComponent* Combat = OwnerCharacter->GetAICombat())
 		Combat->EnterCombat();
@@ -290,6 +331,55 @@ void UGolemBossComponent::DeactivateBoss()
 		Combat->ExitCombat();
 	HideBossUIAndMusic();
 	bActivated = false;
+	PendingForcedAttack = -1;
+	TargetInvalidTime = -1.f;
+	TargetOutOfArenaTime = -1.f;
+}
+
+void UGolemBossComponent::ResetEncounter()
+{
+	if (OwnerCharacter)
+		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+			Anim->StopCurrentAction();
+	if (State != EGolemAttackState::Idle) FinishAttack(true);
+	if (bToppled) EndTopple();
+	ClearAirZones();
+	ClearArenaCrystals();
+	EndBigCrystal();
+
+	for (FGolemWeakPoint& WP : WeakPoints)
+	{
+		WP.CurrentHealth = WP.Health;
+		WP.bBroken = false;
+		WP.bVulnerable = false;
+		WP.CrystalHits = 0;
+	}
+
+	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(ExposeLingerTimerHandle);
+	ExposingAttackId = NAME_None;
+	for (float& T : AttackReadyTimes) T = 0.f;
+	LastAttackIndex = -1;
+
+	CurrentPhase = 0;
+	PendingForcedAttack = -1;
+	NextAttackReadyTime = 0.f;
+	IntroEndTime = 0.f;
+	TargetInvalidTime = -1.f;
+	TargetOutOfArenaTime = -1.f;
+	bHadTargetThisActivation = false;
+
+	if (OwnerCharacter)
+	{
+		if (UHealthComponent* HP = OwnerCharacter->FindComponentByClass<UHealthComponent>())
+			HP->Heal(HP->GetMaxHealth());
+		OwnerCharacter->ClearTarget();
+		if (UAICombatComponent* Combat = OwnerCharacter->GetAICombat())
+			Combat->ExitCombat();
+	}
+
+	HideBossUIAndMusic();
+	bActivated = false;
+	OnGolemEncounterReset.Broadcast();
 }
 
 bool UGolemBossComponent::ForceAttack(FName AttackId)
@@ -351,6 +441,7 @@ void UGolemBossComponent::LaunchRockNow()
 		Rock = HeldRock;
 		HeldRock = nullptr;
 		Rock->Launch(Origin, Target, Travel, RockThrowArcHeight);
+		InFlightRocks.Add(Rock);
 	}
 	else
 	{
@@ -543,7 +634,7 @@ void UGolemBossComponent::EnterRecovery()
 		{
 			if (BombardImpactFired.IsValidIndex(i) && BombardImpactFired[i]) continue;
 			const FVector P = CurrentTelegraph.ImpactPoints[i];
-			ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+			ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 			if (BombardImpactFired.IsValidIndex(i)) BombardImpactFired[i] = true;
 
 			FGolemStrikeEvent St;
@@ -580,6 +671,13 @@ void UGolemBossComponent::FinishAttack(bool bInterrupted)
 	ClearBeamVFX();
 
 	if (HeldRock) { HeldRock->Destroy(); HeldRock = nullptr; }
+
+	if (bInterrupted)
+	{
+		for (const TWeakObjectPtr<AActor>& R : InFlightRocks)
+			if (AActor* Rock = R.Get()) Rock->Destroy();
+	}
+	InFlightRocks.Reset();
 
 	const UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
@@ -838,7 +936,7 @@ void UGolemBossComponent::DoStrike()
 	{
 		const FVector C = bSockets ? SocketPts[0]
 			: (CurrentTelegraph.ImpactPoints.Num() > 0 ? CurrentTelegraph.ImpactPoints[0] : ResolveArenaCentre());
-		ApplyRadialBurst(C, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+		ApplyRadialBurst(C, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 		Broadcast(C, Cfg.ImpactRadius, 0, 1);
 		if (bDrawDebugHazards) DrawImpactDebug(C, Cfg.ImpactRadius, Cfg.bAirborneIsSafe);
 		break;
@@ -901,7 +999,7 @@ void UGolemBossComponent::DoStrike()
 			for (int32 i = 0; i < Num; ++i)
 			{
 				const FVector P = CurrentTelegraph.ImpactPoints[i];
-				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 				if (BombardImpactFired.IsValidIndex(i)) BombardImpactFired[i] = true;
 				if (BombardLaunched.IsValidIndex(i)) BombardLaunched[i] = true;
 				Broadcast(P, Cfg.ImpactRadius, i, Num);
@@ -1033,7 +1131,7 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 			if (BombardImpactFired.IsValidIndex(i) && !BombardImpactFired[i] && ElapsedActive >= When)
 			{
 				BombardImpactFired[i] = true;
-				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 
 				FGolemStrikeEvent St;
 				St.AttackId = Cfg.AttackId; St.Shape = Cfg.Shape; St.Location = P;
@@ -1096,7 +1194,8 @@ AGolemFallingRock* UGolemBossComponent::SpawnFallingRock(const FVector& Origin, 
 
 	if (RockActorClass)
 	{
-		W->SpawnActor<AActor>(RockActorClass, Origin, (Target - Origin).Rotation(), SpawnParams);
+		if (AActor* Spawned = W->SpawnActor<AActor>(RockActorClass, Origin, (Target - Origin).Rotation(), SpawnParams))
+			InFlightRocks.Add(Spawned);
 		return nullptr;
 	}
 
@@ -1109,6 +1208,7 @@ AGolemFallingRock* UGolemBossComponent::SpawnFallingRock(const FVector& Origin, 
 	{
 		Rock->Configure(Mesh, RockMeshScale, RockSpinSpeed);
 		Rock->Launch(Origin, Target, TravelTime, ArcHeight);
+		InFlightRocks.Add(Rock);
 	}
 	return Rock;
 }
@@ -1642,7 +1742,32 @@ void UGolemBossComponent::UpdatePhaseFromHealth()
 	{
 		const int32 Old = CurrentPhase;
 		CurrentPhase = Best;
-		OnGolemPhaseChanged.Broadcast(Old, CurrentPhase, Phases[CurrentPhase].PhaseName);
+		const FGolemPhaseConfig& Phase = Phases[CurrentPhase];
+
+		if (State != EGolemAttackState::Idle)
+		{
+			if (OwnerCharacter)
+				if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+					Anim->StopCurrentAction();
+			FinishAttack(true);
+		}
+
+		float TransitionDelay = FMath::Max(Phase.TransitionPause, 0.f);
+		if (Phase.TransitionMontage && OwnerCharacter)
+		{
+			if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+				if (Anim->PlayActionMontage(Phase.TransitionMontage))
+					TransitionDelay += Phase.TransitionMontage->GetPlayLength();
+		}
+
+		const UWorld* W = GetWorld();
+		const float Now = W ? W->GetTimeSeconds() : 0.f;
+		NextAttackReadyTime = FMath::Max(NextAttackReadyTime, Now + TransitionDelay);
+
+		if (Phase.ForcedOpenerAttackId != NAME_None)
+			ForceAttack(Phase.ForcedOpenerAttackId);
+
+		OnGolemPhaseChanged.Broadcast(Old, CurrentPhase, Phase.PhaseName);
 	}
 }
 
@@ -1751,6 +1876,9 @@ bool UGolemBossComponent::RouteBodyHit(float Damage, AActor* Instigator)
 {
 	if (Damage <= 0.f) return false;
 
+	if (Instigator && OwnerCharacter && !OwnerCharacter->GetCurrentTarget())
+		OwnerCharacter->OnPerceiveTarget(Instigator);
+
 	if (bToppled)
 	{
 		for (const FGolemWeakPoint& WP : WeakPoints)
@@ -1769,7 +1897,14 @@ bool UGolemBossComponent::RouteBodyHit(float Damage, AActor* Instigator)
 		if (DistSq < BestDistSq) { BestDistSq = DistSq; BestArm = WP.Id; }
 	}
 
-	const bool bApplied = (BestArm != NAME_None) && HitArm(BestArm, Damage, Instigator);
+	if (BestArm == NAME_None)
+	{
+		DealDamageToBoss(Damage * UnexposedArmDamageMultiplier, Instigator);
+		if (!bActivated && bAutoActivateOnTarget) ActivateBoss();
+		return true;
+	}
+
+	const bool bApplied = HitArm(BestArm, Damage, Instigator);
 	if (bApplied && !bActivated && bAutoActivateOnTarget) ActivateBoss();
 	return bApplied;
 }
@@ -2013,8 +2148,9 @@ void UGolemBossComponent::ShowBossUIAndMusic()
 		}
 	}
 
-	if (CombatMusic && !CombatMusicComp)
+	if (CombatMusic)
 	{
+		if (CombatMusicComp) { CombatMusicComp->Stop(); CombatMusicComp = nullptr; }
 		CombatMusicComp = UGameplayStatics::CreateSound2D(this, CombatMusic, 1.f, 1.f, 0.f, nullptr, false, false);
 		if (CombatMusicComp)
 		{

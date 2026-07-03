@@ -296,7 +296,7 @@ private:
 	bool IsTargetCurrentlySeen(AActor* Target);
 
 	void StartSearchAtLastKnown();
-	void BeginInvestigate(const FVector& Location);
+	void BeginInvestigate(const FVector& Location, bool bUrgent = false);
 	void DrawDebugPerception() const;
 	float GetEffectiveAttackRange() const;
 
@@ -353,6 +353,10 @@ private:
 	TWeakObjectPtr<AActor> CachedDetectionCandidate;
 	FVector InvestigateLocation = FVector::ZeroVector;
 	float InvestigateTimer = 0.f;
+	bool bInvestigateUrgent = false;
+	bool bInvestigatePausing = false;
+	float InvestigateScanPause = 0.f;
+	float InteractGestureTimer = 0.f;
 	TWeakObjectPtr<AActor> NoticedActor;
 	float NoticeTimer = 0.f;
 	float IdleAnchorYaw = 0.f;
@@ -386,6 +390,7 @@ private:
 	float ScentTimer = -1.f;
 	TArray<TPair<float, FVector>> ScentTrail;
 	TWeakObjectPtr<AActor> LastScentTarget;
+	FVector LastCandidateLocation = FVector::ZeroVector;
 	bool bPackEnraged = false;
 	bool bPackDemoralized = false;
 	float BasePackAttackInterval = -1.f;

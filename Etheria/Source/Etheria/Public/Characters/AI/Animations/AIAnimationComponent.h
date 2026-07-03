@@ -94,6 +94,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|ABP Variables", meta=(EditCondition="AnimationMode==EAIAnimationMode::AnimBlueprint"))
 	FName ABP_DirectionName = TEXT("Direction");
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|ABP Variables", meta=(EditCondition="AnimationMode==EAIAnimationMode::AnimBlueprint",
+		ToolTip="Smoothed yaw rotation speed (deg/s, signed) fed to the ABP so a turn-in-place blendspace/lean can react when the AI pivots while stationary."))
+	FName ABP_YawSpeedName = TEXT("YawDeltaSpeed");
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> IdleBaseMontage;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> WalkForwardMontage;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> WalkBackwardMontage;
@@ -104,6 +108,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> WalkRightMontage;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> FallingMontage;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) TObjectPtr<UAnimMontage> LandingMontage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback",
+		ToolTip="Played when the AI pivots left while stationary (turn-in-place). Optional — without it the body just rotates."))
+	TObjectPtr<UAnimMontage> TurnLeftMontage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Locomotion", meta=(EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback",
+		ToolTip="Played when the AI pivots right while stationary (turn-in-place). Optional."))
+	TObjectPtr<UAnimMontage> TurnRightMontage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="10", EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback",
+		ToolTip="Yaw speed (deg/s) above which a stationary AI plays its turn montage instead of ice-skating."))
+	float TurnInPlaceYawSpeed = 45.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0", EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) float IdleSpeedThreshold = 5.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Animation|Thresholds", meta=(ClampMin="0", EditCondition="AnimationMode==EAIAnimationMode::DirectPlayback")) float RunSpeedThreshold = 300.f;
@@ -187,6 +203,11 @@ private:
 	FName ResolvedGroundSpeedName;
 	FName ResolvedFallSpeedName;
 	FName ResolvedDirectionName;
+	FName ResolvedYawSpeedName;
+	float SmoothedYawSpeed = 0.f;
+	float LastOwnerYaw = 0.f;
+	bool bHasLastYaw = false;
+	float TurnMontageCooldown = 0.f;
 
 	TWeakObjectPtr<UClass> CachedABPClass;
 };

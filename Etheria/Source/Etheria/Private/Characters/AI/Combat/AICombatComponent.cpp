@@ -19,6 +19,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "CollisionQueryParams.h"
@@ -208,6 +209,7 @@ bool UAICombatComponent::ExecuteAttack(int32 AttackIndex)
 	bHitWindowActive = false;
 	HitWindowActiveTimer = 0.f;
 	bHitConnectedThisSwing = false;
+	bImpactSoundPlayedThisSwing = false;
 	HitThisSwing.Reset();
 	MultiTargetHitsThisSwing = 0;
 	bFeintArmed = false;
@@ -219,6 +221,12 @@ bool UAICombatComponent::ExecuteAttack(int32 AttackIndex)
 	HitWindowTimer = (Atk.HitWindowTime < 0.f) ? Atk.HitWindowTime : FMath::Max(Atk.HitWindowTime, MinTelegraphTime);
 
 	ApplyLunge(Atk);
+
+	if (Atk.WindupSound)
+		UGameplayStatics::PlaySoundAtLocation(this, Atk.WindupSound, OwnerCharacter->GetActorLocation());
+	if (Atk.WindupVFX)
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, Atk.WindupVFX,
+			OwnerCharacter->GetActorLocation(), OwnerCharacter->GetActorRotation());
 
 	OnAIAttackStarted.Broadcast(Atk, AttackIndex, Atk.AttackMontage);
 	return true;
@@ -423,6 +431,12 @@ bool UAICombatComponent::ApplyHitDamageTo(AActor* Victim, const FAIAttackData& A
 
 	UGameplayStatics::ApplyPointDamage(Victim, Damage, HitDir, FHitResult(),
 		OwnerCharacter->GetController(), OwnerCharacter, UDamageType::StaticClass());
+
+	if (Atk.ImpactSound && !bImpactSoundPlayedThisSwing)
+	{
+		bImpactSoundPlayedThisSwing = true;
+		UGameplayStatics::PlaySoundAtLocation(this, Atk.ImpactSound, Victim->GetActorLocation());
+	}
 
 	if (Atk.KnockbackForce > 0.f)
 		if (ACharacter* HitChar = Cast<ACharacter>(Victim))

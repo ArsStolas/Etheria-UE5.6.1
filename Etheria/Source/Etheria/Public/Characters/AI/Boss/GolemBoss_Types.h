@@ -286,6 +286,15 @@ struct FGolemPhaseConfig
 
 	/** Multiplies all damage dealt in this phase. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase", meta = (ClampMin = "0.05")) float DamageScale = 1.f;
+
+	/** Played (full-body) the moment this phase is entered — the enrage roar. Interrupts the current attack. Optional. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase") TObjectPtr<UAnimMontage> TransitionMontage = nullptr;
+
+	/** Extra beat (seconds) after the transition montage before the boss attacks again. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase", meta = (ClampMin = "0", ClampMax = "10")) float TransitionPause = 1.f;
+
+	/** First attack of this phase (AttackId) — the signature opener right after the roar. None = normal selection. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase") FName ForcedOpenerAttackId = NAME_None;
 };
 
 /** Telegraph payload — everything BP needs to draw the warning the moment an attack starts winding up. */

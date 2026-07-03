@@ -22,6 +22,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/OverlapResult.h"
+#include "Characters/AI/AIDeathLedgerSubsystem.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -80,6 +81,7 @@ void ABaseAICharacter::BeginPlay()
 	SpawnScale    = GetActorScale3D();
 	if (GetMesh()) MeshRelativeTransform = GetMesh()->GetRelativeTransform();
 
+
 	if (UCharacterMovementComponent* MC = GetCharacterMovement())
 		MC->RotationRate = FRotator(0.f, AIMovementComponent->MovementRotationRate, 0.f);
 
@@ -130,6 +132,28 @@ void ABaseAICharacter::BeginPlay()
 		if (UWorld* W = GetWorld())
 			if (UAIPackRegistrySubsystem* Reg = W->GetSubsystem<UAIPackRegistrySubsystem>())
 				Reg->Register(this, PackID);
+
+	if (HasAnyFlags(RF_WasLoaded))
+		if (UGameInstance* GI = GetGameInstance())
+			if (UAIDeathLedgerSubsystem* Ledger = GI->GetSubsystem<UAIDeathLedgerSubsystem>())
+				if (Ledger->ShouldStayDead(this))
+					EnterSilentDeadState();
+}
+
+void ABaseAICharacter::EnterSilentDeadState()
+{
+	CurrentState = EAIState::Dead;
+	SetActorHiddenInGame(true);
+	SetActorEnableCollision(false);
+	SetActorTickEnabled(false);
+	if (GetCharacterMovement()) GetCharacterMovement()->DisableMovement();
+	if (USkeletalMeshComponent* M = GetMesh()) M->bPauseAnims = true;
+	if (AIMovementComponent) AIMovementComponent->SetComponentTickEnabled(false);
+	if (AICombatComponent) AICombatComponent->SetComponentTickEnabled(false);
+	if (AIAnimationComponent) AIAnimationComponent->SetComponentTickEnabled(false);
+	if (RespawnCondition != EAIRespawnCondition::Never && GetWorld())
+		GetWorld()->GetTimerManager().SetTimer(RespawnTimerHandle, this,
+			&ABaseAICharacter::HandleLedgerRespawnCheck, 5.f, true);
 }
 
 void ABaseAICharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -566,6 +590,7 @@ void ABaseAICharacter::TryPlayGreeting()
 void ABaseAICharacter::ForcePanicFlee(AActor* Threat)
 {
 	if (!Threat || CurrentState == EAIState::Dead || CurrentState == EAIState::Fleeing || bIsDormant) return;
+	if (CurrentState == EAIState::Interacting) EndInteraction();
 	SetAwarenessLevel(EAIAwarenessLevel::Alert);
 	SetTarget(Threat);
 	SetAIState(EAIState::Fleeing);
@@ -623,7 +648,7 @@ void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmo
 	const float DamageFraction = (MaxHP > 0.f) ? DamageAmount / MaxHP : 0.f;
 
 	bool bStaggering = false;
-	if (ShouldEngageTargets() && AICombatComponent && !AICombatComponent->IsStaggerImmune())
+	if (ShouldEngageTargets() && AICombatComponent && !AICombatComponent->IsStaggerImmune() && !AICombatComponent->IsBroken())
 	{
 		AICombatComponent->CurrentHitCount++;
 		if (AICombatComponent->CurrentHitCount >= AICombatComponent->StaggerThreshold)
@@ -653,6 +678,7 @@ void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmo
 	if (!bStaggering && bCanFlee && FleeHealthThreshold > 0.f && LastHealthFraction <= FleeHealthThreshold
 		&& CurrentState != EAIState::Fleeing)
 	{
+		if (CurrentState == EAIState::Interacting) EndInteraction();
 		SetAwarenessLevel(EAIAwarenessLevel::Alert);
 		SetTarget(DamageInstigator);
 		SetAIState(EAIState::Fleeing);
@@ -686,6 +712,8 @@ void ABaseAICharacter::BeginInteraction(AActor* Interactor)
 {
 	if (!bIsInteractable || CurrentState == EAIState::Dead || bIsDormant) return;
 	if (CurrentState == EAIState::Interacting) return;
+	if (CurrentState == EAIState::Fleeing || CurrentState == EAIState::Staggered
+		|| CurrentState == EAIState::Chasing || CurrentState == EAIState::Attacking) return;
 
 	PreInteractionState = CurrentState;
 	InteractionPartner = Interactor;
@@ -701,9 +729,12 @@ void ABaseAICharacter::EndInteraction()
 {
 	if (CurrentState != EAIState::Interacting) return;
 	InteractionPartner = nullptr;
+	if (AIAnimationComponent && AIAnimationComponent->IsPlayingAction())
+		AIAnimationComponent->StopCurrentAction();
 	OnInteractionEnded.Broadcast();
 
-	if (AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
+	if (PreInteractionState == EAIState::Patrolling
+		&& AIMovementComponent && AIMovementComponent->PatrolMode != EPatrolMode::Stationary)
 	{
 		SetAIState(EAIState::Patrolling);
 		AIMovementComponent->StartPatrol();
@@ -946,6 +977,9 @@ void ABaseAICharacter::Die()
 {
 	if (CurrentState == EAIState::Dead) return;
 
+	SetActorTickEnabled(true);
+	if (USkeletalMeshComponent* M = GetMesh()) M->bPauseAnims = false;
+
 	if (CurrentState == EAIState::Interacting && InteractionPartner)
 	{
 		InteractionPartner = nullptr;
@@ -976,11 +1010,30 @@ void ABaseAICharacter::Die()
 			GetMesh()->AddImpulse(LastHitDirection.GetSafeNormal() * DeathRagdollImpulse, NAME_None, true);
 	}
 
+	if (HasAnyFlags(RF_WasLoaded))
+		if (UGameInstance* GI = GetGameInstance())
+			if (UAIDeathLedgerSubsystem* Ledger = GI->GetSubsystem<UAIDeathLedgerSubsystem>())
+				Ledger->RegisterDeath(this, RespawnCondition, RespawnTimerDuration);
+
 	NotifyPackOfDeath();
 	OnAIDied.Broadcast();
 
+	if (AIMovementComponent) AIMovementComponent->SetComponentTickEnabled(false);
+	if (AICombatComponent) AICombatComponent->SetComponentTickEnabled(false);
+	if (AIAnimationComponent) AIAnimationComponent->SetComponentTickEnabled(false);
+
 	const float MontageLength = (DeathMontage ? DeathMontage->GetPlayLength() : 1.5f);
 	const float TriggerAt = FMath::Max(0.f, MontageLength - DeathVFXTimeBeforeEnd);
+
+	if (DeathMontage && GetMesh() && GetWorld())
+	{
+		GetWorld()->GetTimerManager().SetTimer(DeathPoseFreezeHandle,
+			FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (CurrentState == EAIState::Dead && GetMesh() && !GetMesh()->IsSimulatingPhysics())
+					GetMesh()->bPauseAnims = true;
+			}), FMath::Max(MontageLength - 0.05f, 0.05f), false);
+	}
 
 	if (TriggerAt <= KINDA_SMALL_NUMBER)
 	{
@@ -1149,10 +1202,25 @@ void ABaseAICharacter::ResetDeathVisuals()
 
 void ABaseAICharacter::Respawn()
 {
+	if (UGameInstance* GI = GetGameInstance())
+		if (UAIDeathLedgerSubsystem* Ledger = GI->GetSubsystem<UAIDeathLedgerSubsystem>())
+			Ledger->ClearDeath(this);
+
 	if (UWorld* W = GetWorld())
 		W->GetTimerManager().ClearTimer(RespawnTimerHandle);
 
 	ResetDeathVisuals();
+
+	SetActorTickEnabled(true);
+	if (AIMovementComponent) AIMovementComponent->SetComponentTickEnabled(true);
+	if (AICombatComponent) AICombatComponent->SetComponentTickEnabled(ShouldEngageTargets());
+	if (AIAnimationComponent)
+	{
+		AIAnimationComponent->SetComponentTickEnabled(true);
+		AIAnimationComponent->StopCurrentAction();
+	}
+	if (USkeletalMeshComponent* M = GetMesh()) M->bPauseAnims = false;
+	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(DeathPoseFreezeHandle);
 
 	SetActorLocation(SpawnLocation);
 	SetActorRotation(SpawnRotation);
@@ -1189,12 +1257,26 @@ void ABaseAICharacter::NotifyDayCycleComplete()
 
 void ABaseAICharacter::HandleRespawnTimer() { if (CurrentState == EAIState::Dead) Respawn(); }
 
+void ABaseAICharacter::HandleLedgerRespawnCheck()
+{
+	if (CurrentState != EAIState::Dead) return;
+	if (UGameInstance* GI = GetGameInstance())
+		if (UAIDeathLedgerSubsystem* Ledger = GI->GetSubsystem<UAIDeathLedgerSubsystem>())
+			if (!Ledger->ShouldStayDead(this))
+			{
+				SetActorHiddenInGame(false);
+				SetActorEnableCollision(true);
+				SetActorTickEnabled(true);
+				Respawn();
+			}
+}
+
 void ABaseAICharacter::SetDormant(bool bNewDormant)
 {
 	if (bIsDormant == bNewDormant) return;
 	bIsDormant = bNewDormant;
 
-	SetActorHiddenInGame(bNewDormant);
+	if (USkeletalMeshComponent* M = GetMesh()) M->bPauseAnims = bNewDormant;
 	SetActorTickEnabled(!bNewDormant);
 
 	if (bNewDormant && AICombatComponent) AICombatComponent->EndHitStop();
@@ -1228,6 +1310,21 @@ void ABaseAICharacter::UpdateDormancy()
 		SetDormant(true);
 	else if (bIsDormant && DistSq < WakeSq)
 		SetDormant(false);
+
+	if (DormantHideDistance > 0.f)
+	{
+		const bool bShouldHide = bIsDormant && DistSq > FMath::Square(DormantHideDistance);
+		if (bShouldHide != bDormancyHidden)
+		{
+			bDormancyHidden = bShouldHide;
+			SetActorHiddenInGame(bShouldHide);
+		}
+	}
+	else if (bDormancyHidden)
+	{
+		bDormancyHidden = false;
+		SetActorHiddenInGame(false);
+	}
 
 	if (!bIsDormant)
 		if (AController* AC = GetController())

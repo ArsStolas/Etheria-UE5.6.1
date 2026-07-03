@@ -374,8 +374,12 @@ protected:
 	float DeathRagdollImpulse = 350.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="500",
-		ToolTip="AI further than this from the player will be put to sleep to save performance. AI within DormantDistance * 0.8 wakes up."))
+		ToolTip="AI further than this from the player will be put to sleep to save performance (logic + anims frozen, mesh STAYS visible). AI within DormantDistance * 0.8 wakes up."))
 	float DormantDistance = 8000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="0",
+		ToolTip="Beyond this distance a dormant AI's mesh is also hidden entirely. 0 = never hide (renderer distance-culls on its own). Must be well above DormantDistance or you get visible pop-in."))
+	float DormantHideDistance = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Optimization", meta=(ClampMin="0.1",
 		ToolTip="Interval between dormancy checks. Lower = more responsive but slightly more expensive. Runs on a timer, NOT on Tick (so it works even while dormant)."))
@@ -438,6 +442,8 @@ private:
 	void TickThreatDecay(float DeltaTime);
 
 	void HandleRespawnTimer();
+	void HandleLedgerRespawnCheck();
+	void EnterSilentDeadState();
 	void DestroyCorpse();
 
 	void OnDeathVFXAndFadeStart();
@@ -498,8 +504,10 @@ private:
 	FTimerHandle RespawnTimerHandle;
 	FTimerHandle DeathVFXTimerHandle;
 	FTimerHandle PackAlertTimerHandle;
+	FTimerHandle DeathPoseFreezeHandle;
 	TWeakObjectPtr<AActor> PendingPackThreat;
 	float LastGreetTime = -100.f;
+	bool bDormancyHidden = false;
 	float LastHowlTime = -100.f;
 	float LastRallyTime = -100.f;
 	bool bJoiningFromRally = false;

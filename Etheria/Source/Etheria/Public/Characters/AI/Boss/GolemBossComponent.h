@@ -64,6 +64,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGolemPhaseChanged, int32, OldP
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGolemDefeated);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGolemEncounterReset);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGolemWeakPointsExposed, bool, bExposed, FName, AttackId);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGolemWeakPointHit, FName, Id, float, Damage, float, HealthRemaining);
@@ -106,6 +108,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Golem") void ActivateBoss();
 
 	UFUNCTION(BlueprintCallable, Category = "Golem") void DeactivateBoss();
+
+	UFUNCTION(BlueprintCallable, Category = "Golem",
+		meta=(ToolTip="Full clean retry state: interrupts the attack, clears topple/crystals/air zones, restores boss and weak point health, hides the boss UI and deactivates (re-arms on next sight). Fired automatically ~3s after the target dies."))
+	void ResetEncounter();
 
 	UFUNCTION(BlueprintPure, Category = "Golem") bool IsBossActive() const { return bActivated; }
 
@@ -191,6 +197,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemAirZoneClosed OnGolemAirZoneClosed;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemPhaseChanged OnGolemPhaseChanged;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemDefeated OnGolemDefeated;
+	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemEncounterReset OnGolemEncounterReset;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemWeakPointsExposed OnGolemWeakPointsExposed;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemWeakPointHit OnGolemWeakPointHit;
 	UPROPERTY(BlueprintAssignable, Category = "Golem|Events") FOnGolemWeakPointBroken OnGolemWeakPointBroken;
@@ -453,6 +460,10 @@ private:
 	int32 CurrentAttackIndex = -1;
 	int32 LastAttackIndex = -1;
 	int32 PendingForcedAttack = -1;
+	float TargetInvalidTime = -1.f;
+	float TargetOutOfArenaTime = -1.f;
+	bool bHadTargetThisActivation = false;
+	TArray<TWeakObjectPtr<AActor>> InFlightRocks;
 	int32 CurrentPhase = 0;
 
 	float ActiveTimer = 0.f;
