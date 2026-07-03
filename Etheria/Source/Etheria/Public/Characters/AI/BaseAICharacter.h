@@ -72,6 +72,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="AI") bool OnlyDetectsPlayers() const { return bOnlyDetectPlayers; }
 
 	UFUNCTION(BlueprintPure, Category="AI") bool ShouldEngageTargets() const;
+	UFUNCTION(BlueprintPure, Category="AI") bool WantsInfiniteSightPursuit() const { return bInfiniteSightPursuit; }
 
 	UFUNCTION(BlueprintPure, Category="AI") bool CanReactToPerception() const;
 
@@ -202,6 +203,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Threat", meta=(EditCondition="bUseThreatSystem", ClampMin="0",
 		ToolTip="Threat lost per second so old attackers eventually stop holding aggro. 0 = permanent."))
 	float ThreatDecayPerSecond = 2.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Detection",
+		meta=(ToolTip="While it can SEE its engaged target, this AI follows it ANYWHERE on the map: no distance cap on tracking and no leash give-up. Losing sight falls back to the normal memory/leash rules."))
+	bool bInfiniteSightPursuit = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Behavior",
 		meta=(ToolTip="Idle NPCs turn to look at the player when noticed. Pure ambient flavor."))
@@ -399,6 +404,7 @@ private:
 	void UpdatePackFollow(float DeltaTime);
 
 	bool ReactToThreat(AActor* Threat, bool bFromDamage);
+	void JoinHuntDelayed(AActor* Threat);
 	void AlarmNearbyAllies(AActor* Threat);
 
 	void RallyNearbyAllies(AActor* Threat);
@@ -466,4 +472,6 @@ private:
 	FTimerHandle DormancyCheckTimerHandle;
 	FTimerHandle RespawnTimerHandle;
 	FTimerHandle DeathVFXTimerHandle;
+	FTimerHandle PackAlertTimerHandle;
+	TWeakObjectPtr<AActor> PendingPackThreat;
 };

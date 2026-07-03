@@ -504,6 +504,25 @@ void ABaseAICharacter::OnPerceiveTarget(AActor* PerceivedActor)
 	ReactToThreat(PerceivedActor, false);
 }
 
+void ABaseAICharacter::JoinHuntDelayed(AActor* Threat)
+{
+	if (!Threat || IsDead() || bIsDormant || CurrentTarget) return;
+	UWorld* W = GetWorld();
+	if (!W || W->GetTimerManager().IsTimerActive(PackAlertTimerHandle)) return;
+
+	PendingPackThreat = Threat;
+	SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+	W->GetTimerManager().SetTimer(PackAlertTimerHandle, [this]()
+	{
+		AActor* T = PendingPackThreat.Get();
+		PendingPackThreat = nullptr;
+		if (!T || IsDead() || bIsDormant || CurrentTarget) return;
+		if (!IsValidTargetCandidate(T)) return;
+		SetAwarenessLevel(EAIAwarenessLevel::Alert);
+		OnPerceiveTarget(T);
+	}, FMath::FRandRange(0.15f, 0.55f), false);
+}
+
 void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmount)
 {
 	if (CurrentState == EAIState::Dead || bIsDormant) return;
@@ -567,6 +586,8 @@ void ABaseAICharacter::OnReceiveDamage(AActor* DamageInstigator, float DamageAmo
 		SetTarget(DamageInstigator);
 	else
 		ReactToThreat(DamageInstigator, true);
+
+	if (DamageInstigator && CurrentTarget == DamageInstigator) RallyNearbyAllies(DamageInstigator);
 
 	EvaluateThreatSwitch();
 }
@@ -653,7 +674,7 @@ void ABaseAICharacter::RallyNearbyAllies(AActor* Threat)
 {
 
 	if (!bCallForHelpOnEngage || CombatAlertRadius <= 0.f || !Threat || bSuppressRallyBroadcast) return;
-	if (HostilityType != EAIHostilityType::Aggressive) return;
+	if (!ShouldEngageTargets()) return;
 	UWorld* W = GetWorld();
 	if (!W) return;
 
@@ -668,18 +689,16 @@ void ABaseAICharacter::RallyNearbyAllies(AActor* Threat)
 	{
 		ABaseAICharacter* O = Cast<ABaseAICharacter>(Ov.GetActor());
 		if (!O || O == this || O->IsDead() || O->IsDormant()) continue;
-		if (O->HostilityType != EAIHostilityType::Aggressive) continue;
+		if (!O->ShouldEngageTargets()) continue;
 		if (!O->IsValidTargetCandidate(Threat)) continue;
 
 		const EAIState S = O->GetCurrentAIState();
 		if (S == EAIState::Chasing || S == EAIState::Attacking || S == EAIState::Fleeing || S == EAIState::Dead) continue;
 
-		O->bSuppressRallyBroadcast = true;
 		if (bRallyEngagesDirectly)
-			O->OnPerceiveTarget(Threat);
+			O->JoinHuntDelayed(Threat);
 		else if (ABaseAIController* AIC = Cast<ABaseAIController>(O->GetController()))
 			AIC->InvestigateThreat(Threat);
-		O->bSuppressRallyBroadcast = false;
 	}
 
 #if ENABLE_DRAW_DEBUG

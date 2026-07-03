@@ -184,19 +184,23 @@ float UAICombatDirectorSubsystem::ReserveAttackAngle(AActor* Target, AActor* Att
 	}
 	else
 	{
-
+		const float BackAngle = FMath::UnwindRadians(FMath::DegreesToRadians(Target->GetActorRotation().Yaw) + PI);
 		TArray<float> Sorted = Others;
 		Sorted.Sort();
 		const int32 N = Sorted.Num();
 		float BestMid = PreferredAngle;
-		float BestGap = -1.f;
+		float BestScore = -FLT_MAX;
 		for (int32 i = 0; i < N; ++i)
 		{
 			const float A = Sorted[i];
 			const float B = Sorted[(i + 1) % N];
 			float Gap = B - A;
 			if (Gap <= 0.f) Gap += 2.f * PI;
-			if (Gap > BestGap) { BestGap = Gap; BestMid = A + Gap * 0.5f; }
+			const float Mid = FMath::UnwindRadians(A + Gap * 0.5f);
+			float Score = FMath::Min(Gap, 2.5f)
+				- 0.8f * FMath::Abs(FMath::FindDeltaAngleRadians(Mid, BackAngle));
+			if (Gap < MinSeparation * 2.f) Score -= 10.f;
+			if (Score > BestScore) { BestScore = Score; BestMid = Mid; }
 		}
 		Granted = FMath::UnwindRadians(BestMid);
 	}

@@ -583,7 +583,7 @@ bool ABaseAIController::IsTargetCurrentlySeen(AActor* Target)
 	const bool bEngagedOnIt = (AICharacter->GetCurrentTarget() == Target);
 	const float Radius = bEngagedOnIt ? FMath::Max(DetectionRadius, LoseSightRadius) : DetectionRadius;
 	const float DistSq = FVector::DistSquared(AICharacter->GetActorLocation(), Target->GetActorLocation());
-	if (DistSq > FMath::Square(Radius))
+	if (!(AICharacter->WantsInfiniteSightPursuit() && bEngagedOnIt) && DistSq > FMath::Square(Radius))
 		return false;
 
 	if (DistSq <= FMath::Square(GetCombatReach(Target) + GetEffectiveAttackRange() + 150.f))
@@ -835,7 +835,9 @@ bool ABaseAIController::CheckLeashAndReturn()
 
 	const bool bInMelee = T && (FVector::Dist(AICharacter->GetActorLocation(), T->GetActorLocation()) - GetCombatReach(T))
 		<= GetEffectiveAttackRange();
-	const bool bSelfTooFar = !bInMelee && FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > GiveUpSq;
+	const bool bRelentless = AICharacter->WantsInfiniteSightPursuit() && T && IsTargetCurrentlySeen(T);
+	const bool bSelfTooFar = !bInMelee && !bRelentless
+		&& FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > GiveUpSq;
 
 	if (!bSelfTooFar && T) return false;
 
