@@ -10,7 +10,6 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/Inventory/InventoryTypes.h"
-#include "Interfaces/Interaction.h"
 #include "ItemPickup.generated.h"
 
 class USphereComponent;
@@ -19,7 +18,7 @@ class UNiagaraComponent;
 class UNiagaraSystem;
 
 UCLASS()
-class ETHERIA_API AItemPickup : public AActor, public IInteraction
+class ETHERIA_API AItemPickup : public AActor
 {
 	GENERATED_BODY()
 public:
@@ -43,6 +42,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Item", meta=(ClampMin="1"))
 	int32 quantity = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	bool bIsFirstTimePicked = true;
 
 	// ---- Visuals 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visual")
@@ -79,8 +81,6 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
-
-	virtual void Interact_Implementation(AActor* Interactor) override;
 
 private:
 	/** Applies static mesh and Niagara VFX based on current properties. Called in editor (OnConstruction) and at runtime (BeginPlay). */
