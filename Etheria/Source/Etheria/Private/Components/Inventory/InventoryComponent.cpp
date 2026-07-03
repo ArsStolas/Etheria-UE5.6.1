@@ -175,6 +175,7 @@ bool UInventoryComponent::SpawnDrop(const FItemStack& StackToDrop)
     // Set data before FinishSpawning so OnConstruction can build the visuals correctly
     Spawned->itemDef = StackToDrop.def;
     Spawned->quantity = StackToDrop.quantity;
+	Spawned->bIsFirstTimePicked = false;
 
     UGameplayStatics::FinishSpawningActor(Spawned, SpawnTM);
     return true;
