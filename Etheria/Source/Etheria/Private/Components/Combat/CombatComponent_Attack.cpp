@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: 0nnen
- * Last Updated by: 0nnen
+ * Last Updated by: ArsStolas
  * Class: "CombatComponent - Source (Attacks)"
  * Notes: Attack execution, traces, target assist, and damage application.
  */
@@ -9,6 +9,7 @@
 #include "Components/Combat/CombatComponent.h"
 
 #include "Characters/BaseCharacter.h"
+#include "Characters/AI/BaseAICharacter.h"
 #include "Components/Combat/LockTarget/LockTargetComponent.h"
 #include "Components/Characters/CharacterStateComponent.h"
 
@@ -20,6 +21,16 @@
 #include "DrawDebugHelpers.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
+
+namespace
+{
+
+	bool IsUntouchableVictim(const AActor* A)
+	{
+		const ABaseAICharacter* AI = Cast<const ABaseAICharacter>(A);
+		return AI && (AI->IsDead() || !AI->IsKillable());
+	}
+}
 
 #pragma region ATTACK
 
@@ -43,7 +54,7 @@ bool UCombatComponent::TryAttackGroup(FName GroupId)
         if (S.Group != GroupId) continue;
         if (S.Stance == EStance::AirOnly    && !bInAir) continue;
         if (S.Stance == EStance::GroundOnly &&  bInAir) continue;
-        Chosen = &S; break; // first match wins
+        Chosen = &S; break;
     }
 
     if (!Chosen) return false;
@@ -64,7 +75,6 @@ bool UCombatComponent::TryAttackById(FName AttackId, float ChargeLevel)
     if (!Spec) return false;
     if (!CanExecuteAttack(AttackId)) return false;
 
-    // Combo start cooldown gating (per combo)
     {
         const FComboSpecConfig* GateCombo = nullptr;
         for (const FComboSpecConfig& C : Combos)
@@ -81,7 +91,7 @@ bool UCombatComponent::TryAttackById(FName AttackId, float ChargeLevel)
                 {
                     if (Now < *Until)
                     {
-                        return false; // still cooling down
+                        return false;
                     }
                 }
                 ComboCooldownUntil.FindOrAdd(GateCombo->ComboId) = Now + Cd;
@@ -91,7 +101,6 @@ bool UCombatComponent::TryAttackById(FName AttackId, float ChargeLevel)
 
     CurrentAttackId = AttackId;
 
-    // Seed combo state to the index of this attack if it belongs to a combo.
     {
         const FComboSpecConfig* FoundCombo = nullptr;
         int32 FoundIndex = -1;
@@ -113,7 +122,7 @@ bool UCombatComponent::TryAttackById(FName AttackId, float ChargeLevel)
         if (FoundCombo)
         {
             ActiveComboId   = FoundCombo->ComboId;
-            ActiveComboStep = FoundIndex; // exact index of the section we are about to play
+            ActiveComboStep = FoundIndex;
         }
         else
         {
@@ -124,8 +133,7 @@ bool UCombatComponent::TryAttackById(FName AttackId, float ChargeLevel)
 
     if (Spec->Charge.bChargeable)
     {
-        // This is the "manual charge" style (BeginCharge/EndCharge driven by input).
-        // Play montage immediately if desired; release will execute attack.
+
         if (OwnerCharacter.IsValid() && Spec->Montage)
         {
             PrePlayMontageSafety(*Spec);
@@ -159,7 +167,7 @@ void UCombatComponent::ExecuteAttack(const FAttackSpecConfig& Spec, float Damage
     OnAttackStarted.Broadcast(Spec.AttackId);
 
     CurrentAttackMontage = Spec.Montage;
-    
+
     WeaponDissolve_PingActivity();
 
     if (StateComp.IsValid())
@@ -172,7 +180,6 @@ void UCombatComponent::ExecuteAttack(const FAttackSpecConfig& Spec, float Damage
         PlayOrJumpMontageSection(Spec);
     }
 
-    // Only notifies or timers drive the hit window. No eager hit now.
     if (Spec.HitWindow > 0.f)
     {
         OpenWindowWithTimers(Spec);
@@ -212,7 +219,7 @@ void UCombatComponent::CloseCurrentAttack()
     CurrentAttackId = NAME_None;
 
     AdvanceComboIfRequested();
-    
+
     if (StateComp.IsValid())
     {
         StateComp->ClearCombatState();
@@ -309,6 +316,8 @@ AActor* UCombatComponent::ResolveBestTarget(const FVector& EyeLoc, const FVector
     for (AActor* A : OutActors)
     {
         if (!A || A == Owner) continue;
+
+        if (IsUntouchableVictim(A)) continue;
         const FVector Dir = (A->GetActorLocation() - EyeLoc).GetSafeNormal();
         const float CosAng = FVector::DotProduct(Dir, Forward);
         const float AngDeg = FMath::RadiansToDegrees(acosf(FMath::Clamp(CosAng, -1.f, 1.f)));
@@ -365,39 +374,60 @@ float UCombatComponent::ComputeFinalDamageForTarget(AActor* Victim, float RawDam
 
     float Damage = RawDamage * CritMul;
 
-    if (const UCombatComponent* VictimCombat = Victim->FindComponentByClass<UCombatComponent>())
+    if (UCombatComponent* VictimCombat = Victim->FindComponentByClass<UCombatComponent>())
     {
-        if (VictimCombat->bInDodgeIFrames)
+        bool bNegated = false;
+        Damage = VictimCombat->MitigateIncomingDamage(Damage, GetOwner(), bNegated);
+    }
+
+    return Damage;
+}
+
+float UCombatComponent::MitigateIncomingDamage(float RawDamage, AActor* Attacker, bool& bOutFullyNegated)
+{
+    bOutFullyNegated = false;
+    float Damage = RawDamage;
+
+    if (bInDodgeIFrames)
+    {
+        Damage = 0.f;
+        bOutFullyNegated = true;
+        if (bPerfectDodgeWindow)
+        {
+
+            EndPerfectDodgeWindow();
+            if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(AutoPerfectDodgeHandle);
+            OnPerfect.Broadcast(EPerfectKind::Dodge);
+            ApplyPerfectBoost(EPerfectKind::Dodge);
+            OnCue.Broadcast(FName("PerfectDodge"), ECombatCuePhase::Impact);
+        }
+    }
+    else if (bParryHeld)
+    {
+        if (bPerfectParryWindow)
         {
             Damage = 0.f;
-            if (VictimCombat->bPerfectDodgeWindow)
-            {
-                const_cast<UCombatComponent*>(VictimCombat)->OnPerfect.Broadcast(EPerfectKind::Dodge);
-                const_cast<UCombatComponent*>(VictimCombat)->ApplyPerfectBoost(EPerfectKind::Dodge);
-                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("PerfectDodge"), ECombatCuePhase::Impact);
-            }
+            bOutFullyNegated = true;
+            EndPerfectParryWindow();
+            if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(AutoPerfectParryHandle);
+            OnPerfect.Broadcast(EPerfectKind::Parry);
+            ApplyPerfectBoost(EPerfectKind::Parry);
+            OnCue.Broadcast(FName("PerfectParry"), ECombatCuePhase::Impact);
         }
-        else if (VictimCombat->bParryHeld)
+        else
         {
-            if (VictimCombat->bPerfectParryWindow)
-            {
-                Damage = 0.f;
-                const_cast<UCombatComponent*>(VictimCombat)->OnPerfect.Broadcast(EPerfectKind::Parry);
-                const_cast<UCombatComponent*>(VictimCombat)->ApplyPerfectBoost(EPerfectKind::Parry);
-                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("PerfectParry"), ECombatCuePhase::Impact);
-            }
-            else
-            {
-                Damage *= FMath::Clamp(VictimCombat->ParryDamageFactorWhileHeld, 0.f, 1.f);
-                const_cast<UCombatComponent*>(VictimCombat)->OnCue.Broadcast(FName("ParryGuard"), ECombatCuePhase::Impact);
+            Damage *= FMath::Clamp(ParryDamageFactorWhileHeld, 0.f, 1.f);
 
-                if (VictimCombat->ParryHitReactionMontages.Num() > 0 && VictimCombat->OwnerCharacter.IsValid())
+            const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+            if (Now - LastGuardReactTime >= 0.45f)
+            {
+                LastGuardReactTime = Now;
+                OnCue.Broadcast(FName("ParryGuard"), ECombatCuePhase::Impact);
+                if (ParryHitReactionMontages.Num() > 0 && OwnerCharacter.IsValid())
                 {
-                    const int32 Idx = FMath::RandRange(0, VictimCombat->ParryHitReactionMontages.Num() - 1);
-                    if (VictimCombat->ParryHitReactionMontages[Idx])
-                    {
-                        VictimCombat->OwnerCharacter->PlayAnimMontage(VictimCombat->ParryHitReactionMontages[Idx], 1.f);
-                    }
+                    const int32 Idx = FMath::RandRange(0, ParryHitReactionMontages.Num() - 1);
+                    if (ParryHitReactionMontages[Idx])
+                        OwnerCharacter->PlayAnimMontage(ParryHitReactionMontages[Idx], 1.f);
                 }
             }
         }
@@ -477,6 +507,7 @@ void UCombatComponent::PerformMeleeTrace(const FAttackSpecConfig& Spec, float Da
     const TArray<AActor*> Unique = UniqueActorsFromHits(Hits);
     for (AActor* Other : Unique)
     {
+        if (IsUntouchableVictim(Other)) continue;
         bool bCrit = false;
         const float FinalDamage = ComputeFinalDamageForTarget(Other, Spec.BaseDamage * DamageScale, bCrit, Spec.CritChance, Spec.CritMultiplier);
         if (FinalDamage <= 0.f) continue;
@@ -485,7 +516,8 @@ void UCombatComponent::PerformMeleeTrace(const FAttackSpecConfig& Spec, float Da
         Dummy.TraceStart = Start;
         Dummy.ImpactPoint = Other->GetActorLocation();
 
-        UGameplayStatics::ApplyPointDamage(Other, FinalDamage, Fwd, Dummy, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
+        const float Applied = UGameplayStatics::ApplyPointDamage(Other, FinalDamage, Fwd, Dummy, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
+        if (Applied <= 0.f) { OnCue.Broadcast(FName("Blocked"), ECombatCuePhase::Impact); continue; }
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage);
         else       OnHit.Broadcast(Other, FinalDamage);
@@ -499,12 +531,10 @@ void UCombatComponent::PerformRangedLine(const FAttackSpecConfig& Spec, float Da
 {
     if (!GetWorld()) return;
 
-    // Use mesh or actor facing, not the camera
     FVector Fwd;
     const FVector Origin = GetEyeLocationForward(Fwd);
     const float Range = Spec.Range * RangeScale;
 
-    // Try muzzle socket if available
     FVector Start = Origin;
     if (OwnerCharacter.IsValid() && OwnerCharacter->GetMesh())
     {
@@ -537,6 +567,7 @@ void UCombatComponent::PerformRangedLine(const FAttackSpecConfig& Spec, float Da
     AActor* Other = Hit.GetActor();
     if (!Other) return;
     if (bIgnoreOwner && Other == GetOwner()) return;
+    if (IsUntouchableVictim(Other)) return;
 
     bool bCrit = false;
     const float FinalDamage = ComputeFinalDamageForTarget(
@@ -548,7 +579,7 @@ void UCombatComponent::PerformRangedLine(const FAttackSpecConfig& Spec, float Da
     );
     if (FinalDamage <= 0.f) return;
 
-    UGameplayStatics::ApplyPointDamage(
+    const float Applied = UGameplayStatics::ApplyPointDamage(
         Other,
         FinalDamage,
         Fwd,
@@ -557,6 +588,7 @@ void UCombatComponent::PerformRangedLine(const FAttackSpecConfig& Spec, float Da
         GetOwner(),
         nullptr
     );
+    if (Applied <= 0.f) { OnCue.Broadcast(FName("Blocked"), ECombatCuePhase::Impact); return; }
 
     if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage);
     else       OnHit.Broadcast(Other, FinalDamage);
@@ -565,11 +597,11 @@ void UCombatComponent::PerformRangedLine(const FAttackSpecConfig& Spec, float Da
     PushRecentHitActor(Other);
 }
 
-
 void UCombatComponent::HandleRangedProjectileImpact(AActor* HitActor, const FHitResult& Hit, FName AttackId, float ChargeAlpha, float DamageScale)
 {
     if (!GetWorld() || !GetOwner() || !HitActor) return;
     if (bIgnoreOwner && HitActor == GetOwner()) return;
+    if (IsUntouchableVictim(HitActor)) return;
 
     const FAttackSpecConfig* Spec = FindAttack(AttackId);
     if (!Spec)
@@ -578,7 +610,6 @@ void UCombatComponent::HandleRangedProjectileImpact(AActor* HitActor, const FHit
         return;
     }
 
-    // Resolve charge multipliers from AttackSpec charge levels (optional).
     float ChargeDamageMul = 1.f;
     float ChargeRangeMul  = 1.f;
 
@@ -591,11 +622,9 @@ void UCombatComponent::HandleRangedProjectileImpact(AActor* HitActor, const FHit
             Total += FMath::Max(0.001f, L.Time);
         }
 
-        // Map alpha to a time along the charge curve.
         float TargetT = Alpha * Total;
         float Acc = 0.f;
 
-        // Start values (no charge)
         float PrevDM = 1.f;
         float PrevRM = 1.f;
 
@@ -620,7 +649,6 @@ void UCombatComponent::HandleRangedProjectileImpact(AActor* HitActor, const FHit
             PrevRM = NextRM;
             Acc = NextAcc;
 
-            // If we exceeded all levels, clamp to last
             if (i == Spec->Charge.Levels.Num() - 1)
             {
                 ChargeDamageMul = NextDM;
@@ -651,7 +679,7 @@ void UCombatComponent::HandleRangedProjectileImpact(AActor* HitActor, const FHit
         Dir = (HitActor->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
     }
 
-    UGameplayStatics::ApplyPointDamage(
+    const float Applied = UGameplayStatics::ApplyPointDamage(
         HitActor,
         FinalDamage,
         Dir,
@@ -660,6 +688,7 @@ void UCombatComponent::HandleRangedProjectileImpact(AActor* HitActor, const FHit
         GetOwner(),
         nullptr
     );
+    if (Applied <= 0.f) { OnCue.Broadcast(FName("Blocked"), ECombatCuePhase::Impact); return; }
 
     if (bCrit) OnHitCrit.Broadcast(HitActor, FinalDamage);
     else       OnHit.Broadcast(HitActor, FinalDamage);
@@ -707,6 +736,7 @@ void UCombatComponent::PerformAoE(const FAttackSpecConfig& Spec, float DamageSca
     {
         if (!Other) continue;
         if (bIgnoreOwner && Other == Owner) continue;
+        if (IsUntouchableVictim(Other)) continue;
 
         bool bCrit = false;
         const float FinalDamage = ComputeFinalDamageForTarget(Other, Spec.BaseDamage * DamageScale, bCrit, Spec.CritChance, Spec.CritMultiplier);
@@ -715,7 +745,8 @@ void UCombatComponent::PerformAoE(const FAttackSpecConfig& Spec, float DamageSca
         FHitResult Dummy;
         Dummy.ImpactPoint = Other->GetActorLocation();
 
-        UGameplayStatics::ApplyPointDamage(Other, FinalDamage, FVector::UpVector, Dummy, Owner->GetInstigatorController(), Owner, nullptr);
+        const float Applied = UGameplayStatics::ApplyPointDamage(Other, FinalDamage, FVector::UpVector, Dummy, Owner->GetInstigatorController(), Owner, nullptr);
+        if (Applied <= 0.f) { OnCue.Broadcast(FName("Blocked"), ECombatCuePhase::Impact); continue; }
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage);
         else       OnHit.Broadcast(Other, FinalDamage);
@@ -756,6 +787,7 @@ void UCombatComponent::PerformFrontalRect(const FAttackSpecConfig& Spec, float D
     {
         if (!Other) continue;
         if (bIgnoreOwner && Other == Owner) continue;
+        if (IsUntouchableVictim(Other)) continue;
 
         bool bCrit = false;
         const float FinalDamage = ComputeFinalDamageForTarget(Other, Spec.BaseDamage * DamageScale, bCrit, Spec.CritChance, Spec.CritMultiplier);
@@ -764,7 +796,8 @@ void UCombatComponent::PerformFrontalRect(const FAttackSpecConfig& Spec, float D
         FHitResult Dummy;
         Dummy.ImpactPoint = Other->GetActorLocation();
 
-        UGameplayStatics::ApplyPointDamage(Other, FinalDamage, Fwd, Dummy, Owner->GetInstigatorController(), Owner, nullptr);
+        const float Applied = UGameplayStatics::ApplyPointDamage(Other, FinalDamage, Fwd, Dummy, Owner->GetInstigatorController(), Owner, nullptr);
+        if (Applied <= 0.f) { OnCue.Broadcast(FName("Blocked"), ECombatCuePhase::Impact); continue; }
 
         if (bCrit) OnHitCrit.Broadcast(Other, FinalDamage);
         else       OnHit.Broadcast(Other, FinalDamage);

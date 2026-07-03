@@ -1,13 +1,14 @@
 /**
  * Etheria's End Project, 2025
  * Created by: 0nnen
- * Last Updated by: 0nnen
+ * Last Updated by: ArsStolas
  * Class: "LockTargetComponent" - Source (Core)
  * Notes: Implements core lock-on logic (toggle, clear, switch, candidate search and scoring) and controls when the component tick is enabled.
  */
 
 #include "Components/Combat/LockTarget/LockTargetComponent.h"
 
+#include "Characters/AI/BaseAICharacter.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/World.h"
@@ -20,7 +21,7 @@
 ULockTargetComponent::ULockTargetComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    // We only tick while a lock is active and at least one runtime feature needs updates.
+
     PrimaryComponentTick.bStartWithTickEnabled = false;
 }
 
@@ -58,17 +59,15 @@ void ULockTargetComponent::GetViewLocationAndForward(FVector& OutLocation, FVect
 
 bool ULockTargetComponent::ToggleLock(AActor* Preferred)
 {
-    // If already locked, clear and exit.
+
     if (CurrentTarget.IsValid())
     {
         ClearLock();
         return false;
     }
 
-    // Try to find a new target.
     CurrentTarget = FindBestTarget(Preferred);
 
-    // No valid candidate: do nothing (no DOF, no cinematic, movement stays normal).
     if (!CurrentTarget.IsValid())
     {
         ApplyMovementSettingsForLock(false);
@@ -76,10 +75,8 @@ bool ULockTargetComponent::ToggleLock(AActor* Preferred)
         return false;
     }
 
-    // We have a valid target: apply lock movement style if enabled.
     ApplyMovementSettingsForLock(true);
 
-    // Enable ticking only if at least one runtime feature needs it.
     const bool bNeedsTick =
         bEnableCameraLock || bEnableSoftLock || bDebugDrawLock ||
         bAutoUnlockOnDistance || bAutoUnlockOnHiddenTarget || bAutoUnlockOnInvalidTarget;
@@ -263,19 +260,25 @@ TArray<AActor*> ULockTargetComponent::GatherCandidates() const
             continue;
         }
 
-        // Only Pawns are eligible when we require a hostile tag.
         APawn* Pawn = Cast<APawn>(A);
         if (!Pawn)
         {
             continue;
         }
 
-        // If we require a hostile tag, make sure this Pawn has it.
+        if (const ABaseAICharacter* AI = Cast<ABaseAICharacter>(A))
+        {
+            if (AI->IsDead() || !AI->IsKillable())
+            {
+                continue;
+            }
+        }
+
         if (bRequireHostileTag && !A->ActorHasTag(HostileTagName))
         {
             continue;
         }
-        
+
         const float DistSq = FVector::DistSquared(EyeLoc, A->GetActorLocation());
         if (DistSq > MaxDistance * MaxDistance)
         {
@@ -301,6 +304,5 @@ float ULockTargetComponent::ScoreCandidate(AActor* Candidate, const FVector& Eye
     const float   Dot  = FVector::DotProduct(Dir, Forward);
     const float   Dist = FVector::Dist(EyeLoc, Candidate->GetActorLocation());
 
-    // Favor candidates close to the view center (Dot) and relatively close in distance.
     return Dot * 2.0f + (1.0f - FMath::Clamp(Dist / MaxDistance, 0.f, 1.f));
 }

@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: "ArsStolas"
+ * Last Updated by: ArsStolas
  * Class: HealthComponent - Header
 */
 
@@ -19,8 +19,11 @@ class ABaseCharacter;
 class UCharacterStateComponent;
 class UMaterialInterface;
 class UMeshComponent;
+class UPrimitiveComponent;
+class UDamageType;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHealthChangedSignature, float, NewHealth, float, MaxHealth);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDamagedDirectionalSignature, FVector, HitDirection, AActor*, DamageCauser);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class ETHERIA_API UHealthComponent : public UActorComponent
@@ -29,24 +32,19 @@ class ETHERIA_API UHealthComponent : public UActorComponent
 
 public:
 	UHealthComponent();
-	
+
 	UFUNCTION(BlueprintCallable, Category="Health")
 	void ResetHealth();
-	
+
 	UFUNCTION(BlueprintCallable, Category="Health")
 	void TakeDamage(const float DamageAmount);
 
 	UFUNCTION(BlueprintCallable, Category="Health")
 	void Heal(const float HealAmount);
 
-	// =============================================================
-	// Damage Feedback - Overlay
-	// =============================================================
-	/** Force the hit overlay to appear immediately (also called automatically on damage). */
 	UFUNCTION(BlueprintCallable, Category="Damage Feedback|Overlay")
 	void TriggerDamageOverlay();
 
-	/** Clears the hit overlay right away (normally called automatically after Duration). */
 	UFUNCTION(BlueprintCallable, Category="Damage Feedback|Overlay")
 	void ClearDamageOverlay();
 
@@ -71,8 +69,17 @@ public:
 	UFUNCTION(BlueprintPure, Category="Health")
 	bool IsInvulnerable() const { return bInvulnerable; }
 
+	UFUNCTION(BlueprintCallable, Category="Health")
+	void SetMinHealth(float NewMin) { MinHealth = FMath::Clamp(NewMin, 0.f, MaxHealth); }
+
+	UFUNCTION(BlueprintPure, Category="Health")
+	float GetMinHealth() const { return MinHealth; }
+
 	UPROPERTY(BlueprintAssignable, Category="Health")
 	FOnHealthChangedSignature OnHealthChanged;
+
+	UPROPERTY(BlueprintAssignable, Category="Health")
+	FOnDamagedDirectionalSignature OnDamagedDirectional;
 
 	TWeakObjectPtr<AActor> OwnerActor;
 	TWeakObjectPtr<ABaseCharacter> OwnerCharacter;
@@ -90,28 +97,24 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health")
 	bool bInvulnerable = false;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health", meta=(ClampMin="0"))
+	float MinHealth = 0.f;
+
 	UPROPERTY(EditAnywhere, Category="State Timing")
 	float DamageStateDuration = 0.6f;
 
 	UPROPERTY(EditAnywhere, Category="State Timing")
 	float HealStateDuration = 0.8f;
 
-	// =============================================================
-	// Damage Feedback - Overlay
-	// =============================================================
-	/** Enable/disable the hit overlay feature. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage Feedback|Overlay")
 	bool bEnableDamageOverlay = true;
 
-	/** Material used as overlay for a short hit flash. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage Feedback|Overlay", meta=(EditCondition="bEnableDamageOverlay"))
 	TObjectPtr<UMaterialInterface> DamageOverlayMaterial = nullptr;
 
-	/** How long the overlay stays on (seconds). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage Feedback|Overlay", meta=(EditCondition="bEnableDamageOverlay", ClampMin="0.0", UIMin="0.0", UIMax="0.25"))
 	float DamageOverlayDuration = 0.06f;
 
-	/** Optional: explicitly pick which mesh component receives the overlay (recommended for complex characters). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage Feedback|Overlay", meta=(EditCondition="bEnableDamageOverlay"))
 	FComponentReference DamageOverlayMesh;
 
@@ -119,6 +122,11 @@ private:
 	UFUNCTION()
 	void HandleTakeAnyDamage(AActor* DamagedActor, const float Damage, const UDamageType* DamageType,
 	                         AController* InstigatedBy, AActor* DamageCauser);
+
+	UFUNCTION()
+	void HandleTakePointDamage(AActor* DamagedActor, float Damage, AController* InstigatedBy, FVector HitLocation,
+	                           UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection,
+	                           const UDamageType* DamageType, AActor* DamageCauser);
 
 	void SetTemporaryLifeState(FGameplayTag TempState, float Duration);
 

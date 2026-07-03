@@ -31,12 +31,17 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="AI|Movement") void StartPatrol();
 	UFUNCTION(BlueprintCallable, Category="AI|Movement") void StopPatrol();
-	UFUNCTION(BlueprintCallable, Category="AI|Movement") bool MoveToLocation(const FVector& Target, float AcceptanceOverride = -1.f);
+
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") bool MoveToLocation(const FVector& Target, float AcceptanceOverride = -1.f, bool bExactGoal = false);
+
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") bool MoveToActorDirect(AActor* Goal, float InAcceptanceRadius);
+
+	UFUNCTION(BlueprintCallable, Category="AI|Movement") void CancelPathMove();
+
+	UFUNCTION(BlueprintPure, Category="AI|Movement") bool IsPathMoveActive() const;
 	UFUNCTION(BlueprintCallable, Category="AI|Movement") void StopMovement();
 	UFUNCTION(BlueprintCallable, Category="AI|Movement") FVector GetNextPatrolPoint();
 
-	/** Flee away from a threat. Returns true if a reachable point that increases distance was found and a move
-	 *  issued; false if cornered (no nav escape) so the caller can face/hold instead of shuffling into the threat. */
 	UFUNCTION(BlueprintCallable, Category="AI|Movement") bool FleeFrom(AActor* Threat);
 
 	UFUNCTION(BlueprintPure, Category="AI|Movement") bool IsPatrolling() const { return bIsPatrolling; }
@@ -45,104 +50,94 @@ public:
 
 	void SetPatrolSpline(USplineComponent* Spline) { PatrolSpline = Spline; }
 
-	/** Stable patrol anchor captured at StartPatrol (Zone center). Used by herd members to cluster on the leader. */
 	UFUNCTION(BlueprintPure, Category="AI|Movement") FVector GetPatrolOrigin() const { return PatrolOrigin; }
 
 	UFUNCTION(BlueprintPure, Category="AI|Movement") int32 GetNumPatrolPoints() const;
 
-	/* ── Dispatchers ── */
 	UPROPERTY(BlueprintAssignable, Category="AI|Movement") FOnPatrolPointReached OnPatrolPointReached;
 	UPROPERTY(BlueprintAssignable, Category="AI|Movement") FOnPatrolCompleted OnPatrolCompleted;
 	UPROPERTY(BlueprintAssignable, Category="AI|Movement") FOnMovementTargetUpdated OnMovementTargetUpdated;
 
-	/* ── Config ── */
-	
-	/* ── Rotation ── */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="200", ClampMax="4000",
+		ToolTip="Max ground acceleration (cm/s^2). Lower = softer, more animal starts; the engine default 2048 reads twitchy."))
+	float MaxAcceleration = 1200.f;
 
-	/** How fast the AI rotates toward its movement direction (degrees/sec). Lower = smoother turns for humanoids. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement",
 		meta=(ClampMin="50", ClampMax="1000", ToolTip="Rotation speed at full (chase) speed. Lower values give smoother turns."))
-	float MovementRotationRate = 400.f;
+	float MovementRotationRate = 300.f;
 
-	/** Yaw turn rate when nearly stationary; lerps up to MovementRotationRate at chase speed (avoids tower-pivot look). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="20", ClampMax="1000",
 		ToolTip="Turn rate at low speed. Blends up to MovementRotationRate as the AI speeds up."))
 	float LowSpeedRotationRate = 220.f;
 
-	/** Walking braking deceleration. ~800-1200 = smooth combat stops; the 2048 engine default reads like hitting a wall. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="200",
 		ToolTip="Deceleration when stopping. Lower = smoother. 2048 (default) reads abrupt at the chase→attack halt."))
 	float BrakingDeceleration = 1024.f;
 
-	/** How this AI patrols: Stationary, Zone (random within radius), or Path (follows spline). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement") EPatrolMode PatrolMode = EPatrolMode::Stationary;
-	
-	/** How the path loops: Loop, PingPong, or Once. */
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(EditCondition="PatrolMode==EPatrolMode::Path")) EPatrolLoopMode PatrolLoopMode = EPatrolLoopMode::Loop;
 
-	/** Optional: an actor in the world that carries a SplineComponent. If set, the AI follows THAT spline
-	 *  instead of the character's built-in PatrolSpline. Lets level designers draw paths visually in the level. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category="AI|Movement|Path",
 		meta=(EditCondition="PatrolMode==EPatrolMode::Path",
 		ToolTip="Optional. Drag a spline actor from the level here. Its spline overrides the character's built-in PatrolSpline. Leave empty to use the character's own spline."))
 	TObjectPtr<AActor> PatrolPathActor;
 
-	/** How long to wait at each patrol point. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="0", ToolTip="Seconds the AI waits at each patrol point."))
 	float WaitTimeAtPoint = 2.f;
 
-	/** Random extra wait on top of WaitTimeAtPoint. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="0"))
 	float WaitTimeRandomDeviation = 1.f;
 
-	/** Chance (0-1) to play a long activity montage (graze/peck/sleep) on arriving at a patrol point. 0 = always plain idle. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="0", ClampMax="1",
 		ToolTip="Chance to play an AIAnimation ActivityMontage (graze/peck) at a patrol point."))
 	float ActivityChance = 0.f;
 
-	/** While dwelling at a point, replay an activity/idle about every this many seconds (graze→look up→graze) instead of freezing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="0.3", EditCondition="ActivityChance>0",
 		ToolTip="Seconds between dwell activities at a patrol point so the NPC keeps moving naturally during the wait."))
 	float ActivityRepeatInterval = 1.5f;
-	
-	/** Distance to consider 'arrived' at a patrol point. */
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement", meta=(ClampMin="10"))
 	float AcceptanceRadius = 100.f;
-	
-	/** Radius for Zone patrol mode. AI picks random NavMesh points within this. */
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Zone", meta=(EditCondition="PatrolMode==EPatrolMode::Zone", ClampMin="100",
 		ToolTip="Random patrol radius. AI picks a reachable point within this distance."))
 	float PatrolRadius = 800.f;
-	
-	/** Walk speed during patrol. */
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ToolTip="Speed when patrolling."))
 	float PatrolSpeed = 200.f;
 
-	/** Run speed during chase or return. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ToolTip="Speed when chasing a target."))
 	float ChaseSpeed = 500.f;
 
-	/** Speed when fleeing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ToolTip="Speed when running away from a threat."))
 	float FleeSpeed = 450.f;
 
-	/** Acceleration interpolation speed. Higher = snappier speed changes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Speed", meta=(ClampMin="0.1", ToolTip="How quickly MaxWalkSpeed interpolates to the desired value."))
 	float AccelerationInterpSpeed = 5.f;
-	
-	/** How far the AI tries to flee per flee request. */
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Flee", meta=(ClampMin="200", ToolTip="Distance to flee from the threat per move request."))
 	float FleeDistance = 1500.f;
 
-	/* ── Repath gating ── */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Flee", meta=(ClampMin="0", ClampMax="1",
+		ToolTip="How strongly a fleeing AI commits to its current heading vs re-picking the furthest escape point. Higher = smoother panic arcs."))
+	float FleeTurnCommitment = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Flee", meta=(ClampMin="0", ClampMax="60",
+		ToolTip="Max degrees each individual's escape heading is randomly offset, so a startled herd fans out instead of overlapping."))
+	float FleeScatterSpread = 25.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Repath", meta=(ClampMin="0",
 		ToolTip="Minimum goal movement (cm) before re-pathing to a moving target. Higher = smoother but slightly laggier tracking."))
-	float RepathTolerance = 120.f;
+	float RepathTolerance = 140.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Repath", meta=(ClampMin="0",
 		ToolTip="Minimum delay between re-paths to a near-identical goal. Caps repath frequency to avoid stutter."))
 	float MinRepathInterval = 0.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI|Movement|Repath", meta=(ClampMin="0.1",
+		ToolTip="Max seconds a path is kept before a forced refresh even if the goal stayed in the dead-zone."))
+	float RepathMaxStale = 0.4f;
 
 protected:
 	virtual void BeginPlay() override;
@@ -162,7 +157,6 @@ private:
 	UPROPERTY() TObjectPtr<UCharacterMovementComponent> MovementComp;
 	UPROPERTY() TObjectPtr<USplineComponent> PatrolSpline;
 
-	/** Cached world-space positions of spline points. Snapshotted at StartPatrol. */
 	TArray<FVector> CachedSplineWorldPoints;
 
 	FVector CurrentDestination = FVector::ZeroVector;
@@ -170,7 +164,14 @@ private:
 
 	FVector LastRequestedGoal = FVector::ZeroVector;
 	float RepathCooldown = 0.f;
+	float RepathStaleTimer = 0.f;
 	bool bHasLastGoal = false;
+
+	TWeakObjectPtr<AActor> CurrentMoveGoalActor;
+	float CurrentMoveGoalAcceptance = -1.f;
+
+	float FleeScatterAngle = 0.f;
+	bool bFleeScatterRolled = false;
 
 	float DesiredMaxSpeed = 0.f;
 	float WaitTimer = 0.f;

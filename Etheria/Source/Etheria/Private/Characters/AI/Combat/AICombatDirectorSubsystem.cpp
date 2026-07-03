@@ -33,11 +33,13 @@ void UAICombatDirectorSubsystem::PruneAngleClaims(TArray<FAngleClaim>& Claims, f
 void UAICombatDirectorSubsystem::SweepStaleEntries()
 {
 	const float Now = NowSeconds();
-	if (Now - LastSweepTime < 5.f) return; // amortized cleanup, every ~5s
+	if (Now - LastSweepTime < 5.f) return;
 	LastSweepTime = Now;
 	for (auto It = TokensByTarget.CreateIterator(); It; ++It)
 		if (!It.Key().IsValid()) It.RemoveCurrent();
 	for (auto It = LastAttackStartByTarget.CreateIterator(); It; ++It)
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+	for (auto It = LastHitConnectByTarget.CreateIterator(); It; ++It)
 		if (!It.Key().IsValid()) It.RemoveCurrent();
 	for (auto It = AnglesByTarget.CreateIterator(); It; ++It)
 		if (!It.Key().IsValid()) It.RemoveCurrent();
@@ -118,19 +120,29 @@ bool UAICombatDirectorSubsystem::HasAttackToken(AActor* Target, AActor* Attacker
 	return false;
 }
 
-bool UAICombatDirectorSubsystem::IsAttackWindowOpen(AActor* Target, float MinInterval) const
+bool UAICombatDirectorSubsystem::IsAttackWindowOpen(AActor* Target, float MinInterval, float HitGrace) const
 {
-	if (!Target || MinInterval <= 0.f) return true;
+	if (!Target) return true;
 	const float Now = NowSeconds();
-	if (const float* Last = LastAttackStartByTarget.Find(Target))
-		if ((Now - *Last) < MinInterval)
-			return false;
+	if (MinInterval > 0.f)
+		if (const float* Last = LastAttackStartByTarget.Find(Target))
+			if ((Now - *Last) < MinInterval)
+				return false;
+	if (HitGrace > 0.f)
+		if (const float* LastHit = LastHitConnectByTarget.Find(Target))
+			if ((Now - *LastHit) < HitGrace)
+				return false;
 	return true;
 }
 
 void UAICombatDirectorSubsystem::NotifyAttackStarted(AActor* Target)
 {
 	if (Target) LastAttackStartByTarget.Add(Target, NowSeconds());
+}
+
+void UAICombatDirectorSubsystem::NotifyAttackConnected(AActor* Target)
+{
+	if (Target) LastHitConnectByTarget.Add(Target, NowSeconds());
 }
 
 float UAICombatDirectorSubsystem::ReserveAttackAngle(AActor* Target, AActor* Attacker, float PreferredAngle, float MinSeparation, float LeaseDuration)
@@ -143,7 +155,6 @@ float UAICombatDirectorSubsystem::ReserveAttackAngle(AActor* Target, AActor* Att
 	TArray<FAngleClaim>& Claims = AnglesByTarget.FindOrAdd(Target);
 	PruneAngleClaims(Claims, Now);
 
-	// Every other attacker's currently-claimed lane around this target (exclude our own claim).
 	TArray<float> Others;
 	Others.Reserve(Claims.Num());
 	for (const FAngleClaim& C : Claims)
@@ -152,7 +163,6 @@ float UAICombatDirectorSubsystem::ReserveAttackAngle(AActor* Target, AActor* Att
 
 	FAngleClaim* Mine = Claims.FindByPredicate([Attacker](const FAngleClaim& C){ return C.Attacker.Get() == Attacker; });
 
-	// Min angular clearance of a candidate angle from every other claim (radians).
 	auto MinClearOf = [&Others](float Ang) -> float
 	{
 		float MinClear = PI;
@@ -164,20 +174,17 @@ float UAICombatDirectorSubsystem::ReserveAttackAngle(AActor* Target, AActor* Att
 	float Granted;
 	if (Others.Num() == 0)
 	{
-		// First attacker in: take where we approached from.
+
 		Granted = PreferredAngle;
 	}
 	else if (Mine && MinClearOf(Mine->Angle) >= MinSeparation)
 	{
-		// HYSTERESIS (must run BEFORE gap-filling): we already hold a lane that still clears MinSeparation from
-		// everyone else — keep it. No reassignment, no per-update thrash.
-		Granted = Mine->Angle;
+
+		Granted = (MinClearOf(PreferredAngle) >= MinSeparation) ? PreferredAngle : Mine->Angle;
 	}
 	else
 	{
-		// GAP-FILLING: drop the (new or relocated) claim in the MIDDLE of the largest empty angular gap among the
-		// other claims (wrap-around). This walks attackers to the emptiest side, so the BACK fills even when every
-		// wolf approaches from the front. k evenly-placed claims → 2 opposite, 3 at 120°, 4 at 90°: full encirclement.
+
 		TArray<float> Sorted = Others;
 		Sorted.Sort();
 		const int32 N = Sorted.Num();
@@ -187,8 +194,8 @@ float UAICombatDirectorSubsystem::ReserveAttackAngle(AActor* Target, AActor* Att
 		{
 			const float A = Sorted[i];
 			const float B = Sorted[(i + 1) % N];
-			float Gap = B - A;               // forward gap A->B
-			if (Gap <= 0.f) Gap += 2.f * PI; // wrap on the final segment
+			float Gap = B - A;
+			if (Gap <= 0.f) Gap += 2.f * PI;
 			if (Gap > BestGap) { BestGap = Gap; BestMid = A + Gap * 0.5f; }
 		}
 		Granted = FMath::UnwindRadians(BestMid);

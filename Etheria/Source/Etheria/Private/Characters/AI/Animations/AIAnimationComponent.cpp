@@ -15,33 +15,88 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimSingleNodeInstance.h"
 #include "KismetAnimationLibrary.h"
 
 UAIAnimationComponent::UAIAnimationComponent() { PrimaryComponentTick.bCanEverTick = true; }
+
+namespace
+{
+
+	FName ResolveABPFloatName(UClass* C, FName Configured, std::initializer_list<FName> Fallbacks)
+	{
+		if (Configured.IsNone()) return NAME_None;
+		auto IsFloatLike = [C](const FName& N) { return FindFProperty<FFloatProperty>(C, N) || FindFProperty<FDoubleProperty>(C, N); };
+		if (IsFloatLike(Configured)) return Configured;
+		for (const FName& N : Fallbacks)
+			if (IsFloatLike(N)) return N;
+		return NAME_None;
+	}
+
+	FName ResolveABPVectorName(UClass* C, FName Configured, std::initializer_list<FName> Fallbacks)
+	{
+		if (Configured.IsNone()) return NAME_None;
+		auto IsVector = [C](const FName& N)
+		{
+			const FStructProperty* P = FindFProperty<FStructProperty>(C, N);
+			return P && P->Struct == TBaseStructure<FVector>::Get();
+		};
+		if (IsVector(Configured)) return Configured;
+		for (const FName& N : Fallbacks)
+			if (IsVector(N)) return N;
+		return NAME_None;
+	}
+
+	FBoolProperty* ResolveABPBoolProp(UClass* C, std::initializer_list<FName> Candidates)
+	{
+		for (const FName& N : Candidates)
+			if (FBoolProperty* P = FindFProperty<FBoolProperty>(C, N)) return P;
+		return nullptr;
+	}
+}
 
 void UAIAnimationComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	OwnerCharacter = Cast<ABaseAICharacter>(GetOwner());
-	if (!OwnerCharacter) return;
 
+}
+
+void UAIAnimationComponent::EnsureModeInitialized()
+{
+	if (bModeInitialized || !OwnerCharacter) return;
 	USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
 	if (!Mesh) return;
+	bModeInitialized = true;
+
+	const bool bHasLocomotionMontages = (WalkForwardMontage || RunForwardMontage || IdleBaseMontage);
+	if (bAutoCorrectAnimationMode)
+	{
+		if (AnimationMode == EAIAnimationMode::DirectPlayback && !bHasLocomotionMontages && Mesh->GetAnimClass())
+		{
+			AnimationMode = EAIAnimationMode::AnimBlueprint;
+			UE_LOG(LogTemp, Warning, TEXT("[%s] AIAnimation: DirectPlayback had no locomotion montages but the mesh has an ABP — auto-switched to AnimBlueprint mode (set bAutoCorrectAnimationMode=false to opt out)."),
+				*OwnerCharacter->GetName());
+		}
+		else if (AnimationMode == EAIAnimationMode::AnimBlueprint && !Mesh->GetAnimClass() && bHasLocomotionMontages)
+		{
+			AnimationMode = EAIAnimationMode::DirectPlayback;
+			UE_LOG(LogTemp, Warning, TEXT("[%s] AIAnimation: AnimBlueprint mode had no anim class on the mesh but locomotion montages are assigned — auto-switched to DirectPlayback (set bAutoCorrectAnimationMode=false to opt out)."),
+				*OwnerCharacter->GetName());
+		}
+	}
 
 	if (AnimationMode == EAIAnimationMode::DirectPlayback)
 	{
-		// Direct mode — force SingleNode, no ABP
+
 		Mesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 		if (IdleBaseMontage) { PlayOnMesh(IdleBaseMontage, true); CurrentLocomotionMontage = IdleBaseMontage; }
 	}
 	else
 	{
-		// ABP mode — leave animation mode alone, bind montage end callback
-		if (UAnimInstance* Anim = Mesh->GetAnimInstance())
-		{
-			Anim->OnMontageEnded.AddDynamic(this, &UAIAnimationComponent::HandleMontageEnded);
-			bMontageCallbackBound = true;
-		}
+
+		if (Mesh->GetAnimationMode() != EAnimationMode::AnimationBlueprint && Mesh->GetAnimClass())
+			Mesh->SetAnimationMode(EAnimationMode::AnimationBlueprint);
 	}
 }
 
@@ -49,30 +104,41 @@ void UAIAnimationComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	EnsureModeInitialized();
+
 	if (AnimationMode == EAIAnimationMode::AnimBlueprint)
 	{
-		// Feed ABP variables every frame
-		UpdateABPVariables();
 
-		// ABP mode uses HandleMontageEnded callback — no timer tracking needed
-		// But we still need bIsPlayingAction state for external queries
+		UpdateABPVariables(DeltaTime);
+
 	}
-	else // DirectPlayback
+	else
 	{
 		if (bIsPlayingAction)
 		{
-			ActionTimer -= DeltaTime;
+
+			float RateScale = 1.f;
+			if (OwnerCharacter)
+				if (USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh())
+					RateScale = Mesh->GlobalAnimRateScale;
+			ActionTimer -= DeltaTime * FMath::Max(RateScale, 0.f);
 			if (ActionTimer <= 0.f)
 			{
 				UAnimMontage* Finished = CurrentActionMontage;
 				bIsPlayingAction = false;
 				bLocomotionPaused = false;
 				bIsPlayingIdleVariation = false;
+				bCurrentActionIsHitReact = false;
 				CurrentActionMontage = nullptr;
 				ActionTimer = 0.f;
+				SmoothedPlayRate = 1.f;
 				OnAIAnimEnded.Broadcast(Finished);
-				CurrentLocomotionMontage = nullptr;
-				UpdateLocomotionDirect();
+
+				if (!bIsPlayingAction)
+				{
+					CurrentLocomotionMontage = nullptr;
+					UpdateLocomotionDirect();
+				}
 			}
 			return;
 		}
@@ -80,12 +146,12 @@ void UAIAnimationComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		if (!bLocomotionPaused && !bIsPlayingIdleVariation)
 		{
 			UpdateLocomotionDirect();
-			ApplyLocomotionSpeedMatch();
+			ApplyLocomotionSpeedMatch(DeltaTime);
 		}
 	}
 }
 
-void UAIAnimationComponent::ApplyLocomotionSpeedMatch()
+void UAIAnimationComponent::ApplyLocomotionSpeedMatch(float DeltaTime)
 {
 	if (!OwnerCharacter) return;
 	USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
@@ -93,17 +159,29 @@ void UAIAnimationComponent::ApplyLocomotionSpeedMatch()
 	if (!Mesh || !MC) return;
 
 	const float Speed = MC->Velocity.Size2D();
-	if (Speed < IdleSpeedThreshold) return; // idle clip plays at its own rate
+
+	const bool bMovingState =
+		CurrentLocomotionState != EAILocomotionState::Idle &&
+		CurrentLocomotionState != EAILocomotionState::Falling &&
+		CurrentLocomotionState != EAILocomotionState::Landing;
+	if (Speed < IdleSpeedThreshold || !bMovingState)
+	{
+		if (!FMath::IsNearlyEqual(SmoothedPlayRate, 1.f)) { SmoothedPlayRate = 1.f; Mesh->SetPlayRate(1.f); }
+		return;
+	}
 
 	const bool bRunning = (CurrentLocomotionState == EAILocomotionState::RunForward || CurrentLocomotionState == EAILocomotionState::RunBackward);
-	const float Ref = bRunning ? RunRefSpeed : WalkRefSpeed;
-	// Match the clip's play rate to actual capsule speed so feet don't slide between the coarse walk/run buckets.
-	Mesh->SetPlayRate(FMath::Clamp(Speed / FMath::Max(Ref, 1.f), 0.6f, 1.6f));
+
+	const float MeshScale = FMath::Max(Mesh->GetComponentScale().X, 0.05f);
+	const float Ref = (bRunning ? RunRefSpeed : WalkRefSpeed) * MeshScale;
+	const float Target = FMath::Clamp(Speed / FMath::Max(Ref, 1.f),
+		bRunning ? FMath::Max(0.6f, PlayRateMin) : PlayRateMin, FMath::Max(PlayRateMax, 1.f));
+
+	SmoothedPlayRate = FMath::FInterpTo(SmoothedPlayRate, Target, DeltaTime, PlayRateInterpSpeed);
+	Mesh->SetPlayRate(SmoothedPlayRate);
 }
 
-/* ═══════════ ABP Variable Feeding ═══════════ */
-
-void UAIAnimationComponent::UpdateABPVariables()
+void UAIAnimationComponent::UpdateABPVariables(float DeltaTime)
 {
 	if (!OwnerCharacter) return;
 	USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
@@ -115,12 +193,44 @@ void UAIAnimationComponent::UpdateABPVariables()
 	if (!MC) return;
 
 	const FVector Vel = MC->Velocity;
+	const float RawSpeed = Vel.Size2D();
 
-	SetABPVector(Anim, ABP_VelocityName, Vel);
-	SetABPFloat(Anim, ABP_GroundSpeedName, Vel.Size2D());
-	SetABPFloat(Anim, ABP_FallSpeedName, Vel.Z);
-	SetABPFloat(Anim, ABP_DirectionName,
-		UKismetAnimationLibrary::CalculateDirection(Vel, OwnerCharacter->GetActorRotation()));
+	SmoothedGroundSpeed = FMath::FInterpTo(SmoothedGroundSpeed, RawSpeed, DeltaTime, GroundSpeedInterpSpeed);
+	const float RawDir = UKismetAnimationLibrary::CalculateDirection(Vel, OwnerCharacter->GetActorRotation());
+	const float DirDelta = FMath::UnwindDegrees(RawDir - SmoothedDirection);
+	SmoothedDirection = FMath::UnwindDegrees(SmoothedDirection + DirDelta * FMath::Clamp(DeltaTime * DirectionInterpSpeed, 0.f, 1.f));
+
+	if (CachedABPClass.Get() != Anim->GetClass())
+	{
+		CachedABPClass = Anim->GetClass();
+		UClass* C = Anim->GetClass();
+		ResolvedVelocityName    = ResolveABPVectorName(C, ABP_VelocityName, { TEXT("Velocity"), TEXT("CharacterVelocity") });
+		ResolvedGroundSpeedName = ResolveABPFloatName(C, ABP_GroundSpeedName, { TEXT("GroundSpeed"), TEXT("Speed"), TEXT("MoveSpeed"), TEXT("CurrentSpeed"), TEXT("WalkSpeed") });
+		ResolvedFallSpeedName   = ResolveABPFloatName(C, ABP_FallSpeedName, { TEXT("FallSpeed"), TEXT("VerticalVelocity"), TEXT("ZVelocity") });
+		ResolvedDirectionName   = ResolveABPFloatName(C, ABP_DirectionName, { TEXT("Direction"), TEXT("MovementDirection"), TEXT("MoveDirection") });
+		ShouldMovePropCached = ResolveABPBoolProp(C, { TEXT("ShouldMove"), TEXT("bShouldMove"), TEXT("IsMoving"), TEXT("bIsMoving"), TEXT("IsAccelerating"), TEXT("bIsAccelerating") });
+		IsFallingPropCached  = ResolveABPBoolProp(C, { TEXT("IsFalling"), TEXT("bIsFalling"), TEXT("IsInAir"), TEXT("bIsInAir") });
+
+		if (ResolvedGroundSpeedName == NAME_None && ResolvedVelocityName == NAME_None && !ShouldMovePropCached
+			&& !Anim->IsA<UAnimSingleNodeInstance>())
+			UE_LOG(LogTemp, Warning, TEXT("[%s] AIAnimation: ABP '%s' exposes none of the expected locomotion variables (GroundSpeed/Speed/Velocity/ShouldMove/IsMoving...) — nav movement will not animate. Set the ABP_* name overrides on AIAnimationComponent to match your ABP."),
+				*OwnerCharacter->GetName(), *C->GetName());
+	}
+
+	SetABPVector(Anim, ResolvedVelocityName, Vel);
+	SetABPFloat(Anim, ResolvedGroundSpeedName, SmoothedGroundSpeed);
+	SetABPFloat(Anim, ResolvedFallSpeedName, Vel.Z);
+	SetABPFloat(Anim, ResolvedDirectionName, SmoothedDirection);
+
+	if (BoundAnimInstance.Get() != Anim)
+	{
+		Anim->OnMontageEnded.AddDynamic(this, &UAIAnimationComponent::HandleMontageEnded);
+		BoundAnimInstance = Anim;
+	}
+	bABPShouldMove = bABPShouldMove ? (RawSpeed > 10.f)
+	                                : (RawSpeed > FMath::Max(IdleSpeedThreshold * 4.f, 25.f));
+	if (ShouldMovePropCached) ShouldMovePropCached->SetPropertyValue_InContainer(Anim, bABPShouldMove);
+	if (IsFallingPropCached)  IsFallingPropCached->SetPropertyValue_InContainer(Anim, MC->IsFalling());
 }
 
 void UAIAnimationComponent::SetABPFloat(UAnimInstance* Anim, FName Name, float Value)
@@ -131,7 +241,7 @@ void UAIAnimationComponent::SetABPFloat(UAnimInstance* Anim, FName Name, float V
 		Prop->SetPropertyValue_InContainer(Anim, Value);
 		return;
 	}
-	// UE5 might use double
+
 	if (FDoubleProperty* Prop = FindFProperty<FDoubleProperty>(Anim->GetClass(), Name))
 	{
 		Prop->SetPropertyValue_InContainer(Anim, static_cast<double>(Value));
@@ -151,8 +261,6 @@ void UAIAnimationComponent::SetABPVector(UAnimInstance* Anim, FName Name, const 
 	}
 }
 
-/* ═══════════ Direct Mode Locomotion ═══════════ */
-
 void UAIAnimationComponent::UpdateLocomotionDirect()
 {
 	if (!OwnerCharacter) return;
@@ -163,28 +271,45 @@ void UAIAnimationComponent::UpdateLocomotionDirect()
 
 	const FVector Vel = MC->Velocity;
 	const float Speed = Vel.Size2D();
-	if (Speed < IdleSpeedThreshold) { SetLocomotionState(EAILocomotionState::Idle); return; }
 
-	const FVector Dir2D = Vel.GetSafeNormal2D();
-	const float FwdDot = FVector::DotProduct(OwnerCharacter->GetActorForwardVector(), Dir2D);
-	if (Speed >= RunSpeedThreshold)
+	const bool bWasIdle = (CurrentLocomotionState == EAILocomotionState::Idle);
+	const float MoveEnter = FMath::Max(IdleSpeedThreshold * 2.f, IdleSpeedThreshold + 10.f);
+	if (bWasIdle ? (Speed < MoveEnter) : (Speed < IdleSpeedThreshold)) { SetLocomotionState(EAILocomotionState::Idle); return; }
+
+	const FVector Dir2D  = Vel.GetSafeNormal2D();
+	const float FwdDot   = FVector::DotProduct(OwnerCharacter->GetActorForwardVector(), Dir2D);
+	const float RightDot = FVector::DotProduct(OwnerCharacter->GetActorRightVector(),   Dir2D);
+
+	const bool bWasForward =
+		CurrentLocomotionState == EAILocomotionState::WalkForward || CurrentLocomotionState == EAILocomotionState::RunForward ||
+		CurrentLocomotionState == EAILocomotionState::WalkLeft   || CurrentLocomotionState == EAILocomotionState::WalkRight  ||
+		CurrentLocomotionState == EAILocomotionState::Idle;
+	const bool bFwd = bWasForward ? (FwdDot > -0.15f) : (FwdDot > 0.15f);
+
+	const bool bWasStrafing = (CurrentLocomotionState == EAILocomotionState::WalkLeft || CurrentLocomotionState == EAILocomotionState::WalkRight);
+	const float StrafeMargin = bWasStrafing ? -0.15f : 0.25f;
+	if (FMath::Abs(RightDot) > FMath::Abs(FwdDot) + StrafeMargin)
 	{
-		SetLocomotionState(FwdDot >= 0.f ? EAILocomotionState::RunForward : EAILocomotionState::RunBackward);
+		SetLocomotionState(RightDot >= 0.f ? EAILocomotionState::WalkRight : EAILocomotionState::WalkLeft);
 		return;
 	}
-	// Walking: pick a lateral strafe state when moving more sideways than forward/back (combat orbit while facing target).
-	const float RightDot = FVector::DotProduct(OwnerCharacter->GetActorRightVector(), Dir2D);
-	if (FMath::Abs(RightDot) > FMath::Abs(FwdDot))
-		SetLocomotionState(RightDot >= 0.f ? EAILocomotionState::WalkRight : EAILocomotionState::WalkLeft);
-	else
-		SetLocomotionState(FwdDot >= 0.f ? EAILocomotionState::WalkForward : EAILocomotionState::WalkBackward);
+
+	const bool bWasRunning = (CurrentLocomotionState == EAILocomotionState::RunForward || CurrentLocomotionState == EAILocomotionState::RunBackward);
+	const float RunExit = RunSpeedThreshold * FMath::Clamp(RunHysteresisFraction, 0.1f, 0.99f);
+	if (bWasRunning ? (Speed > RunExit) : (Speed >= RunSpeedThreshold))
+	{
+		SetLocomotionState(bFwd ? EAILocomotionState::RunForward : EAILocomotionState::RunBackward);
+		return;
+	}
+	SetLocomotionState(bFwd ? EAILocomotionState::WalkForward : EAILocomotionState::WalkBackward);
 }
 
 void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
 {
-	if (AnimationMode == EAIAnimationMode::AnimBlueprint) return; // ABP handles locomotion
+	if (AnimationMode == EAIAnimationMode::AnimBlueprint) return;
 
 	if (CurrentLocomotionState == NewState && CurrentLocomotionMontage) return;
+	const EAILocomotionState OldState = CurrentLocomotionState;
 	CurrentLocomotionState = NewState;
 
 	UAnimMontage* T = nullptr;
@@ -201,17 +326,34 @@ void UAIAnimationComponent::SetLocomotionState(EAILocomotionState NewState)
 	case EAILocomotionState::Landing:      T = LandingMontage; break;
 	}
 
-	if (T && T != CurrentLocomotionMontage) { PlayOnMesh(T, true); CurrentLocomotionMontage = T; }
+	if (T && T != CurrentLocomotionMontage)
+	{
+
+		float PhaseFrac = -1.f;
+		const bool bOldMoving = (OldState != EAILocomotionState::Idle && OldState != EAILocomotionState::Falling && OldState != EAILocomotionState::Landing);
+		const bool bNewMoving = (NewState != EAILocomotionState::Idle && NewState != EAILocomotionState::Falling && NewState != EAILocomotionState::Landing);
+		if (bOldMoving && bNewMoving && CurrentLocomotionMontage && OwnerCharacter)
+			if (USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh())
+				if (UAnimSingleNodeInstance* SN = Mesh->GetSingleNodeInstance())
+					if (const float OldLen = CurrentLocomotionMontage->GetPlayLength(); OldLen > 0.f)
+						PhaseFrac = FMath::Fmod(SN->GetCurrentTime() / OldLen, 1.f);
+
+		PlayOnMesh(T, true);
+		CurrentLocomotionMontage = T;
+
+		if (PhaseFrac >= 0.f && OwnerCharacter)
+			if (USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh())
+				if (UAnimSingleNodeInstance* SN = Mesh->GetSingleNodeInstance())
+					SN->SetPosition(PhaseFrac * T->GetPlayLength(), false);
+	}
 	OnLocomotionStateChanged.Broadcast();
 }
-
-/* ═══════════ Action Montages ═══════════ */
 
 UAnimMontage* UAIAnimationComponent::PlayRandomIdle()
 {
 	if (IdleVariations.Num() == 0) return nullptr;
 	int32 Idx = FMath::RandRange(0, IdleVariations.Num() - 1);
-	if (IdleVariations.Num() > 1 && Idx == LastIdleIndex) Idx = (Idx + 1) % IdleVariations.Num(); // no immediate repeat
+	if (IdleVariations.Num() > 1 && Idx == LastIdleIndex) Idx = (Idx + 1) % IdleVariations.Num();
 	LastIdleIndex = Idx;
 	UAnimMontage* R = PlayActionMontage(IdleVariations[Idx], IdlePlayRate);
 	if (R) bIsPlayingIdleVariation = true;
@@ -222,10 +364,10 @@ UAnimMontage* UAIAnimationComponent::PlayRandomActivity()
 {
 	if (ActivityMontages.Num() == 0) return nullptr;
 	int32 Idx = FMath::RandRange(0, ActivityMontages.Num() - 1);
-	if (ActivityMontages.Num() > 1 && Idx == LastActivityIndex) Idx = (Idx + 1) % ActivityMontages.Num(); // no immediate repeat
+	if (ActivityMontages.Num() > 1 && Idx == LastActivityIndex) Idx = (Idx + 1) % ActivityMontages.Num();
 	LastActivityIndex = Idx;
 	UAnimMontage* R = PlayActionMontage(ActivityMontages[Idx], IdlePlayRate);
-	if (R) bIsPlayingIdleVariation = true; // plays to completion like an idle variation
+	if (R) bIsPlayingIdleVariation = true;
 	return R;
 }
 
@@ -256,16 +398,16 @@ UAnimMontage* UAIAnimationComponent::PlayHitReaction() { return PlayRandomHitRea
 UAnimMontage* UAIAnimationComponent::PlayRandomHitReaction()
 {
 	if (HitReactionMontages.Num() == 0) return nullptr;
-	StopCurrentAction(); // Hit interrupts everything
-	return PlayActionMontage(HitReactionMontages[FMath::RandRange(0, HitReactionMontages.Num() - 1)]);
+	StopCurrentAction();
+	UAnimMontage* R = PlayActionMontage(HitReactionMontages[FMath::RandRange(0, HitReactionMontages.Num() - 1)]);
+	if (R) bCurrentActionIsHitReact = true;
+	return R;
 }
 
 UAnimMontage* UAIAnimationComponent::PlayDirectionalHitReaction(const FVector& WorldHitDir)
 {
 	if (!OwnerCharacter || WorldHitDir.IsNearlyZero()) return PlayRandomHitReaction();
 
-	// WorldHitDir is the direction the hit TRAVELLED (attacker→us); flip it to point toward the attacker, then
-	// express it in local space: +X front, +Y right.
 	const FVector Local = OwnerCharacter->GetActorTransform().InverseTransformVectorNoScale((-WorldHitDir).GetSafeNormal2D());
 
 	const TArray<TObjectPtr<UAnimMontage>>* Pool;
@@ -274,23 +416,24 @@ UAnimMontage* UAIAnimationComponent::PlayDirectionalHitReaction(const FVector& W
 
 	if (Pool && Pool->Num() > 0)
 	{
-		StopCurrentAction(); // a hit interrupts everything
-		return PlayActionMontage((*Pool)[FMath::RandRange(0, Pool->Num() - 1)]);
+		StopCurrentAction();
+		UAnimMontage* R = PlayActionMontage((*Pool)[FMath::RandRange(0, Pool->Num() - 1)]);
+		if (R) bCurrentActionIsHitReact = true;
+		return R;
 	}
-	return PlayRandomHitReaction(); // no directional clips authored → generic pool
+	return PlayRandomHitReaction();
 }
 
 UAnimMontage* UAIAnimationComponent::PlayStartle()
 {
-	// DirectPlayback creatures express startle through their flee locomotion; a montage here would pause locomotion
-	// and make them slide. Startle is an ABP (humanoid) feature where montages layer over the locomotion graph.
+
 	if (AnimationMode == EAIAnimationMode::DirectPlayback) return nullptr;
 	return StartleMontage ? PlayActionMontage(StartleMontage) : nullptr;
 }
 
 UAnimMontage* UAIAnimationComponent::PlayMenace()
 {
-	// The AI holds still while menacing, so a montage is safe even in DirectPlayback (no foot-slide).
+
 	return MenaceMontage ? PlayActionMontage(MenaceMontage) : nullptr;
 }
 
@@ -298,14 +441,19 @@ UAnimMontage* UAIAnimationComponent::PlayDeath() { return PlayRandomDeath(); }
 
 UAnimMontage* UAIAnimationComponent::PlayRandomDeath()
 {
+	EnsureModeInitialized();
 	if (DeathMontages.Num() == 0) return nullptr;
 	UAnimMontage* M = DeathMontages[FMath::RandRange(0, DeathMontages.Num() - 1)];
 	if (!M) return nullptr;
 
 	if (AnimationMode == EAIAnimationMode::DirectPlayback)
+	{
 		PlayOnMesh(M, false);
-	else
-		PlayViaMontageSystem(M);
+	}
+	else if (!PlayViaMontageSystem(M))
+	{
+		return nullptr;
+	}
 
 	bIsPlayingAction = true;
 	bLocomotionPaused = true;
@@ -318,6 +466,9 @@ UAnimMontage* UAIAnimationComponent::PlayRandomDeath()
 UAnimMontage* UAIAnimationComponent::PlayActionMontage(UAnimMontage* Montage, float PlayRate)
 {
 	if (!Montage || !OwnerCharacter) return nullptr;
+	EnsureModeInitialized();
+
+	bCurrentActionIsHitReact = false;
 
 	if (AnimationMode == EAIAnimationMode::DirectPlayback)
 	{
@@ -329,6 +480,35 @@ UAnimMontage* UAIAnimationComponent::PlayActionMontage(UAnimMontage* Montage, fl
 	}
 	else
 	{
+		UAnimMontage* Played = PlayViaMontageSystem(Montage, PlayRate);
+		if (!Played) return nullptr;
+		bIsPlayingAction = true;
+		bLocomotionPaused = true;
+		CurrentActionMontage = Montage;
+	}
+
+	OnAIAnimStarted.Broadcast(Montage);
+	return Montage;
+}
+
+UAnimMontage* UAIAnimationComponent::PlayLoopingAction(UAnimMontage* Montage, float MaxDuration, float PlayRate)
+{
+	if (!Montage || !OwnerCharacter || MaxDuration <= 0.f) return nullptr;
+	EnsureModeInitialized();
+
+	bCurrentActionIsHitReact = false;
+
+	if (AnimationMode == EAIAnimationMode::DirectPlayback)
+	{
+		PlayOnMesh(Montage, true, PlayRate);
+		bIsPlayingAction = true;
+		bLocomotionPaused = true;
+		CurrentActionMontage = Montage;
+		ActionTimer = MaxDuration;
+	}
+	else
+	{
+
 		UAnimMontage* Played = PlayViaMontageSystem(Montage, PlayRate);
 		if (!Played) return nullptr;
 		bIsPlayingAction = true;
@@ -354,18 +534,18 @@ void UAIAnimationComponent::StopCurrentAction()
 	bIsPlayingAction = false;
 	bLocomotionPaused = false;
 	bIsPlayingIdleVariation = false;
+	bCurrentActionIsHitReact = false;
 	CurrentActionMontage = nullptr;
 	ActionTimer = 0.f;
+	SmoothedPlayRate = 1.f;
 	OnAIAnimEnded.Broadcast(Stopped);
 
-	if (AnimationMode == EAIAnimationMode::DirectPlayback)
+	if (AnimationMode == EAIAnimationMode::DirectPlayback && !bIsPlayingAction)
 	{
 		CurrentLocomotionMontage = nullptr;
 		UpdateLocomotionDirect();
 	}
 }
-
-/* ═══════════ ABP Callback ═══════════ */
 
 void UAIAnimationComponent::HandleMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
@@ -373,16 +553,21 @@ void UAIAnimationComponent::HandleMontageEnded(UAnimMontage* Montage, bool bInte
 
 	if (Montage == CurrentActionMontage)
 	{
+
+		if (OwnerCharacter)
+			if (USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh())
+				if (UAnimInstance* Anim = Mesh->GetAnimInstance())
+					if (Anim->Montage_IsPlaying(Montage)) return;
+
 		UAnimMontage* Finished = CurrentActionMontage;
 		bIsPlayingAction = false;
 		bLocomotionPaused = false;
 		bIsPlayingIdleVariation = false;
+		bCurrentActionIsHitReact = false;
 		CurrentActionMontage = nullptr;
 		OnAIAnimEnded.Broadcast(Finished);
 	}
 }
-
-/* ═══════════ Internal Playback ═══════════ */
 
 void UAIAnimationComponent::PlayOnMesh(UAnimMontage* Montage, bool bLoop, float PlayRate)
 {
