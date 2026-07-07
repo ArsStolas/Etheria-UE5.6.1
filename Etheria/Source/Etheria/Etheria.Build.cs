@@ -27,6 +27,7 @@ public class Etheria : ModuleRules
 			"LevelSequence",
 			"MovieScene",
 			"MovieSceneTracks",
+			"OrionRPG",
 			"Slate",
 			"SlateCore"
 		});
