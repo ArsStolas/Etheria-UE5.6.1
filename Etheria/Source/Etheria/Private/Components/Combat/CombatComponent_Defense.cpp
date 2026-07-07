@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by:  0nnen
- * Last Updated by: 0nnen
+ * Last Updated by: ArsStolas
  * Class: "CombatComponent - Source (Defense)"
  * Notes: Parry / dodge / perfect window helpers.
  */
@@ -30,11 +30,29 @@ void UCombatComponent::SetParryHeld(bool bHeld)
         const float Mult = bParryHeld ? ParryMoveSpeedMultiplier : 1.f;
         MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
     }
+
+    if (UWorld* W = GetWorld())
+    {
+        if (bHeld && AutoPerfectParryWindow > 0.f)
+        {
+            BeginPerfectParryWindow();
+            W->GetTimerManager().SetTimer(AutoPerfectParryHandle,
+                FTimerDelegate::CreateUObject(this, &UCombatComponent::EndPerfectParryWindow),
+                AutoPerfectParryWindow, false);
+        }
+        else if (!bHeld)
+        {
+            W->GetTimerManager().ClearTimer(AutoPerfectParryHandle);
+            if (bPerfectParryWindow) EndPerfectParryWindow();
+        }
+    }
 }
 
 void UCombatComponent::BeginPerfectParryWindow()
 {
     bPerfectParryWindow = true;
+
+    if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(AutoPerfectParryHandle);
     OnCue.Broadcast(FName("PerfectParryWindow"), ECombatCuePhase::Start);
 }
 
@@ -59,11 +77,23 @@ void UCombatComponent::StartDodgeIFrames(float DurationOverride)
 
     if (UWorld* W = GetWorld())
     {
+
+        if (AutoPerfectDodgeWindow > 0.f)
+        {
+            BeginPerfectDodgeWindow();
+            W->GetTimerManager().SetTimer(AutoPerfectDodgeHandle,
+                FTimerDelegate::CreateUObject(this, &UCombatComponent::EndPerfectDodgeWindow),
+                FMath::Min(AutoPerfectDodgeWindow, Duration), false);
+        }
+
         FTimerHandle H;
         W->GetTimerManager().SetTimer(H, [this]()
         {
             bInDodgeIFrames = false;
             OnCue.Broadcast(FName("DodgeIFrames"), ECombatCuePhase::End);
+
+            if (StateComp.IsValid() && StateComp->IsInCombatState(EtheriaTags::State_Combat_Dodging))
+                StateComp->ClearCombatState();
         }, Duration, false);
     }
 }
@@ -71,6 +101,7 @@ void UCombatComponent::StartDodgeIFrames(float DurationOverride)
 void UCombatComponent::BeginPerfectDodgeWindow()
 {
     bPerfectDodgeWindow = true;
+    if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(AutoPerfectDodgeHandle);
     OnCue.Broadcast(FName("PerfectDodgeWindow"), ECombatCuePhase::Start);
 }
 
@@ -87,13 +118,11 @@ bool UCombatComponent::CanStartDodge() const
         return false;
     }
 
-    // Already in i-frames -> don't stack dodges.
     if (bInDodgeIFrames)
     {
         return false;
     }
 
-    // If you want to allow cancel out of attacks, remove this check.
     if (IsAttackActive())
     {
         return false;
@@ -102,9 +131,6 @@ bool UCombatComponent::CanStartDodge() const
     return true;
 }
 
-/**
- * Summary: Handles a dodge tap (sprint double-tap) using a world-space movement direction.
- */
 void UCombatComponent::HandleDodgeInputTap(const FVector& WorldDirection)
 {
     if (!CanStartDodge())
@@ -117,7 +143,7 @@ void UCombatComponent::HandleDodgeInputTap(const FVector& WorldDirection)
 
     if (Dir.IsNearlyZero())
     {
-        // No direction -> ignore tap
+
         return;
     }
 
@@ -137,7 +163,6 @@ void UCombatComponent::HandleDodgeInputTap(const FVector& WorldDirection)
 
     const float Now = World->GetTimeSeconds();
 
-    // Second tap in time window -> real dodge.
     if (bDodgeTapPending && (Now - LastDodgeTapTime) <= DodgeDoubleTapMaxDelay)
     {
         bDodgeTapPending   = false;
@@ -148,15 +173,11 @@ void UCombatComponent::HandleDodgeInputTap(const FVector& WorldDirection)
         return;
     }
 
-    // First tap, just store time & direction.
     bDodgeTapPending   = true;
     LastDodgeTapTime   = Now;
     LastDodgeDirection = Dir;
 }
 
-/**
- * Summary: Tries to start a directional dodge based on a world-space direction.
- */
 bool UCombatComponent::TryDodgeWorldDirection(const FVector& WorldDirection)
 {
     if (!CanStartDodge())
@@ -212,9 +233,6 @@ bool UCombatComponent::TryDodgeWorldDirection(const FVector& WorldDirection)
     return TryDodgeDirection(DodgeDir);
 }
 
-/**
- * Summary: Tries to start a dodge in a fixed enum direction.
- */
 bool UCombatComponent::TryDodgeDirection(EDodgeDirection DodgeDirection)
 {
     if (!CanStartDodge())
@@ -228,10 +246,8 @@ bool UCombatComponent::TryDodgeDirection(EDodgeDirection DodgeDirection)
         return false;
     }
 
-    // Enter dodge i-frames (perfect windows & state are already handled inside StartDodgeIFrames).
     StartDodgeIFrames(-1.f);
 
-    // Block jump & crouch during the dodge.
     PushInputLock(FName("Dodge"), true, true);
 
     const float Duration = OwnerCharacter->PlayAnimMontage(Montage);
@@ -256,9 +272,6 @@ bool UCombatComponent::TryDodgeDirection(EDodgeDirection DodgeDirection)
     return true;
 }
 
-/**
- * Summary: Returns the dodge montage corresponding to a direction.
- */
 UAnimMontage* UCombatComponent::GetDodgeMontage(EDodgeDirection Direction) const
 {
     switch (Direction)
@@ -283,10 +296,7 @@ void UCombatComponent::ApplyPerfectBoost(EPerfectKind Kind)
     }
 
     if (UWorld* W = GetWorld())
-    {
-        FTimerHandle H;
-        W->GetTimerManager().SetTimer(H, [this](){ RestoreBoosts(); }, PerfectBoostDuration, false);
-    }
+        W->GetTimerManager().SetTimer(PerfectBoostRestoreHandle, [this](){ RestoreBoosts(); }, PerfectBoostDuration, false);
 }
 
 void UCombatComponent::RestoreBoosts()

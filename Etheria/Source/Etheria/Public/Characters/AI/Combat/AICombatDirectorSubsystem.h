@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
+ * Created by: ArsStolas
  * Last Updated by: ArsStolas
  * Class: "AICombatDirectorSubsystem - Header"
  */
@@ -22,13 +22,13 @@ public:
 	bool HasAttackToken(AActor* Target, AActor* Attacker) const;
 	int32 GetAttackerCount(AActor* Target) const;
 
-	/** Group attack pacing (READ-ONLY): true if at least MinInterval has elapsed since the last attack START
-	 *  against this target by ANYONE. Staggers a group so they don't swing in unison. MinInterval <= 0 = always open.
-	 *  Does NOT mutate — call NotifyAttackStarted only when an attack actually fires, so a failed swing doesn't block the group. */
-	bool IsAttackWindowOpen(AActor* Target, float MinInterval) const;
+	bool IsAttackWindowOpen(AActor* Target, float MinInterval, float HitGrace = 0.f) const;
 
-	/** Stamp "an attack just started on this target, now". Call this only on a confirmed swing. */
 	void NotifyAttackStarted(AActor* Target);
+
+	void NotifyAttackConnected(AActor* Target);
+
+	float ReserveAttackAngle(AActor* Target, AActor* Attacker, float PreferredAngle, float MinSeparation, float LeaseDuration);
 
 private:
 	struct FAttackLease
@@ -37,15 +37,25 @@ private:
 		float ExpiryTime = 0.f;
 	};
 
+	struct FAngleClaim
+	{
+		TWeakObjectPtr<AActor> Attacker;
+		float Angle = 0.f;
+		float ExpiryTime = 0.f;
+	};
+
 	static void PruneLeases(TArray<FAttackLease>& Leases, float Now);
+	static void PruneAngleClaims(TArray<FAngleClaim>& Claims, float Now);
 	float NowSeconds() const;
 
-	/** Periodically drop entries whose target weak-pointer has gone stale (died/despawned). */
 	void SweepStaleEntries();
 	float LastSweepTime = 0.f;
 
 	TMap<TWeakObjectPtr<AActor>, TArray<FAttackLease>> TokensByTarget;
 
-	/** Last attack-start time per target, used for group attack pacing (TryReserveAttackWindow). */
 	TMap<TWeakObjectPtr<AActor>, float> LastAttackStartByTarget;
+
+	TMap<TWeakObjectPtr<AActor>, float> LastHitConnectByTarget;
+
+	TMap<TWeakObjectPtr<AActor>, TArray<FAngleClaim>> AnglesByTarget;
 };

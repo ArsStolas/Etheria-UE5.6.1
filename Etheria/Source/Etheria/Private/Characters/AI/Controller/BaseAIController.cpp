@@ -1,6 +1,6 @@
 /**
  * Etheria's End Project, 2025
- * Created by: Mato
+ * Created by: ArsStolas
  * Last Updated by: ArsStolas
  * Class: "BaseAIController - Source"
  */
@@ -13,18 +13,22 @@
 #include "Characters/AI/Combat/AICombatComponent.h"
 #include "Characters/AI/Combat/AICombatDirectorSubsystem.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
-#include "Perception/AISense_Sight.h"
 #include "Perception/AISense_Hearing.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Navigation/CrowdFollowingComponent.h"
 #include "NavigationSystem.h"
+#include "Animation/AnimInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
+#include "HAL/IConsoleManager.h"
+
+static TAutoConsoleVariable<int32> CVarAIDebug(TEXT("ai.Debug"), 0,
+	TEXT("1 = per-AI on-screen overlay: state, awareness, detection, token, strike distances."));
 
 ABaseAIController::ABaseAIController(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UCrowdFollowingComponent>(TEXT("PathFollowingComponent")))
@@ -35,29 +39,20 @@ ABaseAIController::ABaseAIController(const FObjectInitializer& ObjectInitializer
 
 void ABaseAIController::SetupPerception()
 {
+
 	UAIPerceptionComponent* PC = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComponent"));
 	SetPerceptionComponent(*PC);
-
-	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-	SightConfig->SightRadius = SightRadius;
-	SightConfig->LoseSightRadius = LoseSightRadius;
-	SightConfig->PeripheralVisionAngleDegrees = SightFOVDegrees;
-	SightConfig->SetMaxAge(5.f);
-	SightConfig->AutoSuccessRangeFromLastSeenLocation = 500.f;
-	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
-	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	PC->ConfigureSense(*SightConfig);
 
 	HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
 	HearingConfig->HearingRange = HearingRange;
 	HearingConfig->SetMaxAge(3.f);
+
 	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-	HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+	HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
 	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
 	PC->ConfigureSense(*HearingConfig);
 
-	PC->SetDominantSense(UAISense_Sight::StaticClass());
+	PC->SetDominantSense(UAISense_Hearing::StaticClass());
 	PC->OnTargetPerceptionUpdated.AddDynamic(this, &ABaseAIController::OnPerceptionUpdated);
 }
 
@@ -68,7 +63,7 @@ void ABaseAIController::OnPossess(APawn* InPawn)
 	if (!AICharacter) return;
 
 	SpawnOrigin = AICharacter->GetActorLocation();
-	// Snap the return goal onto the navmesh so "go home" is always reachable (spawn may be slightly off-nav).
+
 	if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
 	{
 		FNavLocation Proj;
@@ -79,35 +74,26 @@ void ABaseAIController::OnPossess(APawn* InPawn)
 	AICharacter->OnAIStateChanged.AddDynamic(this, &ABaseAIController::HandleAIStateChanged);
 	AICharacter->OnAIDormancyChanged.AddDynamic(this, &ABaseAIController::HandleDormancyChanged);
 	ConfigureCrowdAvoidance();
+	AICharacter->SetDetectionDecalRadius(DetectionRadius);
+
+	if (UAICombatComponent* Combat = AICharacter->GetAICombat())
+		Combat->OnAIAttackResolved.AddDynamic(this, &ABaseAIController::HandleOwnAttackResolved);
 
 	if (UAIPerceptionComponent* PerComp = GetPerceptionComponent())
 	{
-		SightConfig->SightRadius = SightRadius;
-		SightConfig->LoseSightRadius = LoseSightRadius;
-		SightConfig->PeripheralVisionAngleDegrees = SightFOVDegrees;
 		HearingConfig->HearingRange = HearingRange;
 		PerComp->RequestStimuliListenerUpdate();
 	}
 
-	// Inert NPCs (can't react to perception) don't need sight/hearing at all — disable the senses to save CPU.
 	if (!AICharacter->CanReactToPerception())
 		if (UAIPerceptionComponent* PerComp = GetPerceptionComponent())
-		{
-			PerComp->SetSenseEnabled(UAISense_Sight::StaticClass(), false);
 			PerComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), false);
-		}
+
+	DetectionScanTimer = FMath::FRandRange(0.f, 0.12f);
+	OrbitDir = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
 
 	NextIdleAnimTime = IdleAnimInterval + FMath::FRandRange(0.f, IdleAnimRandomDeviation);
 
-	/* ── Defer initial patrol kickoff ─────────────────────────────────────
-	 * For placed pawns, OnPossess runs BEFORE the pawn's BeginPlay, which is
-	 * where the patrol spline gets wired up. Calling StartPatrol() directly
-	 * here would silently fail in Path mode (no spline → AI stuck on its own
-	 * spot). A small delay guarantees:
-	 *   - Character::BeginPlay has run (PatrolSpline pointer set).
-	 *   - The navmesh is fully built.
-	 *   - The movement component is ready to issue MoveTo requests.
-	 * ──────────────────────────────────────────────────────────────────── */
 	if (UWorld* W = GetWorld())
 	{
 		W->GetTimerManager().SetTimer(
@@ -126,6 +112,8 @@ void ABaseAIController::OnUnPossess()
 	{
 		AICharacter->OnAIStateChanged.RemoveDynamic(this, &ABaseAIController::HandleAIStateChanged);
 		AICharacter->OnAIDormancyChanged.RemoveDynamic(this, &ABaseAIController::HandleDormancyChanged);
+		if (UAICombatComponent* Combat = AICharacter->GetAICombat())
+			Combat->OnAIAttackResolved.RemoveDynamic(this, &ABaseAIController::HandleOwnAttackResolved);
 	}
 	if (UWorld* W = GetWorld())
 		W->GetTimerManager().ClearTimer(InitialPatrolTimerHandle);
@@ -134,18 +122,9 @@ void ABaseAIController::OnUnPossess()
 
 void ABaseAIController::ConfigureCrowdAvoidance()
 {
-	if (!bUseCrowdAvoidance) return;
-	// Skip Detour for solo non-aggressive NPCs (a lone cow/villager) — it costs per-agent in the crowd manager.
-	if (AICharacter && AICharacter->GetHostilityType() != EAIHostilityType::Aggressive && AICharacter->GetPackID() == NAME_None)
-		return;
+
 	if (UCrowdFollowingComponent* Crowd = Cast<UCrowdFollowingComponent>(GetPathFollowingComponent()))
-	{
-		Crowd->SetCrowdSimulationState(ECrowdSimulationState::Enabled);
-		Crowd->SetCrowdSeparation(true);
-		Crowd->SetCrowdSeparationWeight(CrowdSeparationWeight);
-		Crowd->SetCrowdAvoidanceRangeMultiplier(CrowdAvoidanceRangeMultiplier);
-		Crowd->SetCrowdAvoidanceQuality(ECrowdAvoidanceQuality::Medium);
-	}
+		Crowd->SetCrowdSimulationState(ECrowdSimulationState::Disabled);
 }
 
 void ABaseAIController::HandleAIStateChanged(EAIState OldState, EAIState NewState)
@@ -153,20 +132,47 @@ void ABaseAIController::HandleAIStateChanged(EAIState OldState, EAIState NewStat
 	if ((OldState == EAIState::Attacking && NewState != EAIState::Attacking) || NewState == EAIState::Dead)
 		ReleaseAttackTokenHeld();
 
-	if (NewState == EAIState::Returning) ReturnTimer = 0.f; // (re)start the anti-soft-lock watchdog
-	if (NewState == EAIState::Fleeing) { bFleeCornered = false; FleeReevalTimer = 0.f; } // fresh flee → recompute now, don't carry a stale corner-freeze
+	bIdleAnchorSet = false;
+	if (NewState == EAIState::Returning) ReturnTimer = 0.f;
+	if (NewState == EAIState::Fleeing) { bFleeCornered = false; FleeReevalTimer = 0.f; bFleeingHome = false; FleeCalmTimer = 0.f; FleeLostSightTimer = -1.f; }
 
-	// Leaving the active swing: drop any half-committed dodge so it can't replay stale on re-entry.
-	if (OldState == EAIState::Attacking && NewState != EAIState::Attacking) { bEvading = false; EvadeTimer = 0.f; }
+	if (OldState == EAIState::Attacking && NewState != EAIState::Attacking)
+	{
+		bEvading = false; EvadeTimer = 0.f;
+		bWindupObserved = false; bEvadeCommitted = false;
+		bDefendObserved = false; bBaitCommitted = false;
+		PlannedAttackRange = -1.f;
+		CombatStallTimer = 0.f;
+		bSteerCombat = false;
+		bSteerSettled = false;
+		bStallRepath = false;
+		StallRepathTime = 0.f;
+		HarassRetreatTimer = 0.f;
+		if (AICharacter)
+			if (UCharacterMovementComponent* Move = AICharacter->GetCharacterMovement())
+				Move->bCanWalkOffLedges = true;
+	}
 
-	// Disengaging entirely: forget the size-up so re-engaging the same target gets a fresh first-contact beat.
 	if (NewState == EAIState::Returning || NewState == EAIState::Idle || NewState == EAIState::Patrolling
 		|| NewState == EAIState::Investigating || NewState == EAIState::Dead)
 	{ EngagedTarget = nullptr; EngageReactionTimer = 0.f; }
 
-	// Going home / idle: clear the target-bound last-known memory (a fresh chase re-captures it).
 	if (NewState == EAIState::Returning || NewState == EAIState::Idle || NewState == EAIState::Patrolling)
-	{ LastKnownActor = nullptr; LastKnownLocation = FVector::ZeroVector; }
+	{
+		LastKnownActor = nullptr; LastKnownLocation = FVector::ZeroVector; LastKnownVelocity = FVector::ZeroVector;
+		ScentTimer = -1.f; ScentTrail.Reset();
+		if ((bPackEnraged || bPackDemoralized) && BasePackAttackInterval > 0.f)
+		{
+			AttackInterval = BasePackAttackInterval;
+			StrafeSpeed = BasePackStrafeSpeed;
+			EvadeChance = BasePackEvadeChance;
+			if (BasePackChaseSpeed > 0.f && AICharacter)
+				if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
+					MC->ChaseSpeed = BasePackChaseSpeed;
+			bPackEnraged = false;
+			bPackDemoralized = false;
+		}
+	}
 
 	if (AICharacter)
 		if (UCharacterMovementComponent* MC = AICharacter->GetCharacterMovement())
@@ -178,16 +184,24 @@ void ABaseAIController::HandleDormancyChanged()
 	if (!AICharacter) return;
 	if (AICharacter->IsDormant()) { ReleaseAttackTokenHeld(); return; }
 
-	// Waking up: recover from transient states that may have frozen mid-transition while dormant.
 	const EAIState S = AICharacter->GetCurrentAIState();
-	if (S == EAIState::Interacting) { AICharacter->EndInteraction(); return; } // close stale dialogue cleanly
+	if (S == EAIState::Interacting) { AICharacter->EndInteraction(); return; }
 	if (S == EAIState::Investigating || S == EAIState::Staggered)
 	{
 		UAICombatComponent* C = AICharacter->GetAICombat();
-		if (S == EAIState::Staggered && C && C->IsStaggered()) return; // genuinely still staggered — let it drain
+		if (S == EAIState::Staggered && C && C->IsStaggered()) return;
 		AICharacter->SetAIState((AICharacter->GetCurrentTarget() && AICharacter->ShouldEngageTargets())
 			? EAIState::Chasing : EAIState::Returning);
+		return;
 	}
+
+	if (S == EAIState::Idle || S == EAIState::Patrolling)
+		if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
+			if (MC->PatrolMode != EPatrolMode::Stationary && !MC->IsPatrolling())
+			{
+				AICharacter->SetAIState(EAIState::Patrolling);
+				MC->StartPatrol();
+			}
 }
 
 UAICombatDirectorSubsystem* ABaseAIController::GetCombatDirector() const
@@ -220,10 +234,18 @@ void ABaseAIController::ReleaseAttackTokenHeld()
 
 bool ABaseAIController::IsAttackWindowOpen(AActor* Target) const
 {
-	if (!bUseAttackTokens || AttackInterval <= 0.f) return true;
+	if (!bUseAttackTokens || (AttackInterval <= 0.f && AttackHitGrace <= 0.f)) return true;
 	if (UAICombatDirectorSubsystem* Dir = GetCombatDirector())
-		return Dir->IsAttackWindowOpen(Target, AttackInterval);
+		return Dir->IsAttackWindowOpen(Target, AttackInterval, AttackHitGrace);
 	return true;
+}
+
+void ABaseAIController::HandleOwnAttackResolved(const FAIAttackData& Attack, AActor* Target, bool bHitConnected)
+{
+
+	if (bHitConnected && bUseAttackTokens && AttackHitGrace > 0.f && Target)
+		if (UAICombatDirectorSubsystem* Dir = GetCombatDirector())
+			Dir->NotifyAttackConnected(Target);
 }
 
 void ABaseAIController::NotifyAttackStarted(AActor* Target)
@@ -242,18 +264,32 @@ bool ABaseAIController::HasUsableAttack(const UAICombatComponent* Combat, float 
 	return false;
 }
 
+bool ABaseAIController::IsNavmeshReadyNear(const FVector& Loc) const
+{
+	const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	if (!Nav) return false;
+	FNavLocation Proj;
+	return Nav->ProjectPointToNavigation(Loc, Proj, FVector(300.f, 300.f, 500.f));
+}
+
 void ABaseAIController::TryStartInitialPatrol()
 {
+
 	if (!AICharacter || AICharacter->IsDead() || AICharacter->IsDormant()) return;
 
 	UAIMovementComponent* MC = AICharacter->GetAIMovement();
-	if (!MC) return;
+	if (!MC || MC->PatrolMode == EPatrolMode::Stationary) return;
 
-	// Don't override an active state (e.g. AI was already alerted during the delay window).
 	const EAIState State = AICharacter->GetCurrentAIState();
 	if (State != EAIState::Idle && State != EAIState::Patrolling) return;
 
-	if (MC->PatrolMode == EPatrolMode::Stationary) return;
+	if (!IsNavmeshReadyNear(AICharacter->GetActorLocation()) && InitialPatrolAttempts++ < MaxInitialPatrolAttempts)
+	{
+		if (UWorld* W = GetWorld())
+			W->GetTimerManager().SetTimer(InitialPatrolTimerHandle, this,
+				&ABaseAIController::TryStartInitialPatrol, 0.5f, false);
+		return;
+	}
 
 	AICharacter->SetAIState(EAIState::Patrolling);
 	MC->StartPatrol();
@@ -264,56 +300,66 @@ void ABaseAIController::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	if (!AICharacter || AICharacter->IsDormant()) return;
 
-	if (EvadeCooldownTimer > 0.f) EvadeCooldownTimer -= DeltaTime; // drains even while chasing, not just in the attack state
-
-	// Keep the last-known location fresh while we can actually sense the target (bound to that exact target).
-	if (AActor* T = AICharacter->GetCurrentTarget())
-		if (IsTargetCurrentlySeen(T))
-		{
-			LastKnownLocation = T->GetActorLocation();
-			LastKnownActor = T;
-		}
+	if (EvadeCooldownTimer > 0.f) EvadeCooldownTimer -= DeltaTime;
 
 	if (LostSightTimer >= 0.f)
 	{
 		LostSightTimer -= DeltaTime;
 		if (LostSightTimer <= 0.f)
 		{
-			LostSightTimer = -1.f;
 			const EAIState Cur = AICharacter->GetCurrentAIState();
-			AICharacter->ClearTarget();
-			if (Cur == EAIState::Chasing || Cur == EAIState::Attacking)
+			if ((Cur == EAIState::Chasing || Cur == EAIState::Attacking)
+				&& ScentTrackDuration > 0.f && AICharacter->GetCurrentTarget())
 			{
-				AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert);
-				// Don't give up cold — go SEARCH where we last saw them (and rally idle packmates there), then return if nothing.
-				if (!LastKnownLocation.IsZero())
-				{
-					AICharacter->AlertPackSearch(LastKnownLocation);
-					BeginInvestigate(LastKnownLocation);
-				}
-				else AICharacter->SetAIState(EAIState::Returning);
+				LostSightTimer = -1.f;
+				ScentTimer = ScentTrackDuration;
 			}
+			else if (Cur == EAIState::Chasing || Cur == EAIState::Attacking) StartSearchAtLastKnown();
+			else { LostSightTimer = -1.f; AICharacter->ClearTarget(); }
 		}
 	}
 
-	// Proximity overlap only for AI that actually pursue or flee — notice-only NPCs rely on cheap sight perception.
-	if (bUseProximityDetection
-		&& (AICharacter->GetHostilityType() == EAIHostilityType::Aggressive || AICharacter->CanFlee()))
+	if (ScentTimer > 0.f)
 	{
-		ProximityTimer -= DeltaTime;
-		if (ProximityTimer <= 0.f) { ProximityTimer = ProximityCheckInterval; CheckProximityDetection(); }
+		ScentTimer -= DeltaTime;
+		if (ScentTimer <= 0.f)
+		{
+			ScentTimer = -1.f;
+			if (ScentTrail.Num() > 0) LastKnownLocation = ScentTrail.Last().Value;
+			const EAIState Cur = AICharacter->GetCurrentAIState();
+			if (Cur == EAIState::Chasing || Cur == EAIState::Attacking) StartSearchAtLastKnown();
+		}
 	}
 
-	TickDetection(DeltaTime);
+	UpdateDetection(DeltaTime);
 
-	// Ambient look-at: briefly face a noticed actor while idle/patrolling (curiosity).
+#if ENABLE_DRAW_DEBUG
+	if (CVarAIDebug.GetValueOnGameThread() != 0)
+	{
+		const AActor* DbgT = AICharacter->GetCurrentTarget();
+		const float DbgSurf = DbgT
+			? FMath::Max(0.f, FVector::Dist(AICharacter->GetActorLocation(), DbgT->GetActorLocation()) - GetCombatReach(DbgT))
+			: -1.f;
+		DrawDebugString(GetWorld(), AICharacter->GetActorLocation() + FVector(0.f, 0.f, 130.f),
+			FString::Printf(TEXT("%s | %s%s\nDet %.0f%%  Surf %.0f  Plan %.0f%s%s"),
+				*UEnum::GetDisplayValueAsText(AICharacter->GetCurrentAIState()).ToString(),
+				*UEnum::GetDisplayValueAsText(AICharacter->GetAwarenessLevel()).ToString(),
+				bHoldingAttackToken ? TEXT(" [TOKEN]") : TEXT(""),
+				DetectionProgress * 100.f, DbgSurf, PlannedAttackRange,
+				bSteerCombat ? TEXT(" STEER") : TEXT(""),
+				ScentTimer > 0.f ? TEXT(" SCENT") : TEXT("")),
+			nullptr, FColor::Yellow, 0.f, true);
+	}
+#endif
+
 	if (NoticedActor.IsValid() && NoticeTimer > 0.f)
 	{
 		const EAIState St = AICharacter->GetCurrentAIState();
-		if (St == EAIState::Idle || St == EAIState::Patrolling)
+		const bool bWalkedAway = FVector::DistSquared(AICharacter->GetActorLocation(), NoticedActor->GetActorLocation())
+			> FMath::Square(NoticeDistance * 1.4f);
+		if ((St == EAIState::Idle || St == EAIState::Patrolling) && !bWalkedAway)
 		{
-			// Only turn to look when basically stationary, so a patrolling NPC keeps its heading (no rotation fight).
-			if (AICharacter->GetVelocity().SizeSquared2D() < 10000.f) // < ~100 cm/s
+			if (AICharacter->GetVelocity().SizeSquared2D() < 10000.f)
 				FaceTargetYawOnly(NoticedActor.Get(), DeltaTime);
 			NoticeTimer -= DeltaTime;
 			if (NoticeTimer <= 0.f)
@@ -323,17 +369,32 @@ void ABaseAIController::Tick(float DeltaTime)
 					AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
 			}
 		}
-		else { NoticedActor = nullptr; NoticeTimer = 0.f; }
+		else
+		{
+			NoticedActor = nullptr;
+			NoticeTimer = 0.f;
+			if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Suspicious)
+				AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+		}
 	}
 
-	// Heard-noise suspicion fades on its own lifetime (identical in Idle and Patrol).
 	if (SuspicionTimer > 0.f)
 	{
 		SuspicionTimer -= DeltaTime;
-		// Don't force Unaware if a detection ramp is building — it owns the Suspicious state then (no on/off flicker).
+
 		if (SuspicionTimer <= 0.f && !PendingDetectTarget.IsValid()
 			&& AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Suspicious)
 			AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+	}
+
+	if (!bHomeAnchored && AICharacter->GetCurrentAIState() == EAIState::Idle
+		&& AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Unaware
+		&& AICharacter->GetVelocity().SizeSquared() < 400.f)
+	{
+		bHomeAnchored = true;
+		SpawnOrigin = AICharacter->GetActorLocation();
+		if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+		{ FNavLocation Proj; if (Nav->ProjectPointToNavigation(SpawnOrigin, Proj, FVector(200.f, 200.f, 300.f))) SpawnOrigin = Proj.Location; }
 	}
 
 	switch (AICharacter->GetCurrentAIState())
@@ -355,76 +416,37 @@ void ABaseAIController::Tick(float DeltaTime)
 #endif
 }
 
-void ABaseAIController::FaceTargetYawOnly(AActor* Target, float DeltaTime)
+void ABaseAIController::FaceTargetYawOnly(AActor* Target, float DeltaTime, float RotationSpeedOverride)
 {
 	if (!Target || !AICharacter) return;
 	const FVector Dir = (Target->GetActorLocation() - AICharacter->GetActorLocation()).GetSafeNormal2D();
 	if (Dir.IsNearlyZero()) return;
+	const float Speed = (RotationSpeedOverride > 0.f) ? RotationSpeedOverride : FaceTargetRotationSpeed;
 	const FRotator Cur = AICharacter->GetActorRotation();
-	const FRotator Goal = FRotator(Cur.Pitch, Dir.Rotation().Yaw, Cur.Roll); // yaw only — preserve pitch/roll
-	AICharacter->SetActorRotation(FMath::RInterpTo(Cur, Goal, DeltaTime, FaceTargetRotationSpeed));
+	const FRotator Goal = FRotator(Cur.Pitch, Dir.Rotation().Yaw, Cur.Roll);
+	AICharacter->SetActorRotation(FMath::RInterpTo(Cur, Goal, DeltaTime, Speed));
 }
-
-/* ═══════════ Perception ═══════════ */
 
 void ABaseAIController::OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
 	if (!AICharacter || !Actor || AICharacter->IsDormant()) return;
 
-	const bool bIsHearing = (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>());
+	if (Stimulus.Type != UAISense::GetSenseID<UAISense_Hearing>()) return;
+	if (!Stimulus.WasSuccessfullySensed()) return;
+	if (!IsThreatInTerritory(Actor)) return;
+	if (!AICharacter->IsValidTargetCandidate(Actor)) return;
+	if (!AICharacter->CanReactToPerception()) return;
 
-	if (Stimulus.WasSuccessfullySensed())
+	const EAIState Cur = AICharacter->GetCurrentAIState();
+	if (AICharacter->GetCurrentTarget() == Actor) return;
+	if (Cur == EAIState::Chasing || Cur == EAIState::Attacking) return;
+
+	if (bInvestigateNoises && AICharacter->GetHostilityType() == EAIHostilityType::Aggressive)
+		BeginInvestigate(Stimulus.StimulusLocation);
+	else if (AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Alert)
 	{
-		if (!IsThreatInTerritory(Actor)) return;
-
-		// Heard a noise: investigate the SOURCE location instead of locking onto the actor's live position
-		// through walls. Already-engaged AI just refreshes its memory.
-		if (bIsHearing)
-		{
-			if (AICharacter->GetCurrentTarget() == Actor) { LostSightTimer = -1.f; return; }
-
-			const EAIState Cur = AICharacter->GetCurrentAIState();
-			const bool bEngaged = (Cur == EAIState::Chasing || Cur == EAIState::Attacking);
-			if (!bEngaged && AICharacter->CanReactToPerception())
-			{
-				if (bInvestigateNoises && AICharacter->GetHostilityType() == EAIHostilityType::Aggressive)
-					BeginInvestigate(Stimulus.StimulusLocation); // hunters go look
-				else if (AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Alert)
-				{
-					AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious); // prey gets edgy at a noise
-					SuspicionTimer = SuspicionDuration; // give it a real lifetime so a bark/posture can play
-				}
-			}
-			return;
-		}
-
-		// Sight (hard sense): refresh memory if it's our target, else feed the detection ramp.
-		if (AICharacter->GetCurrentTarget() == Actor) { LostSightTimer = -1.f; return; }
-
-		if (bUseDetectionRamp && AICharacter->CanReactToPerception() && !AICharacter->GetCurrentTarget())
-		{
-			PendingDetectTarget = Actor; // TickDetection polls whether it's still sensed and fills the meter
-			return;
-		}
-
-		AICharacter->OnPerceiveTarget(Actor);
-	}
-	else
-	{
-		// Lost a sense on this actor. (The detection meter drains on its own — TickDetection polls HasActiveStimulus.)
-		if (AICharacter->GetCurrentTarget() == Actor)
-		{
-			const EAIState Cur = AICharacter->GetCurrentAIState();
-			if ((Cur == EAIState::Chasing || Cur == EAIState::Attacking) && AICharacter->ShouldEngageTargets())
-			{
-				if (TargetMemoryDuration > 0.f && LostSightTimer < 0.f) LostSightTimer = TargetMemoryDuration;
-			}
-			else
-			{
-				AICharacter->ClearTarget();
-				if (Cur == EAIState::Fleeing) AICharacter->SetAIState(EAIState::Returning);
-			}
-		}
+		AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+		SuspicionTimer = SuspicionDuration;
 	}
 }
 
@@ -432,24 +454,23 @@ bool ABaseAIController::ReacquireOnReturn()
 {
 	UWorld* W = GetWorld();
 	if (!AICharacter || !W) return false;
-	if (!AICharacter->CanReactToPerception()) return false; // inert NPCs never re-acquire
+	if (!AICharacter->CanReactToPerception()) return false;
 
 	const FVector MyLoc = AICharacter->GetActorLocation();
 	const FVector Eye = MyLoc + FVector(0.f, 0.f, 60.f);
 
-	// Fast path: player-only AI just checks the player pawn directly — no SightRadius overlap, no per-candidate loop.
 	if (AICharacter->OnlyDetectsPlayers())
 	{
 		APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
 		if (!Player || !AICharacter->IsValidTargetCandidate(Player) || !IsThreatInTerritory(Player)) return false;
-		if (FVector::DistSquared(MyLoc, Player->GetActorLocation()) > FMath::Square(SightRadius)) return false;
+		if (FVector::DistSquared(MyLoc, Player->GetActorLocation()) > FMath::Square(DetectionRadius)) return false;
 
 		FCollisionQueryParams P;
 		P.AddIgnoredActor(AICharacter);
 		P.AddIgnoredActor(Player);
 		FHitResult Block;
 		if (W->LineTraceSingleByChannel(Block, Eye, Player->GetActorLocation() + FVector(0.f, 0.f, 60.f), ECollisionChannel::ECC_Visibility, P))
-			return false; // obstructed
+			return false;
 
 		AICharacter->OnPerceiveTarget(Player);
 		return AICharacter->GetCurrentTarget() != nullptr;
@@ -460,7 +481,7 @@ bool ABaseAIController::ReacquireOnReturn()
 	Params.AddIgnoredActor(AICharacter);
 	W->OverlapMultiByObjectType(Overlaps, MyLoc, FQuat::Identity,
 		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn),
-		FCollisionShape::MakeSphere(SightRadius), Params);
+		FCollisionShape::MakeSphere(DetectionRadius), Params);
 
 	AActor* Best = nullptr;
 	float BestSq = TNumericLimits<float>::Max();
@@ -469,14 +490,12 @@ bool ABaseAIController::ReacquireOnReturn()
 		AActor* Hit = O.GetActor();
 		if (!AICharacter->IsValidTargetCandidate(Hit) || !IsThreatInTerritory(Hit)) continue;
 
-		// Ignore the candidate itself so only WORLD geometry can block — character capsules often don't
-		// block Visibility, which would otherwise make the trace sail past the target and reject it.
 		FCollisionQueryParams LoSParams = Params;
 		LoSParams.AddIgnoredActor(Hit);
 		FHitResult Block;
 		const bool bObstructed = W->LineTraceSingleByChannel(Block, Eye,
 			Hit->GetActorLocation() + FVector(0.f, 0.f, 60.f), ECollisionChannel::ECC_Visibility, LoSParams);
-		if (bObstructed) continue; // something solid sits between us and the candidate
+		if (bObstructed) continue;
 
 		const float DSq = FVector::DistSquared(MyLoc, Hit->GetActorLocation());
 		if (DSq < BestSq) { BestSq = DSq; Best = Hit; }
@@ -486,166 +505,302 @@ bool ABaseAIController::ReacquireOnReturn()
 	return false;
 }
 
-void ABaseAIController::CheckProximityDetection()
+AActor* ABaseAIController::FindPerceptibleTarget(float Radius) const
 {
-	if (!AICharacter || AICharacter->GetCurrentAIState() == EAIState::Dead || AICharacter->IsDormant()) return;
-
-	// Already engaged (has a target) — no need to scan. Fleeing-without-target still falls through to acquire one.
-	if (AICharacter->GetCurrentTarget()) return;
+	UWorld* W = GetWorld();
+	if (!AICharacter || !W) return nullptr;
 
 	const FVector MyLoc = AICharacter->GetActorLocation();
+	const FVector Eye = MyLoc + FVector(0.f, 0.f, 60.f);
+
+	auto HasLineOfSight = [&](AActor* T) -> bool
+	{
+		FCollisionQueryParams P;
+		P.AddIgnoredActor(AICharacter);
+		P.AddIgnoredActor(T);
+		FHitResult Block;
+		return !W->LineTraceSingleByChannel(Block, Eye, T->GetActorLocation() + FVector(0.f, 0.f, 60.f),
+			ECollisionChannel::ECC_Visibility, P);
+	};
+
+	if (AICharacter->OnlyDetectsPlayers())
+	{
+		APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+		if (!Player || !AICharacter->IsValidTargetCandidate(Player)) return nullptr;
+		if (FVector::DistSquared(MyLoc, Player->GetActorLocation()) > FMath::Square(Radius)) return nullptr;
+		return HasLineOfSight(Player) ? Player : nullptr;
+	}
+
 	TArray<FOverlapResult> Overlaps;
-	FCollisionShape Sphere = FCollisionShape::MakeSphere(ProximityRadius);
 	FCollisionQueryParams Params;
 	Params.AddIgnoredActor(AICharacter);
+	W->OverlapMultiByObjectType(Overlaps, MyLoc, FQuat::Identity,
+		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn), FCollisionShape::MakeSphere(Radius), Params);
 
-	GetWorld()->OverlapMultiByObjectType(Overlaps, MyLoc, FQuat::Identity,
-		FCollisionObjectQueryParams(ECollisionChannel::ECC_Pawn), Sphere, Params);
-
-	AActor* Nearest = nullptr;
-	float NearestDistSq = TNumericLimits<float>::Max();
+	AActor* Best = nullptr;
+	float BestSq = TNumericLimits<float>::Max();
 	for (const FOverlapResult& O : Overlaps)
 	{
 		AActor* Hit = O.GetActor();
 		if (!AICharacter->IsValidTargetCandidate(Hit)) continue;
-
 		const float DSq = FVector::DistSquared(MyLoc, Hit->GetActorLocation());
-		if (DSq < NearestDistSq) { NearestDistSq = DSq; Nearest = Hit; }
+		if (DSq < BestSq && HasLineOfSight(Hit)) { BestSq = DSq; Best = Hit; }
+	}
+	return Best;
+}
+
+void ABaseAIController::UpdateDetection(float DeltaTime)
+{
+	if (!AICharacter || AICharacter->IsDormant() || AICharacter->GetCurrentAIState() == EAIState::Dead) return;
+
+	if (AActor* Cur = AICharacter->GetCurrentTarget())
+	{
+		const EAIState State = AICharacter->GetCurrentAIState();
+		if (ScentTrackDuration > 0.f && GetWorld())
+		{
+			if (LastScentTarget.Get() != Cur)
+			{
+				ScentTrail.Reset();
+				LastScentTarget = Cur;
+			}
+			const float Now = GetWorld()->GetTimeSeconds();
+			ScentTrail.Add(TPair<float, FVector>(Now, Cur->GetActorLocation()));
+			while (ScentTrail.Num() > 0 && ScentTrail[0].Key < Now - (ScentTrailDelay + 3.f))
+				ScentTrail.RemoveAt(0);
+		}
+		if (IsTargetCurrentlySeen(Cur))
+		{
+			LostSightTimer = -1.f;
+			FleeLostSightTimer = -1.f;
+			ScentTimer = -1.f;
+			LastKnownLocation = Cur->GetActorLocation();
+			LastKnownVelocity = Cur->GetVelocity();
+			LastKnownActor = Cur;
+		}
+		else if (State == EAIState::Chasing || State == EAIState::Attacking)
+		{
+			if (TargetMemoryDuration > 0.f && LostSightTimer < 0.f && ScentTimer <= 0.f)
+				LostSightTimer = TargetMemoryDuration;
+		}
+		else if (State == EAIState::Fleeing)
+		{
+
+			if (FleeLostSightTimer < 0.f) FleeLostSightTimer = FleeMemoryDuration;
+			FleeLostSightTimer -= DeltaTime;
+			if (FleeLostSightTimer <= 0.f)
+			{
+				FleeLostSightTimer = -1.f;
+				AICharacter->ClearTarget();
+			}
+		}
+		DetectionProgress = 0.f;
+		PendingDetectTarget = nullptr;
+		CachedDetectionCandidate = nullptr;
+		return;
 	}
 
-	if (!Nearest) return;
+	if (!AICharacter->CanReactToPerception()) return;
 
-	if (AICharacter->GetCurrentAIState() == EAIState::Fleeing)
+	DetectionScanTimer -= DeltaTime;
+	if (DetectionScanTimer <= 0.f)
 	{
-		if (!AICharacter->GetCurrentTarget())
-			AICharacter->SetTarget(Nearest);
+		DetectionScanTimer = 0.12f;
+
+		float EffRadius = DetectionRadius;
+		if (AICharacter->ShouldEngageTargets() && AICharacter->GetLeashRange() > 0.f)
+			EffRadius = FMath::Min(DetectionRadius, AICharacter->GetLeashRange() * 1.15f);
+		CachedDetectionCandidate = FindPerceptibleTarget(EffRadius);
 	}
-	else
+
+	AActor* Cand = CachedDetectionCandidate.Get();
+	if (!Cand)
 	{
-		if (!IsThreatInTerritory(Nearest)) return;
-		LostSightTimer = -1.f;
-		if (bUseDetectionRamp && AICharacter->CanReactToPerception())
+		if (PendingDetectTarget.IsValid() && AICharacter->ShouldEngageTargets()
+			&& AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Alert
+			&& !LastCandidateLocation.IsZero())
 		{
-			// Feed the detection ramp (so a stealth approach has a window) instead of hard-acquiring instantly.
-			if (!PendingDetectTarget.IsValid()) PendingDetectTarget = Nearest;
-			ProximitySeen = Nearest;
-			ProximitySeenTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+			PendingDetectTarget = nullptr;
+			SuspicionTimer = SuspicionDuration;
+			Investigate(LastCandidateLocation);
+			return;
 		}
-		else
+		if (DetectionProgress > 0.f)
+			DetectionProgress = FMath::Max(0.f, DetectionProgress - DeltaTime / (FMath::Max(DetectionReactionTime, 0.05f) * 3.5f));
+		if (DetectionProgress <= 0.f)
 		{
-			AICharacter->OnPerceiveTarget(Nearest);
+			PendingDetectTarget = nullptr;
+
+			if (AICharacter->GetCurrentAIState() != EAIState::Investigating)
+			{
+				if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Alert)
+					AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+				else if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Suspicious
+					&& SuspicionTimer <= 0.f && !NoticedActor.IsValid())
+					AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
+			}
 		}
+		return;
+	}
+
+	if (DetectionProgress <= 0.f) DetectionReactionScale = FMath::FRandRange(0.85f, 1.3f);
+	PendingDetectTarget = Cand;
+	LastCandidateLocation = Cand->GetActorLocation();
+	if (DetectionReactionTime <= 0.05f) { DetectionProgress = 0.f; PendingDetectTarget = nullptr; CachedDetectionCandidate = nullptr; AICharacter->OnPerceiveTarget(Cand); return; }
+
+	const float D = FVector::Dist(AICharacter->GetActorLocation(), Cand->GetActorLocation());
+	const float CloseScale = FMath::GetMappedRangeValueClamped(FVector2D(0.f, DetectionRadius), FVector2D(3.f, 1.f), D);
+	const float SpeedScale = FMath::GetMappedRangeValueClamped(FVector2D(80.f, 550.f), FVector2D(0.6f, 1.5f), Cand->GetVelocity().Size2D());
+	DetectionProgress += DeltaTime * CloseScale * SpeedScale / (FMath::Max(DetectionReactionTime, 0.05f) * DetectionReactionScale);
+
+	if (AICharacter->ShouldEngageTargets()
+		&& AICharacter->GetAwarenessLevel() >= EAIAwarenessLevel::Suspicious
+		&& AICharacter->GetVelocity().SizeSquared2D() < 10000.f)
+	{
+		const EAIState FaceState = AICharacter->GetCurrentAIState();
+		if (FaceState == EAIState::Idle || FaceState == EAIState::Patrolling || FaceState == EAIState::Investigating)
+			FaceTargetYawOnly(Cand, DeltaTime, 3.f);
+	}
+
+	if (DetectionProgress >= SuspiciousThreshold && AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Suspicious)
+	{
+		AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+		if (NoticedActor.Get() != Cand) NoticeActor(Cand);
+	}
+	if (DetectionProgress >= AlertThreshold && AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Alert
+		&& (AICharacter->ShouldEngageTargets() || AICharacter->CanFlee()))
+		AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert);
+
+	if (DetectionProgress >= 1.f)
+	{
+		DetectionProgress = 0.f;
+		PendingDetectTarget = nullptr;
+		CachedDetectionCandidate = nullptr;
+		AICharacter->OnPerceiveTarget(Cand);
 	}
 }
 
 bool ABaseAIController::IsTargetCurrentlySeen(AActor* Target)
 {
 	if (!Target || !AICharacter) return false;
-	// Point-blank counts as sensed regardless of FOV (you can't hide at arm's length).
-	if (FVector::DistSquared(AICharacter->GetActorLocation(), Target->GetActorLocation()) <= FMath::Square(ProximityRadius * 1.2f))
+
+	const bool bEngagedOnIt = (AICharacter->GetCurrentTarget() == Target);
+	const float Radius = bEngagedOnIt ? FMath::Max(DetectionRadius, LoseSightRadius) : DetectionRadius;
+	const float DistSq = FVector::DistSquared(AICharacter->GetActorLocation(), Target->GetActorLocation());
+	if (!(AICharacter->WantsInfiniteSightPursuit() && bEngagedOnIt) && DistSq > FMath::Square(Radius))
+		return false;
+
+	if (DistSq <= FMath::Square(GetCombatReach(Target) + GetEffectiveAttackRange() + 150.f))
 		return true;
-	if (const UAIPerceptionComponent* PC = GetPerceptionComponent())
-		return PC->HasActiveStimulus(*Target, UAISense::GetSenseID<UAISense_Sight>());
-	return false;
+	UWorld* W = GetWorld();
+	if (!W) return true;
+	FCollisionQueryParams P;
+	P.AddIgnoredActor(AICharacter);
+	P.AddIgnoredActor(Target);
+	FHitResult Block;
+	const FVector Eye = AICharacter->GetActorLocation() + FVector(0.f, 0.f, 60.f);
+	return !W->LineTraceSingleByChannel(Block, Eye, Target->GetActorLocation() + FVector(0.f, 0.f, 60.f),
+		ECollisionChannel::ECC_Visibility, P);
 }
 
-void ABaseAIController::TickDetection(float DeltaTime)
+void ABaseAIController::NotifyTargetConfirmedByDamage(AActor* InstigatorActor)
 {
-	if (!bUseDetectionRamp) return;
+	if (!AICharacter || !InstigatorActor || AICharacter->GetCurrentTarget() != InstigatorActor) return;
+	LostSightTimer = -1.f;
+	FleeLostSightTimer = -1.f;
+	LastKnownLocation = InstigatorActor->GetActorLocation();
+	LastKnownVelocity = InstigatorActor->GetVelocity();
+	LastKnownActor = InstigatorActor;
+}
 
-	AActor* P = PendingDetectTarget.Get();
-	if (!P || AICharacter->GetCurrentTarget())
+void ABaseAIController::StartSearchAtLastKnown()
+{
+	LostSightTimer = -1.f;
+	AICharacter->ClearTarget();
+	AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Alert);
+
+	if (!LastKnownLocation.IsZero())
 	{
-		PendingDetectTarget = nullptr; // already engaged or candidate gone → drop the pending meter
-		DetectionProgress = 0.f;
-		return;
+		AICharacter->AlertPackSearch(LastKnownLocation);
+		BeginInvestigate(LastKnownLocation, true);
 	}
-
-	// Is the candidate sensed THIS frame? Sight is polled from the perception component (continuous, so it
-	// reflects losing line of sight), proximity from the last 360° poll record — unifying both sources in one meter.
-	bool bFromSight = false;
-	if (UAIPerceptionComponent* PC = GetPerceptionComponent())
-		bFromSight = PC->HasActiveStimulus(*P, UAISense::GetSenseID<UAISense_Sight>());
-	bool bSensed = bFromSight;
-	if (!bSensed && ProximitySeen.Get() == P && GetWorld()
-		&& (GetWorld()->GetTimeSeconds() - ProximitySeenTime) < (ProximityCheckInterval * 1.5f))
-		bSensed = true;
-
-	const float Rate = 1.f / FMath::Max(SightDetectionTime, 0.05f);
-
-	if (bSensed)
-	{
-		// Fresh attempt → roll a small reaction-time variance so two identical guards don't detect in lockstep.
-		if (DetectionProgress <= 0.f) DetectionReactionScale = FMath::FRandRange(0.8f, 1.25f);
-
-		// Closer targets fill faster (point-blank ≈ instant); far targets take the full SightDetectionTime.
-		const float CloseScale = FMath::GetMappedRangeValueClamped(
-			FVector2D(0.f, SightRadius), FVector2D(3.f, 1.f),
-			FVector::Dist(AICharacter->GetActorLocation(), P->GetActorLocation()));
-
-		// Foveal vs peripheral: a target dead-centre fills faster than one at the FOV edge (sight only; 360° proximity is full-rate).
-		float AngScale = 1.f;
-		if (bFromSight)
-		{
-			const FVector ToT = (P->GetActorLocation() - AICharacter->GetActorLocation()).GetSafeNormal2D();
-			if (!ToT.IsNearlyZero())
-			{
-				const float Ang = FMath::RadiansToDegrees(FMath::Acos(
-					FMath::Clamp(FVector::DotProduct(AICharacter->GetActorForwardVector().GetSafeNormal2D(), ToT), -1.f, 1.f)));
-				AngScale = FMath::GetMappedRangeValueClamped(FVector2D(0.f, SightFOVDegrees), FVector2D(1.f, PeripheralDetectionScale), Ang);
-			}
-		}
-
-		DetectionProgress += DeltaTime * Rate * CloseScale * AngScale / FMath::Max(DetectionReactionScale, 0.1f);
-
-		if (DetectionProgress >= SuspiciousThreshold && DetectionProgress < 1.f
-			&& AICharacter->GetAwarenessLevel() < EAIAwarenessLevel::Alert)
-		{
-			AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
-			if (NoticedActor.Get() != P) NoticeActor(P); // turn to look at the suspect — the "huh?" head-turn beat
-		}
-
-		if (DetectionProgress >= 1.f)
-		{
-			AActor* Acquired = P;
-			PendingDetectTarget = nullptr;
-			DetectionProgress = 0.f;
-			AICharacter->OnPerceiveTarget(Acquired); // full detection → hard-acquire
-		}
-	}
-	else
-	{
-		DetectionProgress -= DeltaTime * Rate * DetectionDecayRate;
-		if (DetectionProgress <= 0.f)
-		{
-			DetectionProgress = 0.f;
-			PendingDetectTarget = nullptr;
-			if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Suspicious)
-				AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
-		}
-	}
+	else AICharacter->SetAIState(EAIState::Returning);
 }
 
 void ABaseAIController::InvestigateThreat(AActor* Threat)
 {
 	if (!AICharacter || !Threat) return;
-	if (AICharacter->GetCurrentAIState() == EAIState::Dead || AICharacter->IsDormant()) return;
+	const EAIState S = AICharacter->GetCurrentAIState();
+	if (S == EAIState::Dead || S == EAIState::Staggered || S == EAIState::Interacting || AICharacter->IsDormant()) return;
 	BeginInvestigate(Threat->GetActorLocation());
 }
 
 void ABaseAIController::NoticeActor(AActor* Actor)
 {
-	if (!Actor) return;
+	if (!Actor || !AICharacter) return;
+	if (FVector::DistSquared(AICharacter->GetActorLocation(), Actor->GetActorLocation()) > FMath::Square(NoticeDistance)) return;
 	NoticedActor = Actor;
 	NoticeTimer = NoticeDuration;
+	AICharacter->TryPlayGreeting();
+}
+
+void ABaseAIController::NotifyPackMateDied(bool bAlphaDied, bool bLastSurvivor)
+{
+	if (!AICharacter || AICharacter->GetCurrentAIState() == EAIState::Dead || AICharacter->IsDormant()) return;
+
+	AActor* T = AICharacter->GetCurrentTarget();
+	if (!T) return;
+
+	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+
+	auto CacheBaselines = [&]()
+	{
+		if (BasePackAttackInterval > 0.f) return;
+		BasePackAttackInterval = AttackInterval;
+		BasePackStrafeSpeed = StrafeSpeed;
+		BasePackEvadeChance = EvadeChance;
+		BasePackChaseSpeed = MC ? MC->ChaseSpeed : -1.f;
+	};
+
+	if (bLastSurvivor)
+	{
+		if (AICharacter->GetHealthFraction() < 0.5f)
+		{
+			ReleaseAttackTokenHeld();
+			AICharacter->ForcePanicFlee(T);
+			return;
+		}
+		if (bPackEnraged) return;
+		CacheBaselines();
+		bPackEnraged = true;
+		if (MC && BasePackChaseSpeed > 0.f) MC->ChaseSpeed = BasePackChaseSpeed * 1.15f;
+		StrafeSpeed = BasePackStrafeSpeed * 1.15f;
+		AttackInterval = BasePackAttackInterval * 0.7f;
+		EvadeChance = FMath::Min(BasePackEvadeChance + 0.15f, 0.9f);
+		return;
+	}
+
+	if (bAlphaDied)
+	{
+		if (AICharacter->GetHealthFraction() < 0.6f)
+		{
+			ReleaseAttackTokenHeld();
+			AICharacter->ForcePanicFlee(T);
+			return;
+		}
+		if (bPackDemoralized || bPackEnraged) return;
+		CacheBaselines();
+		bPackDemoralized = true;
+		AttackInterval = BasePackAttackInterval * 1.4f;
+	}
 }
 
 void ABaseAIController::Investigate(const FVector& Location)
 {
 	if (!AICharacter || AICharacter->GetCurrentAIState() == EAIState::Dead || AICharacter->IsDormant()) return;
-	// Don't pull an already-engaged member off its own fight to go search.
+
 	const EAIState S = AICharacter->GetCurrentAIState();
-	if (S == EAIState::Chasing || S == EAIState::Attacking || S == EAIState::Fleeing) return;
+	if (S == EAIState::Chasing || S == EAIState::Attacking || S == EAIState::Fleeing
+		|| S == EAIState::Staggered || S == EAIState::Interacting) return;
 	BeginInvestigate(Location);
 }
 
@@ -653,16 +808,12 @@ void ABaseAIController::ReconcileHostility()
 {
 	if (!AICharacter) return;
 
-	// Re-arm or disable the senses to match the new hostility/perception ability (they may have been off at spawn).
 	if (UAIPerceptionComponent* PC = GetPerceptionComponent())
 	{
-		const bool bEnable = AICharacter->CanReactToPerception();
-		PC->SetSenseEnabled(UAISense_Sight::StaticClass(), bEnable);
-		PC->SetSenseEnabled(UAISense_Hearing::StaticClass(), bEnable);
+		PC->SetSenseEnabled(UAISense_Hearing::StaticClass(), AICharacter->CanReactToPerception());
 		PC->RequestStimuliListenerUpdate();
 	}
 
-	// If it can no longer engage but was mid-fight, disengage cleanly instead of chasing forever.
 	const EAIState S = AICharacter->GetCurrentAIState();
 	if (!AICharacter->ShouldEngageTargets() && (S == EAIState::Chasing || S == EAIState::Attacking))
 	{
@@ -672,18 +823,24 @@ void ABaseAIController::ReconcileHostility()
 	}
 }
 
-void ABaseAIController::BeginInvestigate(const FVector& Location)
+void ABaseAIController::BeginInvestigate(const FVector& Location, bool bUrgent)
 {
+	const EAIState S = AICharacter->GetCurrentAIState();
+	if (S == EAIState::Dead || S == EAIState::Staggered || S == EAIState::Interacting || S == EAIState::Fleeing) return;
+
 	InvestigateLocation = Location;
-	InvestigateTimer = InvestigateDuration;
-	AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Suspicious);
+	InvestigateTimer = InvestigateDuration * (bUrgent ? 1.5f : 1.f);
+	bInvestigateUrgent = bUrgent;
+	bInvestigatePausing = false;
+	InvestigateScanPause = 0.f;
+	AICharacter->SetAwarenessLevel(bUrgent ? EAIAwarenessLevel::Alert : EAIAwarenessLevel::Suspicious);
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
 	{
 		MC->StopPatrol();
-		MC->SetDesiredSpeed(MC->PatrolSpeed);
+		MC->SetDesiredSpeed(bUrgent ? GetChaseSpeed() * 0.9f : MC->PatrolSpeed);
 		MC->MoveToLocation(Location);
 	}
-	ReacquireCooldown = 0.f; // allow an immediate look-around check on arrival
+	ReacquireCooldown = 0.f;
 	AICharacter->SetAIState(EAIState::Investigating);
 }
 
@@ -692,7 +849,6 @@ void ABaseAIController::HandleInvestigateState(float DeltaTime)
 	UAIMovementComponent* MC = AICharacter->GetAIMovement();
 	if (!MC) { AICharacter->SetAIState(EAIState::Returning); return; }
 
-	// Self-leash only (no target during investigate, so CheckLeashAndReturn's target logic doesn't apply).
 	if (FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > FMath::Square(AICharacter->GetLeashRange() * 1.15f))
 	{
 		AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
@@ -702,12 +858,11 @@ void ABaseAIController::HandleInvestigateState(float DeltaTime)
 
 	InvestigateTimer -= DeltaTime;
 
-	// Look for the target periodically while searching (throttled overlap+traces).
 	ReacquireCooldown -= DeltaTime;
 	if (ReacquireCooldown <= 0.f)
 	{
 		ReacquireCooldown = 0.4f;
-		if (ReacquireOnReturn()) return; // spotted it → engage
+		if (ReacquireOnReturn()) return;
 	}
 
 	if (InvestigateTimer <= 0.f)
@@ -717,23 +872,39 @@ void ABaseAIController::HandleInvestigateState(float DeltaTime)
 		return;
 	}
 
-	// Reached the current spot but time remains → sweep to a fresh nav point around the noise (search the area,
-	// don't just stand at one coordinate).
 	if (MC->HasReachedDestination())
 	{
+		if (!bInvestigatePausing)
+		{
+			bInvestigatePausing = true;
+			InvestigateScanPause = FMath::FRandRange(0.8f, 1.6f);
+			ScanGoalYaw = AICharacter->GetActorRotation().Yaw + FMath::FRandRange(-140.f, 140.f);
+		}
+
+		InvestigateScanPause -= DeltaTime;
+		if (!PendingDetectTarget.IsValid())
+		{
+			const FRotator Cur = AICharacter->GetActorRotation();
+			AICharacter->SetActorRotation(FMath::RInterpTo(Cur, FRotator(Cur.Pitch, ScanGoalYaw, Cur.Roll), DeltaTime, 3.f));
+		}
+		if (InvestigateScanPause > 0.f) return;
+
+		bInvestigatePausing = false;
 		if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
 		{
 			FNavLocation NextPt;
 			if (Nav->GetRandomReachablePointInRadius(InvestigateLocation, InvestigateSearchRadius, NextPt))
-			{ MC->SetDesiredSpeed(MC->PatrolSpeed); MC->MoveToLocation(NextPt.Location); }
+			{
+				MC->SetDesiredSpeed(bInvestigateUrgent ? FMath::Min(MC->PatrolSpeed * 1.7f, GetChaseSpeed()) : MC->PatrolSpeed);
+				MC->MoveToLocation(NextPt.Location);
+			}
 		}
 	}
 }
 
-/* ═══════════ Helpers ═══════════ */
-
 float ABaseAIController::GetEffectiveAttackRange() const
 {
+
 	if (UAICombatComponent* C = AICharacter->GetAICombat())
 		if (C->GetAttacks().Num() > 0) return C->GetEffectiveAttackRange();
 	return AttackRange;
@@ -759,7 +930,7 @@ void ABaseAIController::ApproachTarget(AActor* Target, float DesiredDistance)
 
 	const FVector Standoff = TgtLoc + Away * FMath::Max(DesiredDistance, 0.f);
 	MC->SetDesiredSpeed(GetChaseSpeed());
-	MC->MoveToLocation(Standoff);
+	MC->MoveToLocation(Standoff, -1.f, true);
 }
 
 float ABaseAIController::GetCombatApproachDistance(float Range) const
@@ -769,11 +940,75 @@ float ABaseAIController::GetCombatApproachDistance(float Range) const
 	return FMath::Max(Dist, 1.f);
 }
 
+float ABaseAIController::GetCapsuleScale() const
+{
+	if (AICharacter)
+		if (const UCapsuleComponent* Cap = AICharacter->GetCapsuleComponent())
+		{
+			const float Unscaled = Cap->GetUnscaledCapsuleRadius();
+			if (Unscaled > 1.f) return FMath::Max(Cap->GetScaledCapsuleRadius() / Unscaled, 0.1f);
+		}
+	return 1.f;
+}
+
+void ABaseAIController::SteerToPoint(const FVector& Point, float MaxSpeed, float SettleRadius)
+{
+	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+	if (MC)
+	{
+		MC->CancelPathMove();
+		MC->SetDesiredSpeed(MaxSpeed);
+	}
+	if (UCharacterMovementComponent* Move = AICharacter->GetCharacterMovement())
+	{
+		if (!Move->IsActive()) Move->Activate(true);
+		if (Move->MovementMode == MOVE_None) Move->SetMovementMode(MOVE_Walking);
+	}
+	FVector To = Point - AICharacter->GetActorLocation();
+	To.Z = 0.f;
+	const float D = To.Size();
+	if (bSteerSettled)
+	{
+		if (D <= SettleRadius * 1.8f) return;
+		bSteerSettled = false;
+	}
+	else if (D <= SettleRadius)
+	{
+		bSteerSettled = true;
+		return;
+	}
+	const float InputScale = FMath::Clamp(D / (SettleRadius + 120.f * GetCapsuleScale()), 0.3f, 1.f);
+	AICharacter->AddMovementInput(To / D, InputScale);
+}
+
+float ABaseAIController::GetCombatReach(const AActor* Target) const
+{
+	float Reach = 0.f;
+	if (AICharacter)
+		if (const UCapsuleComponent* MyCap = AICharacter->GetCapsuleComponent())
+			Reach += MyCap->GetScaledCapsuleRadius();
+	if (const ACharacter* C = Cast<ACharacter>(Target))
+		if (const UCapsuleComponent* TCap = C->GetCapsuleComponent())
+			Reach += TCap->GetScaledCapsuleRadius();
+	return Reach;
+}
+
 bool ABaseAIController::IsThreatInTerritory(const AActor* Threat) const
 {
 	if (!Threat || !AICharacter) return false;
-	const float Leash = AICharacter->GetLeashRange() * 1.15f; // match CheckLeashAndReturn's give-up radius — no dead band
-	return FVector::DistSquared(Threat->GetActorLocation(), SpawnOrigin) <= Leash * Leash;
+	const float OuterSq = FMath::Square(AICharacter->GetLeashRange() * 1.15f);
+	const float InnerSq = FMath::Square(AICharacter->GetLeashRange() * LeashReengageRatio);
+
+	return FVector::DistSquared(Threat->GetActorLocation(), SpawnOrigin) <= OuterSq
+		|| FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) <= InnerSq;
+}
+
+bool ABaseAIController::IsSelfOutsideLeash() const
+{
+	if (!AICharacter) return false;
+
+	return FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin)
+		> FMath::Square(AICharacter->GetLeashRange() * LeashReengageRatio);
 }
 
 bool ABaseAIController::CheckLeashAndReturn()
@@ -781,9 +1016,13 @@ bool ABaseAIController::CheckLeashAndReturn()
 	const float GiveUpSq = FMath::Square(AICharacter->GetLeashRange() * 1.15f);
 	AActor* T = AICharacter->GetCurrentTarget();
 
-	const bool bSelfTooFar = FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > GiveUpSq;
-	const bool bTargetGone = !T || FVector::DistSquared(T->GetActorLocation(), SpawnOrigin) > GiveUpSq;
-	if (!bSelfTooFar && !bTargetGone) return false;
+	const bool bInMelee = T && (FVector::Dist(AICharacter->GetActorLocation(), T->GetActorLocation()) - GetCombatReach(T))
+		<= GetEffectiveAttackRange();
+	const bool bRelentless = AICharacter->WantsInfiniteSightPursuit() && T && IsTargetCurrentlySeen(T);
+	const bool bSelfTooFar = !bInMelee && !bRelentless
+		&& FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > GiveUpSq;
+
+	if (!bSelfTooFar && T) return false;
 
 	ReleaseAttackTokenHeld();
 	LostSightTimer = -1.f;
@@ -792,8 +1031,6 @@ bool ABaseAIController::CheckLeashAndReturn()
 	AICharacter->SetAIState(EAIState::Returning);
 	return true;
 }
-
-/* ═══════════ State Handlers ═══════════ */
 
 void ABaseAIController::HandleIdleState(float DeltaTime)
 {
@@ -805,26 +1042,29 @@ void ABaseAIController::HandleIdleState(float DeltaTime)
 	{
 		IdleTimer = 0.f;
 		NextIdleAnimTime = IdleAnimInterval + FMath::FRandRange(0.f, IdleAnimRandomDeviation);
-		if (Anim) Anim->PlayRandomIdle();
+		if (Anim && !Anim->IsPlayingAction()) Anim->PlayRandomIdle();
 	}
 
-	// Don't snap back to Unaware while a detection is building, we're looking at something, or a heard-noise
-	// suspicion is still alive (the Tick timer handles that fade — same lifetime in Idle and Patrol).
 	if (AICharacter->GetAwarenessLevel() > EAIAwarenessLevel::Unaware
 		&& !PendingDetectTarget.IsValid() && !NoticedActor.IsValid() && SuspicionTimer <= 0.f)
 		AICharacter->SetAwarenessLevel(EAIAwarenessLevel::Unaware);
 
-	// Ambient look-around: an unaware, stationary NPC slowly turns its head now and then instead of staring straight.
 	if (AICharacter->GetAwarenessLevel() == EAIAwarenessLevel::Unaware
 		&& !NoticedActor.IsValid() && !PendingDetectTarget.IsValid()
 		&& AICharacter->GetVelocity().SizeSquared2D() < 10000.f)
 	{
+		if (!bIdleAnchorSet)
+		{
+			IdleAnchorYaw = AICharacter->GetActorRotation().Yaw;
+			bIdleAnchorSet = true;
+			ScanGoalYaw = IdleAnchorYaw;
+		}
 		ScanTimer -= DeltaTime;
 		if (ScanTimer <= 0.f)
 		{
 			ScanTimer = FMath::FRandRange(2.5f, 5.f);
 			const float Sign = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
-			ScanGoalYaw = AICharacter->GetActorRotation().Yaw + Sign * FMath::FRandRange(30.f, 70.f);
+			ScanGoalYaw = IdleAnchorYaw + Sign * FMath::FRandRange(15.f, 50.f);
 		}
 		const FRotator Cur = AICharacter->GetActorRotation();
 		AICharacter->SetActorRotation(FMath::RInterpTo(Cur, FRotator(Cur.Pitch, ScanGoalYaw, Cur.Roll), DeltaTime, 2.f));
@@ -836,10 +1076,27 @@ void ABaseAIController::HandlePatrolState(float DeltaTime)
 	UAIAnimationComponent* Anim = AICharacter->GetAIAnimation();
 	if (Anim && Anim->IsPlayingIdleVariation()) return;
 
+	if (!AICharacter->ShouldEngageTargets() && AICharacter->GetVelocity().SizeSquared2D() > 2500.f)
+		if (const APawn* P = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+		{
+			FVector To = P->GetActorLocation() - AICharacter->GetActorLocation();
+			To.Z = 0.f;
+			const float R = GetCombatReach(P) + 60.f;
+			if (To.SizeSquared() < R * R)
+			{
+				const FVector Fwd = AICharacter->GetActorForwardVector().GetSafeNormal2D();
+				if (FVector::DotProduct(Fwd, To.GetSafeNormal()) > 0.35f)
+				{
+					const float Side = (FVector::CrossProduct(Fwd, To).Z > 0.f) ? -1.f : 1.f;
+					AICharacter->AddMovementInput(FVector::CrossProduct(FVector::UpVector, Fwd).GetSafeNormal() * Side, 0.6f);
+				}
+			}
+		}
+
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
 	{
 		if (MC->HasReachedDestination()) HandleIdleState(DeltaTime);
-		else IdleTimer = 0.f;
+		else { IdleTimer = 0.f; bIdleAnchorSet = false; }
 	}
 }
 
@@ -848,10 +1105,17 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 	AActor* Target = AICharacter->GetCurrentTarget();
 	if (!Target || AICharacter->IsTargetDeadOrInvalid(Target))
 	{ ReleaseAttackTokenHeld(); AICharacter->ClearTarget(); AICharacter->SetAIState(EAIState::Returning); return; }
-	if (CheckLeashAndReturn()) return;
 
-	// Custom (scripted) offense: skip the built-in approach/slot loop entirely. Lock into the Attacking state and
-	// let BP drive everything (stationary bosses, arena-wide hazards, etc.). BP owns engagement, not the range gate.
+	if (!bUseCustomAttackLogic && CheckLeashAndReturn()) return;
+
+	if (UAIAnimationComponent* Anim = AICharacter->GetAIAnimation())
+		if (Anim->IsPlayingAction())
+		{
+			if (!Anim->IsPlayingHitReact())
+				if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
+			return;
+		}
+
 	if (bUseCustomAttackLogic)
 	{
 		if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
@@ -860,27 +1124,70 @@ void ABaseAIController::HandleChaseState(float DeltaTime)
 	}
 
 	const float Range = GetEffectiveAttackRange();
+	const float Reach = GetCombatReach(Target);
 	const float Dist = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+	const float SurfDist = FMath::Max(0.f, Dist - Reach);
+	float ApproachBand = Range * ApproachPercent;
+	{
+		const UAICombatComponent* CC = AICharacter->GetAICombat();
+		if (!CC || CC->GetCombatStyle() != EAICombatStyle::Ranged)
+			ApproachBand = FMath::Min(ApproachBand, MaxMeleeStandoff * GetCapsuleScale());
+	}
+	const float Standoff = Reach + ApproachBand;
 
-	// In range → commit to the attack regardless of LoS flicker (the hit-window itself enforces line of sight).
-	if (Dist <= Range)
+	if (SurfDist <= Range)
 	{
 		AICharacter->SetAIState(EAIState::Attacking);
 		if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->StopMovement();
 		return;
 	}
 
-	// Lost sight while still OUT of range → head to where we last saw THIS target instead of tracking it through
-	// walls. (LostSightTimer eventually fires → search. Gated on LastKnownActor so a switched target uses live pos.)
+	if (ScentTimer > 0.f)
+	{
+		if (IsTargetCurrentlySeen(Target)) ScentTimer = -1.f;
+		else if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
+		{
+			const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+			FVector TrailPoint = ScentTrail.Num() > 0 ? ScentTrail[0].Value : LastKnownLocation;
+			for (const TPair<float, FVector>& S : ScentTrail)
+			{
+				if (S.Key <= Now - ScentTrailDelay) TrailPoint = S.Value;
+				else break;
+			}
+			MC->SetDesiredSpeed(GetChaseSpeed() * 0.85f);
+			MC->MoveToLocation(TrailPoint, MC->AcceptanceRadius, true);
+			return;
+		}
+	}
+
 	if (!IsTargetCurrentlySeen(Target) && LastKnownActor.Get() == Target && !LastKnownLocation.IsZero())
 	{
 		if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-		{ MC->SetDesiredSpeed(GetChaseSpeed()); MC->MoveToLocation(LastKnownLocation, MC->AcceptanceRadius); }
+		{
+			const FVector Pursuit = LastKnownLocation + LastKnownVelocity * LostSightPredictTime;
+			MC->SetDesiredSpeed(GetChaseSpeed());
+			MC->MoveToLocation(Pursuit, MC->AcceptanceRadius, true);
+			if (MC->HasReachedDestination())
+			{
+				MC->StopMovement();
+
+				if (!LastKnownVelocity.IsNearlyZero())
+				{
+					const FRotator Cur = AICharacter->GetActorRotation();
+					const FRotator Goal(Cur.Pitch, LastKnownVelocity.Rotation().Yaw, Cur.Roll);
+					AICharacter->SetActorRotation(FMath::RInterpTo(Cur, Goal, DeltaTime, 4.f));
+				}
+			}
+		}
 		return;
 	}
 
 	if (UAIMovementComponent* MC = AICharacter->GetAIMovement())
-	{ MC->SetDesiredSpeed(GetChaseSpeed()); MC->MoveToLocation(GetAttackSlotLocation(Target, GetCombatApproachDistance(Range), DeltaTime), CombatPositionAcceptance); }
+	{
+		MC->SetDesiredSpeed(GetChaseSpeed());
+
+		MC->MoveToActorDirect(Target, Standoff);
+	}
 }
 
 void ABaseAIController::HandleAttackState(float DeltaTime)
@@ -888,94 +1195,136 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 	AActor* Target = AICharacter->GetCurrentTarget();
 	if (!Target || AICharacter->IsTargetDeadOrInvalid(Target))
 	{ ReleaseAttackTokenHeld(); AICharacter->ClearTarget(); AICharacter->SetAIState(EAIState::Returning); return; }
-	if (CheckLeashAndReturn()) return;
 
-	const float Range = GetEffectiveAttackRange();
+	if (!bUseCustomAttackLogic && CheckLeashAndReturn()) return;
+
+	UAICombatComponent* Combat = AICharacter->GetAICombat();
+	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+
+	if (Combat && Combat->IsBroken())
+	{
+		if (MC) MC->StopMovement();
+		return;
+	}
+
+	if (UAIAnimationComponent* HitAnim = AICharacter->GetAIAnimation())
+		if (HitAnim->IsPlayingHitReact()) { if (MC) MC->StopMovement(); return; }
+
+	const float Reach = GetCombatReach(Target);
 	const float Dist  = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+	const float SurfDist = FMath::Max(0.f, Dist - Reach);
 
-	// Custom (scripted) offense: BP owns the whole attack pattern. Skip the built-in melee/slot/token/evade/kite
-	// loop and never auto-disengage on range — the boss stays engaged until BP/perception says otherwise.
 	if (bUseCustomAttackLogic)
 	{
-		UAICombatComponent* CC = AICharacter->GetAICombat();
-		if (bCustomLogicFacesTarget && (!CC || !CC->IsAttacking()))
+		if (bCustomLogicFacesTarget && (!Combat || !Combat->IsAttacking()))
 			FaceTargetYawOnly(Target, DeltaTime);
 		TickCustomAttackLogic(Target, Dist, DeltaTime);
 		return;
 	}
 
-	if (Dist > Range * CombatDisengageRangeRatio)
+	const float Range = GetEffectiveAttackRange();
+	if (SurfDist > Range * CombatDisengageRangeRatio)
 	{
 		ReleaseAttackTokenHeld();
-		// Chasing is also a combat state, so this transition won't ExitCombat — cancel a wind-up charge
-		// explicitly so it doesn't auto-release into empty air after the target backed off.
-		if (UAICombatComponent* C = AICharacter->GetAICombat()) C->CancelCharge();
+
+		if (Combat) Combat->CancelCharge();
 		AICharacter->SetAIState(EAIState::Chasing);
 		return;
 	}
 
-	UAICombatComponent* Combat = AICharacter->GetAICombat();
-	UAIMovementComponent* MC = AICharacter->GetAIMovement();
+	{
+		bool bFreezeAim = false;
+		float FaceSpeed = CombatFaceRotationSpeed;
+		if (Combat)
+		{
+			if (Combat->IsInRecovery()) bFreezeAim = true;
+			else if (Combat->IsAttacking())
+			{
+				if (Combat->HasHitWindowFired() || Combat->GetTimeUntilHitWindow() <= AttackAimLockTime) bFreezeAim = true;
+				else FaceSpeed = WindupTrackRotationSpeed;
+			}
+			else if (Combat->IsCharging())
+			{
+				if (Combat->GetChargePercent() > 0.55f) bFreezeAim = true;
+				else FaceSpeed = WindupTrackRotationSpeed;
+			}
+		}
+		if (!bFreezeAim) FaceTargetYawOnly(Target, DeltaTime, FaceSpeed);
+	}
 
-	// Commit the swing direction: stop re-aiming once the active attack is underway, so dodging
-	// perpendicular actually leaves the attack's arc (kills the aim-bot tracking).
-	if (!Combat || !Combat->IsAttacking())
-		FaceTargetYawOnly(Target, DeltaTime);
-
-	// Rooted, punishable recovery after a committed attack — don't move or attack during it.
 	if (Combat && Combat->IsInRecovery())
 	{
 		if (MC) MC->StopMovement();
 		return;
 	}
 
-	// First-contact size-up: a brief beat the first time we reach a NEW target so the AI doesn't swing the exact
-	// frame it arrives in range (facing is already handled by the gate above).
-	if (Target != EngagedTarget.Get())
-	{
-		EngagedTarget = Target;
-		EngageReactionTimer = (EngageReactionTime > 0.f) ? FMath::FRandRange(0.15f, EngageReactionTime) : 0.f;
-	}
-	if (EngageReactionTimer > 0.f)
-	{
-		EngageReactionTimer -= DeltaTime;
-		if (MC) MC->StopMovement();
-		return;
-	}
-
-	// Reactive evade: an Elite/Boss sidesteps/back-hops when the target winds up an attack. (Cooldown ticks in Tick.)
 	if (bEvading)
 	{
 		EvadeTimer -= DeltaTime;
-		if (EvadeTimer > 0.f) return; // committed to the dodge
+		if (EvadeTimer > 0.f)
+		{
+			if (MC) { MC->CancelPathMove(); MC->SetDesiredSpeed(EvadeSpeed); }
+			AICharacter->AddMovementInput(EvadeDir, 1.f);
+			return;
+		}
 		bEvading = false;
 	}
-	if (bUseReactiveEvade && MC && EvadeCooldownTimer <= 0.f
+	if (bUseReactiveEvade && MC
 		&& static_cast<uint8>(AICharacter->GetRank()) >= static_cast<uint8>(EAIRank::Elite)
-		&& (!Combat || (!Combat->IsAttacking() && !Combat->IsCharging() && !Combat->IsStaggered()))
-		&& AICharacter->IsTargetWindingUpAttack(Target) && FMath::FRand() < EvadeChance)
+		&& (!Combat || (!Combat->IsAttacking() && !Combat->IsCharging() && !Combat->IsStaggered())))
 	{
-		const FVector ToTarget = (Target->GetActorLocation() - AICharacter->GetActorLocation()).GetSafeNormal2D();
-		const FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget);
-		const float Sign = (FMath::FRand() < 0.5f) ? 1.f : -1.f;
-		const FVector EvadeDir = (Right * Sign - ToTarget * 0.3f).GetSafeNormal(); // mostly lateral, slight back
+		const bool bWindup = AICharacter->IsTargetWindingUpAttack(Target);
+		if (bWindup && !bWindupObserved)
+		{
+			bWindupObserved = true;
+			bEvadeCommitted = (EvadeCooldownTimer <= 0.f && FMath::FRand() < EvadeChance);
+			EvadeReactDelay = FMath::FRandRange(0.06f, 0.2f);
+		}
+		else if (!bWindup) { bWindupObserved = false; bEvadeCommitted = false; }
+
+		if (bWindup && bEvadeCommitted)
+		{
+			EvadeReactDelay -= DeltaTime;
+			if (EvadeReactDelay <= 0.f)
+			{
+				bEvadeCommitted = false;
+				const FVector ToTarget = (Target->GetActorLocation() - AICharacter->GetActorLocation()).GetSafeNormal2D();
+				const FVector Right = FVector::CrossProduct(FVector::UpVector, ToTarget);
+				const float Sign = (FMath::FRand() < 0.5f) ? 1.f : -1.f;
+				EvadeDir = (Right * Sign - ToTarget * 0.3f).GetSafeNormal();
+				ReleaseAttackTokenHeld();
+				MC->CancelPathMove();
+				MC->SetDesiredSpeed(EvadeSpeed);
+				AICharacter->AddMovementInput(EvadeDir, 1.f);
+				bEvading = true;
+				EvadeTimer = FMath::Max(EvadeDuration, EvadeDistance / FMath::Max(EvadeSpeed, 100.f));
+				EvadeCooldownTimer = EvadeCooldown;
+				return;
+			}
+		}
+	}
+
+	if (HarassRetreatTimer > 0.f && MC
+		&& (!Combat || (!Combat->IsAttacking() && !Combat->IsCharging() && !Combat->IsInRecovery())))
+	{
+		HarassRetreatTimer -= DeltaTime;
 		ReleaseAttackTokenHeld();
-		MC->SetDesiredSpeed(EvadeSpeed);
-		MC->MoveToLocation(AICharacter->GetActorLocation() + EvadeDir * EvadeDistance, CombatPositionAcceptance);
-		bEvading = true;
-		EvadeTimer = EvadeDuration;
-		EvadeCooldownTimer = EvadeCooldown;
+		FVector Away = (AICharacter->GetActorLocation() - Target->GetActorLocation()).GetSafeNormal2D();
+		if (Away.IsNearlyZero()) Away = AICharacter->GetActorForwardVector().GetSafeNormal2D();
+		MC->CancelPathMove();
+		MC->SetDesiredSpeed(GetChaseSpeed());
+		AICharacter->AddMovementInput(Away, 1.f);
 		return;
 	}
 
-	// Kiting: if the target is inside our comfort range, back off to keep distance (ranged/skittish enemies).
 	if (MinComfortRange > 0.f && MC && Dist < MinComfortRange && (!Combat || !Combat->IsAttacking()))
 	{
-		ReleaseAttackTokenHeld(); // we've decided not to attack this frame — free the slot for an ally
+		ReleaseAttackTokenHeld();
 		FVector Away = (AICharacter->GetActorLocation() - Target->GetActorLocation()).GetSafeNormal2D();
 		if (Away.IsNearlyZero()) Away = AICharacter->GetActorForwardVector().GetSafeNormal2D();
+		MC->CancelPathMove();
 		MC->SetDesiredSpeed(StrafeSpeed);
-		MC->MoveToLocation(Target->GetActorLocation() + Away * MinComfortRange, CombatPositionAcceptance);
+		AICharacter->AddMovementInput(Away, 1.f);
 		return;
 	}
 
@@ -987,69 +1336,186 @@ void ABaseAIController::HandleAttackState(float DeltaTime)
 			return;
 		}
 
-		const float SlotRadius = GetCombatApproachDistance(Range);
-		const FVector SlotLoc = GetAttackSlotLocation(Target, SlotRadius, DeltaTime);
-		const bool bAtSlot = (FVector::Dist(AICharacter->GetActorLocation(), SlotLoc) <= CombatPositionAcceptance * 2.f) || (Dist <= SlotRadius);
-
-		// Hold back on a wider "wait ring" instead of crowding the target.
-		auto WaitOnRing = [&]()
+		PlannedRangeTimer -= DeltaTime;
+		if (PlannedAttackRange <= 0.f || PlannedRangeTimer <= 0.f)
 		{
-			if (!MC) return;
-			const FVector Dir = (SlotLoc - Target->GetActorLocation()).GetSafeNormal2D();
-			const FVector WaitSlot = Dir.IsNearlyZero() ? SlotLoc : Target->GetActorLocation() + Dir * (Range * WaitRingRatio);
-			MC->SetDesiredSpeed(StrafeSpeed);
-			MC->MoveToLocation(WaitSlot, CombatPositionAcceptance);
-		};
+			PlannedAttackRange = Combat->PickApproachRange(SurfDist, PlannedMinRange);
+			PlannedRangeTimer = 3.f;
+		}
 
-		// Bait: against a defending target, commit to a short hold (no per-frame re-roll) and DON'T hold a token,
-		// so an ally can apply pressure instead. Decided before consuming a turn.
-		if (BaitTimer > 0.f) BaitTimer -= DeltaTime;
-		if (Combat->CanAttack() && AICharacter->IsTargetDefending(Target)
-			&& (BaitTimer > 0.f || FMath::FRand() < DefenseBaitChance))
+		const float CapScale = GetCapsuleScale();
+		float StandoffBand = PlannedAttackRange * ApproachPercent;
+		if (Combat->GetCombatStyle() != EAICombatStyle::Ranged)
+			StandoffBand = FMath::Min(StandoffBand, MaxMeleeStandoff * CapScale);
+		if (PlannedMinRange > 0.f)
+			StandoffBand = FMath::Clamp(FMath::Max(StandoffBand, PlannedMinRange + 15.f), 0.f, FMath::Max(PlannedAttackRange - 10.f, 0.f));
+		const float SlotRadius = Reach + StandoffBand;
+		const float Settle = FMath::Max(CombatPositionAcceptance * CapScale, 20.f);
+
+		const bool bWasSteer = bSteerCombat;
+		if (StandoffBand > 350.f * CapScale) bSteerCombat = false;
+		else if (bSteerCombat) { if (Dist > SlotRadius + 500.f * CapScale) bSteerCombat = false; }
+		else if (Dist < SlotRadius + 300.f * CapScale) bSteerCombat = true;
+		if (bSteerCombat != bWasSteer)
+			if (UCharacterMovementComponent* Move = AICharacter->GetCharacterMovement())
+				Move->bCanWalkOffLedges = !bSteerCombat;
+		if (!bSteerCombat)
 		{
-			if (BaitTimer <= 0.f) BaitTimer = BaitHoldDuration; // commit to a deliberate hold window
-			ReleaseAttackTokenHeld();
-			WaitOnRing();
+			if (MC)
+			{
+				MC->SetDesiredSpeed(GetChaseSpeed());
+				MC->MoveToActorDirect(Target, SlotRadius);
+			}
 			return;
 		}
-		BaitTimer = 0.f;
 
-		if (Combat->CanAttack() && TryTakeAttackTurn(Target))
+		const FVector SlotLoc = GetAttackSlotLocation(Target, SlotRadius, DeltaTime);
+
+		auto OrbitStep = [&]()
 		{
-			if (Dist <= Range && bAtSlot && HasUsableAttack(Combat, Dist) && IsAttackWindowOpen(Target))
+			if (CombatOrbitSpeed <= 0.f) return;
+			if (UAIAnimationComponent* Anim = AICharacter->GetAIAnimation())
+				if (Anim->IsPlayingAction()) return;
+			OrbitDirTimer -= DeltaTime;
+			if (OrbitDirTimer <= 0.f)
 			{
-				if (Combat->ExecuteRandomAttack(Dist))
-				{
-					NotifyAttackStarted(Target); // stamp the group window ONLY on a confirmed swing
-					if (MC) MC->StopMovement();
-				}
-				else if (MC)
-				{
-					MC->SetDesiredSpeed(StrafeSpeed);
-					MC->MoveToLocation(SlotLoc, CombatPositionAcceptance);
-				}
+				OrbitDirTimer = FMath::FRandRange(3.f, 6.f);
+				if (FMath::FRand() < 0.35f) OrbitDir *= -1.f;
 			}
-			else if (MC)
-			{
-				MC->SetDesiredSpeed(Dist <= Range ? StrafeSpeed : GetChaseSpeed());
-				MC->MoveToLocation(SlotLoc, CombatPositionAcceptance);
-			}
-		}
-		else if (MC)
+			const float Drift = OrbitDir * CombatOrbitSpeed * DeltaTime;
+			CachedSlotAngle += Drift;
+			SlotTargetAngle += Drift;
+		};
+
+		auto SteerSlot = [&](float NearSpeed)
+		{
+			const float DSlot = FVector::Dist2D(AICharacter->GetActorLocation(), SlotLoc);
+			SteerToPoint(SlotLoc, DSlot > 250.f * CapScale ? GetChaseSpeed() : NearSpeed, Settle);
+		};
+
+		auto WaitYourTurn = [&]()
 		{
 			ReleaseAttackTokenHeld();
-			WaitOnRing();
+			OrbitStep();
+			SteerSlot(StrafeSpeed);
+			if (AICharacter->GetVelocity().SizeSquared2D() < 2500.f)
+			{
+				MenaceTimer -= DeltaTime;
+				if (MenaceTimer <= 0.f)
+				{
+					MenaceTimer = CombatWaitMenaceInterval * FMath::FRandRange(0.7f, 1.3f);
+					if (UAIAnimationComponent* Anim = AICharacter->GetAIAnimation())
+						if (!Anim->IsPlayingAction()) Anim->PlayMenace();
+				}
+			}
+		};
+
+		if (Target != EngagedTarget.Get())
+		{
+			EngagedTarget = Target;
+			EngageReactionTimer = (EngageReactionTime > 0.f)
+				? FMath::FRandRange(FMath::Min(0.15f, EngageReactionTime), EngageReactionTime) : 0.f;
+		}
+		if (EngageReactionTimer > 0.f)
+		{
+			EngageReactionTimer -= DeltaTime;
+			OrbitStep();
+			SteerSlot(StrafeSpeed * 0.6f);
+			return;
+		}
+
+		if (BaitTimer > 0.f) BaitTimer -= DeltaTime;
+		const bool bDefending = AICharacter->IsTargetDefending(Target);
+		if (bDefending && !bDefendObserved) { bDefendObserved = true; bBaitCommitted = (FMath::FRand() < DefenseBaitChance); }
+		else if (!bDefending && BaitTimer <= 0.f) { bDefendObserved = false; bBaitCommitted = false; }
+		if (BaitTimer > 0.f || (bDefending && bBaitCommitted && Combat->CanAttack()))
+		{
+			if (BaitTimer <= 0.f) { BaitTimer = BaitHoldDuration; bBaitCommitted = false; }
+			ReleaseAttackTokenHeld();
+			OrbitStep();
+			SteerSlot(StrafeSpeed);
+			return;
+		}
+
+		if (!TryTakeAttackTurn(Target))
+		{
+			WaitYourTurn();
+			return;
+		}
+
+		if (Combat->CanAttack() && SurfDist <= PlannedAttackRange
+			&& Dist <= SlotRadius + Settle + 40.f && IsAttackWindowOpen(Target))
+		{
+			if (Combat->ExecuteRandomAttack(SurfDist))
+			{
+				NotifyAttackStarted(Target);
+				PlannedAttackRange = -1.f;
+				CombatStallTimer = 0.f;
+				bStallRepath = false;
+				StallRepathTime = 0.f;
+				if (AICharacter->GetHarassBelowHealthFraction() > 0.f
+					&& AICharacter->GetHealthFraction() <= AICharacter->GetHarassBelowHealthFraction())
+					HarassRetreatTimer = FMath::FRandRange(1.f, 1.8f);
+				if (MC) MC->CancelPathMove();
+			}
+			else
+			{
+				OrbitStep();
+				SteerSlot(StrafeSpeed);
+			}
+		}
+		else
+		{
+			const bool bInGate = SurfDist <= PlannedAttackRange && Dist <= SlotRadius + Settle + 40.f;
+			if (bStallRepath && MC)
+			{
+				StallRepathTime += DeltaTime;
+				if (bInGate || StallRepathTime > 3.f)
+				{
+					if (!bInGate) bSteerCombat = false;
+					bStallRepath = false;
+					StallRepathTime = 0.f;
+					MC->CancelPathMove();
+				}
+				else
+				{
+					if (!MC->IsPathMoveActive())
+					{
+						MC->SetDesiredSpeed(GetChaseSpeed());
+						MC->MoveToLocation(Target->GetActorLocation(), Reach + FMath::Max(StandoffBand, 40.f), true);
+					}
+					return;
+				}
+			}
+
+			if (Combat->CanAttack() && !bInGate
+				&& AICharacter->GetVelocity().SizeSquared2D() < 2500.f)
+			{
+				CombatStallTimer += DeltaTime;
+				if (CombatStallTimer > 0.6f)
+				{
+					CombatStallTimer = 0.f;
+					bStallRepath = true;
+					StallRepathTime = 0.f;
+					return;
+				}
+			}
+			else CombatStallTimer = 0.f;
+
+			OrbitStep();
+			SteerSlot(StrafeSpeed);
 		}
 	}
 	else if (MC)
 	{
-		if (Dist > Range) ApproachTarget(Target, GetCombatApproachDistance(Range));
+		if (SurfDist > Range) ApproachTarget(Target, GetCombatApproachDistance(Range));
 		else MC->StopMovement();
 	}
 }
 
 FVector ABaseAIController::GetAttackSlotLocation(AActor* Target, float Radius, float DeltaTime)
 {
+
 	SlotTimer -= DeltaTime;
 	if (!bHasCachedSlot || SlotTimer <= 0.f)
 	{
@@ -1058,13 +1524,22 @@ FVector ABaseAIController::GetAttackSlotLocation(AActor* Target, float Radius, f
 		SlotTimer = SlotUpdateInterval;
 	}
 
-	// Rotate the held angle smoothly toward the chosen slot (shortest way) instead of snapping 45° — no lateral twitch.
 	const float Delta = FMath::FindDeltaAngleRadians(CachedSlotAngle, SlotTargetAngle);
-	const float Step = 2.5f * DeltaTime; // ~143°/s
+	const float Step = 2.5f * DeltaTime;
 	CachedSlotAngle += FMath::Clamp(Delta, -Step, Step);
 
 	const FVector Dir(FMath::Cos(CachedSlotAngle), FMath::Sin(CachedSlotAngle), 0.f);
-	return Target->GetActorLocation() + Dir * FMath::Max(Radius, 1.f);
+	FVector Slot = Target->GetActorLocation() + Dir * FMath::Max(Radius, 1.f);
+	if (UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+	{
+		FNavLocation Proj;
+		if (Nav->ProjectPointToNavigation(Slot, Proj, FVector(150.f, 150.f, 400.f)))
+		{
+			Slot.X = Proj.Location.X;
+			Slot.Y = Proj.Location.Y;
+		}
+	}
+	return Slot;
 }
 
 float ABaseAIController::ComputeFreeSlotAngle(AActor* Target, float Radius)
@@ -1073,6 +1548,16 @@ float ABaseAIController::ComputeFreeSlotAngle(AActor* Target, float Radius)
 	FVector ToMe = (AICharacter->GetActorLocation() - PlayerLoc).GetSafeNormal2D();
 	if (ToMe.IsNearlyZero()) ToMe = -AICharacter->GetActorForwardVector().GetSafeNormal2D();
 	const float MyAngle = FMath::Atan2(ToMe.Y, ToMe.X);
+
+	if (bCoordinateAttackSlots)
+	{
+		if (UAICombatDirectorSubsystem* Dir = GetCombatDirector())
+		{
+			const float SlotLease = FMath::Max(SlotUpdateInterval * 3.f, 1.f);
+			return Dir->ReserveAttackAngle(Target, AICharacter, MyAngle,
+				FMath::DegreesToRadians(SlotSeparationDegrees), SlotLease);
+		}
+	}
 
 	TArray<float> Occupied;
 	if (UWorld* W = GetWorld())
@@ -1106,7 +1591,6 @@ float ABaseAIController::ComputeFreeSlotAngle(AActor* Target, float Radius)
 		for (const float OA : Occupied)
 			MinClear = FMath::Min(MinClear, FMath::Abs(FMath::FindDeltaAngleRadians(Ang, OA)));
 
-		// Stronger pull toward the lane we already hold (0.6) so we don't hop slots over minor crowd changes.
 		const float Score = MinClear - FMath::Abs(FMath::FindDeltaAngleRadians(Ang, MyAngle)) * 0.6f;
 		if (Score > BestScore) { BestScore = Score; BestAngle = Ang; }
 	}
@@ -1118,19 +1602,43 @@ void ABaseAIController::HandleReturnState(float DeltaTime)
 	UAIMovementComponent* MC = AICharacter->GetAIMovement();
 	if (!MC) return;
 
-	MC->SetDesiredSpeed(MC->PatrolSpeed);
-	MC->MoveToLocation(SpawnOrigin);
+	if (AICharacter->CanFlee())
+	{
+		ReacquireCooldown -= DeltaTime;
+		if (ReacquireCooldown <= 0.f)
+		{
+			ReacquireCooldown = 0.3f;
+			if (ReacquireOnReturn()) return;
+		}
+	}
+	else
+	{
 
-	// 2D arrival + generous Z band so standing on a slope/step still counts as "home".
+		const bool bWolfInLeash = FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin)
+			<= FMath::Square(AICharacter->GetLeashRange() * LeashReengageRatio);
+		if (bWolfInLeash)
+		{
+			ReacquireCooldown -= DeltaTime;
+			if (ReacquireCooldown <= 0.f)
+			{
+				ReacquireCooldown = 0.4f;
+				if (ReacquireOnReturn()) return;
+			}
+		}
+	}
+
+	const float HomeDist = FVector::Dist2D(AICharacter->GetActorLocation(), SpawnOrigin);
+	MC->SetDesiredSpeed(HomeDist > 600.f ? GetChaseSpeed() : MC->PatrolSpeed);
+	const bool bMoving = MC->MoveToLocation(SpawnOrigin);
+
 	const bool bArrived =
 		FVector::DistSquared2D(AICharacter->GetActorLocation(), SpawnOrigin) <= FMath::Square(MC->AcceptanceRadius + 50.f)
 		&& FMath::Abs(AICharacter->GetActorLocation().Z - SpawnOrigin.Z) <= 200.f;
 
-	// Watchdog: if home is unreachable (knocked off-nav, blocked door…), hard-teleport instead of shuffling forever.
-	ReturnTimer += DeltaTime;
+	ReturnTimer += bMoving ? DeltaTime : DeltaTime * 2.f;
 	if (!bArrived && ReturnTimer >= ReturnTimeout)
 	{
-		AICharacter->TeleportToSpawn(SpawnOrigin); // land on the reachable, nav-projected origin (not the raw spawn)
+		AICharacter->TeleportToSpawn(SpawnOrigin);
 		return;
 	}
 
@@ -1148,49 +1656,57 @@ void ABaseAIController::HandleFleeState(float DeltaTime)
 	UAIMovementComponent* MC = AICharacter->GetAIMovement();
 	if (!MC) return;
 
-	// Panicked NPCs may leave their territory: only a GENEROUS hard cap pulls them back. The normal leash
-	// would yank them home through the threat — bad for prey.
-	if (FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin) > FMath::Square(AICharacter->GetLeashRange() * 2.f))
-	{
-		AICharacter->ClearTarget();
-		AICharacter->SetAIState(EAIState::Returning);
-		return;
-	}
-
 	AActor* Target = AICharacter->GetCurrentTarget();
 
-	// No target — return home
 	if (!Target)
 	{
 		AICharacter->SetAIState(EAIState::Returning);
 		return;
 	}
 
-	const float DistToThreat = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
-
-	// Safe distance — stop fleeing
-	if (DistToThreat >= FleeSafeDistance)
 	{
-		AICharacter->ClearTarget();
-		AICharacter->SetAIState(EAIState::Returning);
-		return;
+		const float LeashR = AICharacter->GetLeashRange();
+		const float DistHomeSq = FVector::DistSquared(AICharacter->GetActorLocation(), SpawnOrigin);
+
+		if (bFleeingHome) { if (DistHomeSq <= FMath::Square(LeashR * 1.5f)) bFleeingHome = false; }
+		else if (DistHomeSq > FMath::Square(LeashR * 2.f)) bFleeingHome = true;
+		if (bFleeingHome)
+		{
+			MC->SetDesiredSpeed(MC->FleeSpeed);
+			MC->MoveToLocation(SpawnOrigin);
+			return;
+		}
 	}
 
-	// ── PANIC MODE: threat is very close — recalc flee on a fast throttle (not literally every frame,
-	// which would fire a NavMesh projection storm for a whole herd) ──
+	const float DistToThreat = FVector::Dist(AICharacter->GetActorLocation(), Target->GetActorLocation());
+
+	if (DistToThreat >= FleeSafeDistance)
+	{
+		MC->SetDesiredSpeed(0.f);
+		FaceTargetYawOnly(Target, DeltaTime);
+		FleeCalmTimer += DeltaTime;
+		if (FleeCalmTimer >= FleeCalmDuration)
+		{
+			FleeCalmTimer = 0.f;
+			AICharacter->ClearTarget();
+			AICharacter->SetAIState(EAIState::Returning);
+		}
+		return;
+	}
+	FleeCalmTimer = 0.f;
+
 	if (DistToThreat <= FleePanicRadius)
 	{
 		FleeReevalTimer -= DeltaTime;
-		if (FleeReevalTimer <= 0.f) { FleeReevalTimer = FleePanicReevalInterval; bFleeCornered = !MC->FleeFrom(Target); }
-		if (bFleeCornered) { MC->StopMovement(); FaceTargetYawOnly(Target, DeltaTime); } // trapped — turn and face the threat
+		if (FleeReevalTimer <= 0.f) { FleeReevalTimer = FleePanicReevalInterval * FMath::FRandRange(0.85f, 1.2f); bFleeCornered = !MC->FleeFrom(Target); }
+		if (bFleeCornered) { MC->StopMovement(); FaceTargetYawOnly(Target, DeltaTime); }
 		return;
 	}
 
-	// ── NORMAL MODE: recalc on timer or when destination reached ──
 	FleeReevalTimer -= DeltaTime;
 	if (FleeReevalTimer <= 0.f || MC->HasReachedDestination())
 	{
-		FleeReevalTimer = FleeReevalInterval;
+		FleeReevalTimer = FleeReevalInterval * FMath::FRandRange(0.85f, 1.2f);
 		bFleeCornered = !MC->FleeFrom(Target);
 	}
 	if (bFleeCornered) { MC->StopMovement(); FaceTargetYawOnly(Target, DeltaTime); }
@@ -1200,19 +1716,26 @@ void ABaseAIController::HandleInteractState(float DeltaTime)
 {
 	AActor* Partner = AICharacter->GetInteractionPartner();
 
-	// Safety net: if the partner is gone/dead or has walked away, leave dialogue ourselves (the BP flow normally
-	// calls EndInteraction, but the player can die/disconnect/run off without it).
 	const bool bPartnerGone = !IsValid(Partner) || AICharacter->IsTargetDeadOrInvalid(Partner);
 	const bool bTooFar = Partner && FVector::DistSquared(AICharacter->GetActorLocation(), Partner->GetActorLocation())
 		> FMath::Square(MaxInteractDistance);
 	if (bPartnerGone || bTooFar)
 	{
-		AICharacter->EndInteraction(); // clears partner, fires OnInteractionEnded, resumes patrol/idle
+		AICharacter->EndInteraction();
 		return;
 	}
 
-	// Hold position and face the conversation partner; the BP dialogue flow calls EndInteraction when done.
 	FaceTargetYawOnly(Partner, DeltaTime);
+
+	InteractGestureTimer -= DeltaTime;
+	if (InteractGestureTimer <= 0.f)
+	{
+		InteractGestureTimer = FMath::FRandRange(4.f, 7.f);
+		UAnimInstance* MeshAnim = AICharacter->GetMesh() ? AICharacter->GetMesh()->GetAnimInstance() : nullptr;
+		if (MeshAnim && MeshAnim->Montage_IsPlaying(nullptr)) return;
+		if (UAIAnimationComponent* Anim = AICharacter->GetAIAnimation())
+			if (!Anim->IsPlayingAction()) Anim->PlayInteraction();
+	}
 }
 
 void ABaseAIController::HandleStaggerState(float DeltaTime)
@@ -1227,7 +1750,7 @@ void ABaseAIController::HandleStaggerState(float DeltaTime)
 		}
 		else if (T && AICharacter->CanFlee())
 		{
-			// A staggered fleer (passive/neutral) resumes fleeing instead of walking home into the threat.
+
 			AICharacter->SetAIState(EAIState::Fleeing);
 			if (UAIMovementComponent* MC = AICharacter->GetAIMovement()) MC->FleeFrom(T);
 		}
@@ -1238,8 +1761,6 @@ void ABaseAIController::HandleStaggerState(float DeltaTime)
 	}
 }
 
-/* ═══════════ Debug ═══════════ */
-
 void ABaseAIController::DrawDebugPerception() const
 {
 #if ENABLE_DRAW_DEBUG
@@ -1247,28 +1768,18 @@ void ABaseAIController::DrawDebugPerception() const
 	const UWorld* W = GetWorld();
 	if (!W) return;
 	const FVector Loc = AICharacter->GetActorLocation();
-	const FVector Fwd = AICharacter->GetActorForwardVector();
 
-	if (bUseProximityDetection)
-		DrawDebugSphere(W, Loc, ProximityRadius, 20, FColor::Magenta, false, -1.f, 0, 1.5f);
-
-	const float HalfFOV = FMath::DegreesToRadians(SightFOVDegrees);
-	for (int32 i = 0; i < 24; ++i)
-	{
-		const float A0 = -HalfFOV + (2.f * HalfFOV * i / 24);
-		const float A1 = -HalfFOV + (2.f * HalfFOV * (i + 1) / 24);
-		DrawDebugLine(W, Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A0), FVector::UpVector) * SightRadius,
-			Loc + Fwd.RotateAngleAxis(FMath::RadiansToDegrees(A1), FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
-	}
-	DrawDebugLine(W, Loc, Loc + Fwd.RotateAngleAxis(-SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
-	DrawDebugLine(W, Loc, Loc + Fwd.RotateAngleAxis(SightFOVDegrees, FVector::UpVector) * SightRadius, FColor::Green, false, -1.f, 0, 1.5f);
-
+	DrawDebugCircle(W, Loc, DetectionRadius, 32, FColor::Green, false, -1.f, 0, 1.5f, FVector(1,0,0), FVector(0,1,0), false);
+	if (LoseSightRadius > DetectionRadius)
+		DrawDebugCircle(W, Loc, LoseSightRadius, 32, FColor(0, 120, 0), false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
 	DrawDebugCircle(W, Loc, HearingRange, 32, FColor::Yellow, false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
 	DrawDebugCircle(W, SpawnOrigin, AICharacter->GetLeashRange(), 32, FColor(150,150,150), false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
 	DrawDebugCircle(W, Loc, GetEffectiveAttackRange(), 16, FColor::Orange, false, -1.f, 0, 1.f, FVector(1,0,0), FVector(0,1,0), false);
 
 	const FString State = StaticEnum<EAIState>()->GetNameStringByValue(static_cast<int64>(AICharacter->GetCurrentAIState()));
-	DrawDebugString(W, Loc + FVector(0,0,100), State, nullptr, FColor::White, -1.f, true);
+	const FString Info = (DetectionProgress > 0.f)
+		? FString::Printf(TEXT("%s  detect %.0f%%"), *State, DetectionProgress * 100.f) : State;
+	DrawDebugString(W, Loc + FVector(0,0,100), Info, nullptr, FColor::White, -1.f, true);
 
 	if (AActor* T = AICharacter->GetCurrentTarget())
 	{

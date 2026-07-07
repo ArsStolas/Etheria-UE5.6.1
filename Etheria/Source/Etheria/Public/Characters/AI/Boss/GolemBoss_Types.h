@@ -16,6 +16,9 @@
 #include "GolemBoss_Types.generated.h"
 
 class UAnimMontage;
+class UNiagaraSystem;
+class UStaticMesh;
+class UMaterialInterface;
 class AActor;
 
 /** Behavioural archetype of a Golem attack — drives C++ damage geometry AND the data handed to BP. */
@@ -71,6 +74,9 @@ struct FGolemBeamSegment
 
 	/** Convenient end point (Origin + Direction * Length). */
 	UPROPERTY(BlueprintReadWrite, Category = "Golem") FVector End = FVector::ZeroVector;
+
+	/** Radius (half-width) of the damaging tube. Drive your beam VFX's thickness from this so it matches the hit radius. */
+	UPROPERTY(BlueprintReadWrite, Category = "Golem") float Width = 160.f;
 };
 
 /**
@@ -134,6 +140,12 @@ struct FGolemAttackConfig
 	/** Kill radius of the core impact (the fist, the rock, each falling boulder). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Impact", meta = (ClampMin = "0")) float ImpactRadius = 350.f;
 
+	/** Optional: bone/socket name(s) on the Golem mesh whose ground-projected position(s) become this attack's impact
+	 *  point(s) AT THE STRIKE FRAME — so the damage/fissures/crystals land exactly under the hand(s) the anim slams down.
+	 *  One name = a single impact (e.g. a fist); two = the two-hand slam's two fissure points. Empty = default arena geometry. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Impact",
+		meta = (ToolTip = "Bone/socket name(s) the impact snaps under at the hit frame (e.g. hand_l, hand_r). Empty = default geometry.")) TArray<FName> ImpactSocketNames;
+
 	/* ── Geometry: Shockwave ring (RadialSlam) ── */
 
 	/** Hammer punch: emit an expanding shockwave ring around the impact (the part you jump over). */
@@ -156,6 +168,14 @@ struct FGolemAttackConfig
 	/** Length of the wall (set ~arena diameter so it spans the whole arena). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Sweep", meta = (ClampMin = "100")) float SweepLength = 3000.f;
 
+	/** Sweep anim played when the wall travels toward the Golem's RIGHT (starts left edge → ends right = "left to right").
+	 *  Usually one arm. Optional — falls back to Montage if unset. The Golem faces the player, so "to the Golem's right"
+	 *  is the player's left; if it looks mirrored in game, just swap this clip with SweepMontageRightToLeft. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Sweep") TObjectPtr<UAnimMontage> SweepMontageLeftToRight;
+
+	/** Sweep anim played when the wall travels toward the Golem's LEFT ("right to left") — the OTHER arm. Optional, falls back to Montage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Sweep") TObjectPtr<UAnimMontage> SweepMontageRightToLeft;
+
 	/* ── Geometry: Beams (BeamSweep) ── */
 
 	/** Number of beams. 2 gives a V (or, mirrored, an X). */
@@ -172,6 +192,42 @@ struct FGolemAttackConfig
 
 	/** How far the whole beam fan rotates across ActiveDuration (the sweep), in degrees. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", ClampMax = "180")) float BeamSweepAngle = 50.f;
+
+	/** Beam VFX (Niagara) the component AUTO-spawns (one per beam) and drives every frame — no BP wiring. Expose Vector user
+	 *  params "BeamStart" / "BeamEnd" and a float "BeamWidth" in your system; the component sets them (BeamWidth = the radius,
+	 *  so the VFX scales with BeamWidth). Empty = no built-in beam VFX (wire it yourself from the dispatchers instead). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") TObjectPtr<UNiagaraSystem> BeamVFX;
+
+	/** One-shot impact / full-screen VFX played ONCE the instant the beam FIRES (spawned at the player camera). Empty = none. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") TObjectPtr<UNiagaraSystem> BeamFireVFX;
+
+	/** Delay (s) after the beam fires before BeamFireVFX plays — use it to line the screen impact up with your montage. 0 = instant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0")) float BeamFireVFXDelay = 0.f;
+
+	/** Eye-laser style: the beam scrapes FROM NEAR THE GOLEM along the ground OUT TO THE PLAYER (instead of a fixed beam) —
+	 *  it aims low near the boss, holds, then sweeps out to catch the player. Overrides the yaw sweep when ON. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") bool bBeamRiseFromGround = false;
+
+	/** Rise-laser: where the sweep STARTS along the golem→player line (0 = at the golem, 1 = at the player). ~0.15 = just in front of the boss. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", ClampMax = "1", EditCondition = "bBeamRiseFromGround")) float BeamSweepStartFraction = 0.15f;
+
+	/** Rise-laser: optional extra height ABOVE the player the beam ends at. 0 = stop right at the player (don't go higher). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", EditCondition = "bBeamRiseFromGround")) float BeamRiseExtraHeight = 0.f;
+
+	/** Rise-laser: fraction of the active window the beam HOLDS at the start (near the golem) before it sweeps out to the player. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (ClampMin = "0", ClampMax = "0.95", EditCondition = "bBeamRiseFromGround")) float BeamRiseHoldFraction = 0.4f;
+
+	/* ── Mesh beam (reliable, C++-driven; skin it with a material) ── */
+
+	/** Reliable C++ beam: a MESH stretched + oriented from the eye to the target EVERY FRAME (follows perfectly, no Niagara
+	 *  authoring). The beam VFX above (BeamVFX) is the Niagara path; this mesh path is the bulletproof one. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam") bool bUseMeshBeam = false;
+
+	/** Mesh used for the beam (authored along +X). Leave empty to use a default box. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (EditCondition = "bUseMeshBeam")) TObjectPtr<UStaticMesh> BeamMesh;
+
+	/** Material on the beam mesh — YOUR laser look (an emissive / additive material). Empty = the mesh's own material. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry|Beam", meta = (EditCondition = "bUseMeshBeam")) TObjectPtr<UMaterialInterface> BeamMeshMaterial;
 
 	/* ── Geometry: Bombardment (Bombardment) ── */
 
@@ -230,6 +286,15 @@ struct FGolemPhaseConfig
 
 	/** Multiplies all damage dealt in this phase. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase", meta = (ClampMin = "0.05")) float DamageScale = 1.f;
+
+	/** Played (full-body) the moment this phase is entered — the enrage roar. Interrupts the current attack. Optional. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase") TObjectPtr<UAnimMontage> TransitionMontage = nullptr;
+
+	/** Extra beat (seconds) after the transition montage before the boss attacks again. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase", meta = (ClampMin = "0", ClampMax = "10")) float TransitionPause = 1.f;
+
+	/** First attack of this phase (AttackId) — the signature opener right after the roar. None = normal selection. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase") FName ForcedOpenerAttackId = NAME_None;
 };
 
 /** Telegraph payload — everything BP needs to draw the warning the moment an attack starts winding up. */
@@ -359,4 +424,27 @@ struct FGolemWeakPoint
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") float CurrentHealth = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") bool bBroken = false;
 	UPROPERTY(BlueprintReadOnly, Category = "Golem") bool bVulnerable = false;
+
+	/** Arm only: player hits this arm's crystal has soaked so far. It shatters at the component's ArmCrystalHitsToBreak,
+	 *  after which hits on the arm deal the broken-crystal bonus (see UGolemBossComponent::HitArm). */
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 CrystalHits = 0;
+};
+
+/**
+ * A crystal planted in the ARENA by the two-hand slam. Destroy it (ArenaCrystalHitsToBreak hits) to deal the player's
+ * damage × ArenaCrystalBreakDamageMult to the boss; destroying ALL of a slam's crystals STUNS it. BP spawns the
+ * destructible mesh at Location from OnGolemArenaCrystalSpawned and calls HitArenaCrystal(Id, ...) when the player connects.
+ */
+USTRUCT(BlueprintType)
+struct FGolemArenaCrystal
+{
+	GENERATED_BODY()
+	/** Unique id mapping this crystal to its spawn/hit/destroy events. */
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 Id = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") FVector Location = FVector::ZeroVector;
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") int32 HitsRemaining = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") bool bDestroyed = false;
+
+	/** The crystal actor the component spawned for this entry (AGolemCrystal/child BP), if any. Destroyed on break/clear. */
+	UPROPERTY(BlueprintReadOnly, Category = "Golem") TObjectPtr<AActor> SpawnedActor = nullptr;
 };

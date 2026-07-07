@@ -54,9 +54,9 @@ protected:
 	bool bAffectOnlyGliding = true; // If true, only gliding/diving players are lifted.
 
 	// === EXIT ===
-	// Gentle upward speed (cm/s) the player is capped to at the top, so they pop out without flying too high.
+	// Small upward pop (cm/s) given at the top so the player rises a few metres above the column. ~800 ≈ +3m. Not a catapult.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind|Boost", meta=(ClampMin="0.0", UIMin="0.0", UIMax="3000.0"))
-	float ExitBoostForce = 700.f;
+	float ExitBoostForce = 800.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Wind|Boost", meta=(ClampMin="0.0", UIMin="0.0", UIMax="300.0"))
 	float ExitTopMargin = 100.f; // Distance below the top within which the gentle exit cap kicks in.

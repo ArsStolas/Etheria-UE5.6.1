@@ -16,13 +16,28 @@
 #include "Characters/AI/Animations/AIAnimationComponent.h"
 #include "Characters/AI/Combat/AICombatComponent.h"
 #include "Characters/AI/Boss/GolemFallingRock.h"
+#include "Characters/AI/Boss/GolemCrystal.h"
+#include "Characters/AI/Boss/GolemBossCharacter.h"
 #include "Components/Characters/HealthComponent.h"
+#include "Components/Combat/CombatComponent.h"
+#include "UI/GolemBossBarWidget.h"
+#include "Blueprint/UserWidget.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraComponent.h"
+#include "Engine/Engine.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 #include "Engine/StaticMesh.h"
 
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/DamageType.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/DecalComponent.h"
 #include "Materials/MaterialInterface.h"
@@ -37,6 +52,30 @@
 
 namespace
 {
+
+	void ShatterCrystalActor(AActor* A)
+	{
+		if (AGolemCrystal* Cr = Cast<AGolemCrystal>(A)) Cr->Shatter();
+		else if (IsValid(A)) A->Destroy();
+	}
+
+	void ApplyBeamParams(UNiagaraComponent* C, const FGolemBeamSegment& B)
+	{
+		if (!C) return;
+		C->SetWorldLocation(B.Origin);
+		C->SetWorldRotation((B.End - B.Origin).Rotation());
+		const float Len = (B.End - B.Origin).Size();
+
+		static const TCHAR* StartNames[] = { TEXT("BeamStart"), TEXT("Start"), TEXT("StartPosition"), TEXT("StartLocation"), TEXT("Source"), TEXT("Origin") };
+		static const TCHAR* EndNames[]   = { TEXT("BeamEnd"),   TEXT("End"),   TEXT("EndPosition"),   TEXT("EndLocation"),   TEXT("Target"), TEXT("Destination") };
+		for (const TCHAR* N : StartNames) { C->SetVariableVec3(FName(N), B.Origin); C->SetVariablePosition(FName(N), B.Origin); }
+		for (const TCHAR* N : EndNames)   { C->SetVariableVec3(FName(N), B.End);    C->SetVariablePosition(FName(N), B.End); }
+		C->SetVariableFloat(FName(TEXT("BeamWidth")), B.Width);
+		C->SetVariableFloat(FName(TEXT("Width")), B.Width);
+		C->SetVariableFloat(FName(TEXT("BeamLength")), Len);
+		C->SetVariableFloat(FName(TEXT("Length")), Len);
+	}
+
 	float SegDist2D(const FVector& P, const FVector& A, const FVector& B)
 	{
 		const FVector p(P.X, P.Y, 0.f), a(A.X, A.Y, 0.f), b(B.X, B.Y, 0.f);
@@ -60,7 +99,10 @@ namespace
 UGolemBossComponent::UGolemBossComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-	PrimaryComponentTick.bStartWithTickEnabled = false; // tick is turned on only during a live moving hazard
+	PrimaryComponentTick.bStartWithTickEnabled = false;
+
+	ArenaCrystalActorClass = AGolemCrystal::StaticClass();
+	BigCrystalActorClass = AGolemCrystal::StaticClass();
 }
 
 void UGolemBossComponent::BeginPlay()
@@ -73,7 +115,11 @@ void UGolemBossComponent::BeginPlay()
 		OwnerHealth = OwnerCharacter->FindComponentByClass<UHealthComponent>();
 		OwnerCharacter->OnAIDied.AddDynamic(this, &UGolemBossComponent::HandleOwnerDied);
 		OwnerCharacter->OnAIDamaged.AddDynamic(this, &UGolemBossComponent::HandleOwnerDamaged);
+		if (OwnerHealth) OwnerHealth->OnHealthChanged.AddDynamic(this, &UGolemBossComponent::HandleBossHealthChanged);
 	}
+
+	OnGolemActivated.AddDynamic(this, &UGolemBossComponent::ShowBossUIAndMusic);
+	OnGolemDefeated.AddDynamic(this, &UGolemBossComponent::HideBossUIAndMusic);
 
 	AttackReadyTimes.Init(0.f, Attacks.Num());
 
@@ -82,11 +128,12 @@ void UGolemBossComponent::BeginPlay()
 		WP.CurrentHealth = WP.Health;
 		WP.bBroken = false;
 		WP.bVulnerable = false;
+		WP.CrystalHits = 0;
 	}
 
 	if (UWorld* W = GetWorld())
 		W->GetTimerManager().SetTimer(BrainTimerHandle, this, &UGolemBossComponent::BrainTick,
-			FMath::Max(0.02f, BrainInterval), /*bLoop=*/true, /*FirstDelay=*/0.1f);
+			FMath::Max(0.02f, BrainInterval), true, 0.1f);
 }
 
 void UGolemBossComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -105,7 +152,12 @@ void UGolemBossComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		OwnerCharacter->OnAIDied.RemoveDynamic(this, &UGolemBossComponent::HandleOwnerDied);
 		OwnerCharacter->OnAIDamaged.RemoveDynamic(this, &UGolemBossComponent::HandleOwnerDamaged);
 	}
+	if (OwnerHealth) OwnerHealth->OnHealthChanged.RemoveDynamic(this, &UGolemBossComponent::HandleBossHealthChanged);
+	HideBossUIAndMusic();
+	ClearBeamVFX();
 	ClearAirZones();
+	EndBigCrystal();
+	ClearArenaCrystals();
 	if (HeldRock) { HeldRock->Destroy(); HeldRock = nullptr; }
 	Super::EndPlay(EndPlayReason);
 }
@@ -113,20 +165,26 @@ void UGolemBossComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void UGolemBossComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	// Only ever enabled during a live hazard — drive the moving hazard frame-by-frame, nothing else.
+
 	if (OwnerCharacter && State == EGolemAttackState::Active)
 		TickActive(DeltaTime);
 }
 
-/* ═══════════ Brain (timer heartbeat) ═══════════ */
-
 void UGolemBossComponent::BrainTick()
 {
 	if (!OwnerCharacter) return;
+
+	if (AGolemBossCharacter* Golem = Cast<AGolemBossCharacter>(OwnerCharacter))
+		Golem->EnforceImmovable();
+
 	const UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
 
-	TickAirZones(BrainInterval);
+	const float Elapsed = (LastBrainTime >= 0.f) ? FMath::Max(Now - LastBrainTime, 0.f) : BrainInterval;
+	LastBrainTime = Now;
+
+	TickAirZones(Elapsed);
+	if (bActivated) TickContactRepulsion();
 
 	if (!bActivated)
 	{
@@ -138,14 +196,72 @@ void UGolemBossComponent::BrainTick()
 	}
 	else if (!OwnerCharacter->IsDead())
 	{
-		UpdatePhaseFromHealth();
-		if (State == EGolemAttackState::Idle && !bToppled) // a toppled boss neither faces nor attacks
+		AActor* WatchT = OwnerCharacter->GetCurrentTarget();
+		if (!WatchT || OwnerCharacter->IsTargetDeadOrInvalid(WatchT))
 		{
-			TickFacing(BrainInterval);
+			if (bHadTargetThisActivation && Now >= IntroEndTime)
+			{
+				if (TargetInvalidTime < 0.f) TargetInvalidTime = Now;
+				else if (Now - TargetInvalidTime > 3.f)
+				{
+					ResetEncounter();
+					return;
+				}
+			}
+		}
+		else
+		{
+			bHadTargetThisActivation = true;
+			TargetInvalidTime = -1.f;
+			const float ArenaR = GetArenaRadius();
+			if (ArenaR > 0.f && FVector::Dist2D(WatchT->GetActorLocation(), ResolveArenaCentre()) > ArenaR * 1.6f)
+			{
+				if (TargetOutOfArenaTime < 0.f) TargetOutOfArenaTime = Now;
+				else if (Now - TargetOutOfArenaTime > 8.f)
+				{
+					ResetEncounter();
+					return;
+				}
+			}
+			else TargetOutOfArenaTime = -1.f;
+		}
+
+		UpdatePhaseFromHealth();
+		if (State == EGolemAttackState::Windup && !bToppled)
+		{
+
+			TickWindupAim(Elapsed);
+		}
+		else if (State == EGolemAttackState::Idle && !bToppled && Now >= IntroEndTime)
+		{
+			TickFacing(Elapsed);
 			if (Now >= NextAttackReadyTime)
 			{
 				AActor* T = OwnerCharacter->GetCurrentTarget();
-				if ((T && !OwnerCharacter->IsTargetDeadOrInvalid(T)) || PendingForcedAttack >= 0)
+				const bool bHasTarget = (T && !OwnerCharacter->IsTargetDeadOrInvalid(T));
+
+				bool bFacingOK = true;
+				if (bFaceTarget && bHasTarget)
+				{
+					FVector To = T->GetActorLocation() - OwnerCharacter->GetActorLocation();
+					To.Z = 0.f;
+					if (!To.IsNearlyZero())
+					{
+						const float YawErr = FMath::Abs(FMath::FindDeltaAngleDegrees(
+							OwnerCharacter->GetActorRotation().Yaw, To.Rotation().Yaw));
+						bFacingOK = YawErr <= AttackFacingToleranceDeg;
+					}
+				}
+
+				bool bTargetInArena = true;
+				if (bHasTarget && PendingForcedAttack < 0)
+				{
+					const float ArenaR = GetArenaRadius();
+					if (ArenaR > 0.f)
+						bTargetInArena = FVector::Dist2D(T->GetActorLocation(), ResolveArenaCentre()) <= ArenaR * 1.1f;
+				}
+
+				if (bFacingOK && bTargetInArena && (bHasTarget || PendingForcedAttack >= 0))
 				{
 					const int32 Idx = SelectNextAttack();
 					if (Idx >= 0) BeginAttack(Idx);
@@ -157,7 +273,28 @@ void UGolemBossComponent::BrainTick()
 	if (bDrawDebugHazards) DrawLiveDebug(BrainInterval);
 }
 
-/* ═══════════ Activation ═══════════ */
+void UGolemBossComponent::TickWindupAim(float DeltaTime)
+{
+	if (!Attacks.IsValidIndex(CurrentAttackIndex) || !OwnerCharacter) return;
+	const FGolemAttackConfig& Cfg = Attacks[CurrentAttackIndex];
+
+	TickFacing(DeltaTime * 0.5f);
+
+	if (Cfg.TargetMode != EGolemTargetMode::AtTarget) return;
+	if (Cfg.Shape != EGolemHazardShape::RadialSlam && Cfg.Shape != EGolemHazardShape::ProjectileImpact) return;
+	if (Cfg.Shape == EGolemHazardShape::ProjectileImpact && bRockLaunched) return;
+	if (CurrentTelegraph.ImpactPoints.Num() == 0 || Cfg.WindupDuration <= 0.f) return;
+
+	UWorld* W = GetWorld();
+	if (!W) return;
+	const float Remaining = W->GetTimerManager().GetTimerRemaining(WindupTimerHandle);
+	if (Remaining < Cfg.WindupDuration * (1.f - FMath::Clamp(WindupAimTrackFraction, 0.f, 0.9f))) return;
+
+	const FVector NewPt = FMath::VInterpTo(CurrentTelegraph.ImpactPoints[0], ResolveTargetLocation(), DeltaTime, 4.f);
+	CurrentTelegraph.ImpactPoints[0] = NewPt;
+	if (TrackedTelegraphDecal.IsValid())
+		TrackedTelegraphDecal->SetWorldLocation(NewPt);
+}
 
 void UGolemBossComponent::ActivateBoss()
 {
@@ -166,7 +303,19 @@ void UGolemBossComponent::ActivateBoss()
 	CurrentPhase = 0;
 	const UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
-	NextAttackReadyTime = Now + FMath::FRandRange(0.4f, 0.4f + GlobalCooldownRandom);
+
+	float IntroDelay = FMath::Max(0.f, IntroDuration);
+	if (IntroMontage)
+	{
+		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+			Anim->PlayActionMontage(IntroMontage);
+		if (IntroDelay <= 0.f) IntroDelay = IntroMontage->GetPlayLength();
+	}
+	IntroEndTime = Now + IntroDelay;
+	NextAttackReadyTime = FMath::Max(IntroEndTime, Now + FMath::FRandRange(0.4f, 0.4f + GlobalCooldownRandom));
+	TargetInvalidTime = -1.f;
+	TargetOutOfArenaTime = -1.f;
+	bHadTargetThisActivation = false;
 
 	if (UAICombatComponent* Combat = OwnerCharacter->GetAICombat())
 		Combat->EnterCombat();
@@ -180,10 +329,58 @@ void UGolemBossComponent::DeactivateBoss()
 	ClearAirZones();
 	if (UAICombatComponent* Combat = OwnerCharacter ? OwnerCharacter->GetAICombat() : nullptr)
 		Combat->ExitCombat();
+	HideBossUIAndMusic();
 	bActivated = false;
+	PendingForcedAttack = -1;
+	TargetInvalidTime = -1.f;
+	TargetOutOfArenaTime = -1.f;
 }
 
-/* ═══════════ Scripted control ═══════════ */
+void UGolemBossComponent::ResetEncounter()
+{
+	if (OwnerCharacter)
+		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+			Anim->StopCurrentAction();
+	if (State != EGolemAttackState::Idle) FinishAttack(true);
+	if (bToppled) EndTopple();
+	ClearAirZones();
+	ClearArenaCrystals();
+	EndBigCrystal();
+
+	for (FGolemWeakPoint& WP : WeakPoints)
+	{
+		WP.CurrentHealth = WP.Health;
+		WP.bBroken = false;
+		WP.bVulnerable = false;
+		WP.CrystalHits = 0;
+	}
+
+	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(ExposeLingerTimerHandle);
+	ExposingAttackId = NAME_None;
+	for (float& T : AttackReadyTimes) T = 0.f;
+	LastAttackIndex = -1;
+
+	CurrentPhase = 0;
+	PendingForcedAttack = -1;
+	NextAttackReadyTime = 0.f;
+	IntroEndTime = 0.f;
+	TargetInvalidTime = -1.f;
+	TargetOutOfArenaTime = -1.f;
+	bHadTargetThisActivation = false;
+
+	if (OwnerCharacter)
+	{
+		if (UHealthComponent* HP = OwnerCharacter->FindComponentByClass<UHealthComponent>())
+			HP->Heal(HP->GetMaxHealth());
+		OwnerCharacter->ClearTarget();
+		if (UAICombatComponent* Combat = OwnerCharacter->GetAICombat())
+			Combat->ExitCombat();
+	}
+
+	HideBossUIAndMusic();
+	bActivated = false;
+	OnGolemEncounterReset.Broadcast();
+}
 
 bool UGolemBossComponent::ForceAttack(FName AttackId)
 {
@@ -224,7 +421,13 @@ void UGolemBossComponent::LaunchRockNow()
 	if (UWorld* W = GetWorld())
 	{
 		const float Rem = W->GetTimerManager().GetTimerRemaining(WindupTimerHandle);
-		if (Rem > 0.f) Travel = Rem; // land exactly when the strike fires
+		if (Rem > 0.f) Travel = Rem;
+
+		if (RockThrowTravelTime > 0.f)
+		{
+			Travel = RockThrowTravelTime;
+			W->GetTimerManager().SetTimer(WindupTimerHandle, this, &UGolemBossComponent::OnWindupElapsed, Travel, false);
+		}
 	}
 
 	FGolemProjectileLaunch L;
@@ -232,15 +435,19 @@ void UGolemBossComponent::LaunchRockNow()
 	L.Origin = Origin; L.Target = Target; L.TravelTime = Travel; L.Index = 0; L.Count = 1;
 	OnGolemProjectileLaunch.Broadcast(L);
 
+	AGolemFallingRock* Rock = nullptr;
 	if (HeldRock)
 	{
-		HeldRock->Launch(Origin, Target, Travel, RockThrowArcHeight); // detach from the hand and throw it
+		Rock = HeldRock;
 		HeldRock = nullptr;
+		Rock->Launch(Origin, Target, Travel, RockThrowArcHeight);
+		InFlightRocks.Add(Rock);
 	}
 	else
 	{
-		SpawnFallingRock(Origin, Target, Travel, RockThrowArcHeight); // BP-rock path / no held mesh
+		Rock = SpawnFallingRock(Origin, Target, Travel, RockThrowArcHeight);
 	}
+	ApplyRockImpactDecal(Rock, Target, Cfg.ImpactRadius, Travel + 0.4f);
 }
 
 void UGolemBossComponent::InterruptAttack()
@@ -251,8 +458,6 @@ void UGolemBossComponent::InterruptAttack()
 			Anim->StopCurrentAction();
 	FinishAttack(true);
 }
-
-/* ═══════════ Sequence (timer-driven) ═══════════ */
 
 void UGolemBossComponent::ClearSequenceTimers()
 {
@@ -280,6 +485,29 @@ void UGolemBossComponent::TickFacing(float DeltaTime)
 	OwnerCharacter->SetActorRotation(FRotator(Cur.Pitch, NewYaw, Cur.Roll));
 }
 
+void UGolemBossComponent::TickContactRepulsion()
+{
+	if (!bRepelOnContact || !OwnerCharacter || OwnerCharacter->IsDead()) return;
+	if (bToppled) return;
+
+	ACharacter* Player = Cast<ACharacter>(OwnerCharacter->GetCurrentTarget());
+	if (!Player) return;
+
+	FVector Out = Player->GetActorLocation() - OwnerCharacter->GetActorLocation();
+	Out.Z = 0.f;
+	const float Dist = Out.Size();
+	if (Dist <= 1.f || Dist >= RepulsionRadius) return;
+
+	const UWorld* W = GetWorld();
+	const float Now = W ? W->GetTimeSeconds() : 0.f;
+	if (Now < NextRepulsionTime) return;
+	NextRepulsionTime = Now + RepulsionInterval;
+
+	const FVector Dir = Out / Dist;
+	Player->LaunchCharacter(Dir * RepulsionForce + FVector(0.f, 0.f, RepulsionForce * 0.25f), true, false);
+	OnGolemRepelledPlayer.Broadcast(Player, Dir);
+}
+
 void UGolemBossComponent::BeginAttack(int32 Index)
 {
 	if (!Attacks.IsValidIndex(Index) || !OwnerCharacter) return;
@@ -289,29 +517,35 @@ void UGolemBossComponent::BeginAttack(int32 Index)
 	LastAttackIndex = Index;
 	State = EGolemAttackState::Windup;
 	DamageTickAccum = 0.f;
+	HazardVictimsThisAttack.Reset();
+	TrackedTelegraphDecal = nullptr;
 
 	BuildTelegraph(Cfg, CurrentTelegraph);
 	BombardImpactFired.Init(false, CurrentTelegraph.ImpactPoints.Num());
 	BombardLaunched.Init(false, CurrentTelegraph.ImpactPoints.Num());
 
-	if (Cfg.Montage)
+	UAnimMontage* MontageToPlay = Cfg.Montage;
+	if (Cfg.Shape == EGolemHazardShape::SweepLine)
+	{
+		const bool bTravelsRight = FVector::DotProduct(CurrentTelegraph.LineDirection, OwnerCharacter->GetActorRightVector()) >= 0.f;
+		UAnimMontage* DirMontage = bTravelsRight ? Cfg.SweepMontageLeftToRight : Cfg.SweepMontageRightToLeft;
+		if (DirMontage) MontageToPlay = DirMontage;
+	}
+	if (MontageToPlay)
 		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
-			Anim->PlayActionMontage(Cfg.Montage);
+			Anim->PlayActionMontage(MontageToPlay);
 
 	OnGolemAttackBegin.Broadcast(Cfg.AttackId, Cfg.Shape);
 	OnGolemTelegraph.Broadcast(CurrentTelegraph);
 
-	// Arm the wind-up timer FIRST so the rock-release path can read the time remaining until the strike.
 	if (Cfg.WindupDuration > 0.f)
 		if (UWorld* W = GetWorld())
 			W->GetTimerManager().SetTimer(WindupTimerHandle, this, &UGolemBossComponent::OnWindupElapsed, Cfg.WindupDuration, false);
 
-	// Thrown rock leaves the HAND at the release moment (RockReleaseTime, or an AnimNotify calling LaunchRockNow),
-	// then flies to the impact — landing exactly when the strike fires.
 	bRockLaunched = false;
 	if (Cfg.Shape == EGolemHazardShape::ProjectileImpact)
 	{
-		SpawnHeldRock(); // put the rock in the hand for the whole wind-up
+		SpawnHeldRock();
 		const float Release = FMath::Clamp(RockReleaseTime, 0.f, Cfg.WindupDuration);
 		if (Release <= 0.f)
 		{
@@ -323,13 +557,12 @@ void UGolemBossComponent::BeginAttack(int32 Index)
 		}
 	}
 
-	// Ground warning decals so players can read where attacks land before the final VFX exist.
 	if (bSpawnTelegraphDecals)
 	{
-		if (Cfg.Shape == EGolemHazardShape::RadialSlam || Cfg.Shape == EGolemHazardShape::ProjectileImpact)
+		if (Cfg.Shape == EGolemHazardShape::RadialSlam)
 		{
 			if (CurrentTelegraph.ImpactPoints.Num() > 0)
-				SpawnTelegraphDecal(CurrentTelegraph.ImpactPoints[0], Cfg.ImpactRadius, Cfg.WindupDuration + 0.4f);
+				TrackedTelegraphDecal = SpawnTelegraphDecal(CurrentTelegraph.ImpactPoints[0], Cfg.ImpactRadius, Cfg.WindupDuration + 0.4f);
 		}
 		else if (Cfg.Shape == EGolemHazardShape::GroundFissures)
 		{
@@ -339,7 +572,7 @@ void UGolemBossComponent::BeginAttack(int32 Index)
 
 	if (bDrawDebugHazards) DrawTelegraphDebug(CurrentTelegraph, FMath::Max(Cfg.WindupDuration, 0.05f));
 
-	if (Cfg.WindupDuration <= 0.f) OnWindupElapsed(); // zero wind-up: strike now, after the rock was set up above
+	if (Cfg.WindupDuration <= 0.f) OnWindupElapsed();
 }
 
 void UGolemBossComponent::OnWindupElapsed()
@@ -352,7 +585,6 @@ void UGolemBossComponent::EnterActive()
 	if (!Attacks.IsValidIndex(CurrentAttackIndex)) { FinishAttack(false); return; }
 	const FGolemAttackConfig& Cfg = Attacks[CurrentAttackIndex];
 
-	// Safety: if the throw's release never fired (release time > wind-up, missing notify), launch it now.
 	if (Cfg.Shape == EGolemHazardShape::ProjectileImpact && !bRockLaunched) LaunchRockNow();
 
 	State = EGolemAttackState::Active;
@@ -368,7 +600,6 @@ void UGolemBossComponent::EnterActive()
 
 	DoStrike();
 
-	// Arms slam down -> expose the arm crystals so the player can climb and break them.
 	if (Cfg.bExposesArmWeakPoints)
 	{
 		if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(ExposeLingerTimerHandle);
@@ -376,7 +607,7 @@ void UGolemBossComponent::EnterActive()
 	}
 
 	if (Cfg.ActiveDuration > 0.f)
-		SetComponentTickEnabled(true); // per-frame ONLY while the live hazard runs
+		SetComponentTickEnabled(true);
 	else
 		EnterRecovery();
 }
@@ -392,10 +623,10 @@ void UGolemBossComponent::TickActive(float DeltaTime)
 void UGolemBossComponent::EnterRecovery()
 {
 	SetComponentTickEnabled(false);
+	ClearBeamVFX();
 	if (!Attacks.IsValidIndex(CurrentAttackIndex)) { FinishAttack(false); return; }
 	const FGolemAttackConfig& Cfg = Attacks[CurrentAttackIndex];
 
-	// Flush any bombardment boulders the per-frame scheduler didn't reach (last index / low-FPS frame skips).
 	if (Cfg.Shape == EGolemHazardShape::Bombardment)
 	{
 		const int32 Num = CurrentTelegraph.ImpactPoints.Num();
@@ -403,7 +634,7 @@ void UGolemBossComponent::EnterRecovery()
 		{
 			if (BombardImpactFired.IsValidIndex(i) && BombardImpactFired[i]) continue;
 			const FVector P = CurrentTelegraph.ImpactPoints[i];
-			ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+			ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 			if (BombardImpactFired.IsValidIndex(i)) BombardImpactFired[i] = true;
 
 			FGolemStrikeEvent St;
@@ -437,8 +668,16 @@ void UGolemBossComponent::FinishAttack(bool bInterrupted)
 {
 	SetComponentTickEnabled(false);
 	ClearSequenceTimers();
+	ClearBeamVFX();
 
-	if (HeldRock) { HeldRock->Destroy(); HeldRock = nullptr; } // unreleased rock (attack interrupted mid-wind-up)
+	if (HeldRock) { HeldRock->Destroy(); HeldRock = nullptr; }
+
+	if (bInterrupted)
+	{
+		for (const TWeakObjectPtr<AActor>& R : InFlightRocks)
+			if (AActor* Rock = R.Get()) Rock->Destroy();
+	}
+	InFlightRocks.Reset();
 
 	const UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
@@ -450,7 +689,6 @@ void UGolemBossComponent::FinishAttack(bool bInterrupted)
 			AttackReadyTimes[CurrentAttackIndex] = Now + Cfg.Cooldown * GetPhaseCooldownScale();
 		OnGolemAttackEnd.Broadcast(Cfg.AttackId, bInterrupted);
 
-		// Keep the arm crystals reachable a little longer after the slam ends, then retract them.
 		if (Cfg.bExposesArmWeakPoints && ExposingAttackId == Cfg.AttackId && !bToppled)
 		{
 			if (WeakPointExposeLinger > 0.f)
@@ -472,8 +710,6 @@ void UGolemBossComponent::FinishAttack(bool bInterrupted)
 	BombardImpactFired.Reset();
 	BombardLaunched.Reset();
 }
-
-/* ═══════════ Selection ═══════════ */
 
 bool UGolemBossComponent::IsAttackUsable(int32 Index) const
 {
@@ -499,7 +735,7 @@ int32 UGolemBossComponent::FindAirZoneOpener() const
 	for (int32 i = 0; i < Attacks.Num(); ++i)
 		if (Attacks[i].bOpensAirZone && IsAttackUsable(i)) return i;
 	for (int32 i = 0; i < Attacks.Num(); ++i)
-		if (Attacks[i].bOpensAirZone) return i; // even on cooldown, so the unavoidable always gets its escape
+		if (Attacks[i].bOpensAirZone) return i;
 	return -1;
 }
 
@@ -507,7 +743,12 @@ int32 UGolemBossComponent::SelectNextAttack()
 {
 	auto MarkReady = [this](int32 i) { if (AttackReadyTimes.IsValidIndex(i)) AttackReadyTimes[i] = 0.f; };
 
-	auto WeightedPick = [this](bool bExcludeRequiresAirZone) -> int32
+	bool bTargetHoveringSafe = false;
+	if (OwnerCharacter)
+		if (AActor* Tgt = OwnerCharacter->GetCurrentTarget())
+			bTargetHoveringSafe = IsActorAirborne(Tgt) && IsLocationInAirZone(Tgt->GetActorLocation());
+
+	auto WeightedPick = [this, bTargetHoveringSafe](bool bExcludeRequiresAirZone) -> int32
 	{
 		float Total = 0.f;
 		TArray<TPair<int32, float>> Candidates;
@@ -515,9 +756,11 @@ int32 UGolemBossComponent::SelectNextAttack()
 		{
 			if (!IsAttackUsable(i)) continue;
 			if (bExcludeRequiresAirZone && Attacks[i].bRequiresAirZoneEscape) continue;
-			// Floor the anti-repeat penalty so the just-used move can never be eliminated entirely (anti-softlock).
+
 			float Wt = Attacks[i].SelectionWeight;
 			if (i == LastAttackIndex) Wt = FMath::Max(Wt * RepeatPenalty, KINDA_SMALL_NUMBER);
+			if (bTargetHoveringSafe)
+				Wt *= (Attacks[i].Shape == EGolemHazardShape::BeamSweep) ? 4.f : 0.2f;
 			if (Wt <= 0.f) continue;
 			Candidates.Add(TPair<int32, float>(i, Wt));
 			Total += Wt;
@@ -532,23 +775,27 @@ int32 UGolemBossComponent::SelectNextAttack()
 		return Candidates.Last().Key;
 	};
 
-	// 1) Forced attack (BP ForceAttack, or an unavoidable queued behind a rock-throw). Re-validate the air-zone guarantee.
+	auto HasEscapeFor = [this](const FGolemAttackConfig& Cfg) -> bool
+	{
+		return HasAirZoneWithTime(Cfg.WindupDuration + Cfg.ActiveDuration + 1.f);
+	};
+
 	if (PendingForcedAttack >= 0)
 	{
 		const int32 Forced = PendingForcedAttack;
 		PendingForcedAttack = -1;
 		if (Attacks.IsValidIndex(Forced))
 		{
-			if (Attacks[Forced].bRequiresAirZoneEscape && !HasActiveAirZone())
+			if (Attacks[Forced].bRequiresAirZoneEscape && !HasEscapeFor(Attacks[Forced]))
 			{
 				const int32 Opener = FindAirZoneOpener();
 				if (Opener >= 0)
 				{
 					MarkReady(Opener);
-					PendingForcedAttack = Forced; // re-queue behind a fresh opener
+					PendingForcedAttack = Forced;
 					return Opener;
 				}
-				// No opener at all -> fall through to a zone-free pick.
+
 			}
 			else
 			{
@@ -558,12 +805,10 @@ int32 UGolemBossComponent::SelectNextAttack()
 		}
 	}
 
-	// 2) Weighted-random pick among usable attacks.
 	const int32 Chosen = WeightedPick(false);
 	if (Chosen < 0) return -1;
 
-	// 3) Air-zone gating: an unavoidable ground attack runs only while a flight zone is open.
-	if (Attacks[Chosen].bRequiresAirZoneEscape && !HasActiveAirZone())
+	if (Attacks[Chosen].bRequiresAirZoneEscape && !HasEscapeFor(Attacks[Chosen]))
 	{
 		const int32 Opener = FindAirZoneOpener();
 		if (Opener >= 0)
@@ -573,13 +818,11 @@ int32 UGolemBossComponent::SelectNextAttack()
 			return Opener;
 		}
 		const int32 ZoneFree = WeightedPick(true);
-		return ZoneFree >= 0 ? ZoneFree : Chosen; // no opener & nothing zone-free -> fire the gated move (anti-softlock)
+		return ZoneFree >= 0 ? ZoneFree : Chosen;
 	}
 
 	return Chosen;
 }
-
-/* ═══════════ Telegraph / geometry ═══════════ */
 
 void UGolemBossComponent::BuildTelegraph(const FGolemAttackConfig& Cfg, FGolemTelegraph& Out)
 {
@@ -614,13 +857,15 @@ void UGolemBossComponent::BuildTelegraph(const FGolemAttackConfig& Cfg, FGolemTe
 	}
 	case EGolemHazardShape::SweepLine:
 	{
-		FVector TravelDir = ResolveTargetLocation() - Centre;
-		TravelDir.Z = 0.f;
-		TravelDir = TravelDir.GetSafeNormal();
-		if (TravelDir.IsNearlyZero()) TravelDir = YawRotate(FVector::ForwardVector, FMath::FRandRange(0.f, 360.f));
 
-		Out.LineDirection = TravelDir;
-		Out.LineCentre = Centre - TravelDir * Radius;
+		FVector Side = OwnerCharacter ? OwnerCharacter->GetActorRightVector() : FVector::RightVector;
+		Side.Z = 0.f;
+		Side = Side.GetSafeNormal();
+		if (Side.IsNearlyZero()) Side = FVector::RightVector;
+		if (FMath::RandBool()) Side = -Side;
+
+		Out.LineDirection = Side;
+		Out.LineCentre = Centre - Side * Radius;
 		Out.LineLength = Cfg.SweepLength;
 		Out.LineThickness = Cfg.SweepThickness;
 		break;
@@ -628,15 +873,22 @@ void UGolemBossComponent::BuildTelegraph(const FGolemAttackConfig& Cfg, FGolemTe
 	case EGolemHazardShape::GroundFissures:
 	{
 		const FVector Axis = YawRotate(FVector::ForwardVector, FMath::FRandRange(0.f, 360.f));
-		Out.ImpactPoints.Add(Centre + Axis * Radius);
-		Out.ImpactPoints.Add(Centre - Axis * Radius);
+
+		Out.ImpactPoints.Add(ProjectToGround(Centre + Axis * Radius));
+		Out.ImpactPoints.Add(ProjectToGround(Centre - Axis * Radius));
 		Out.ImpactRadii.Add(Cfg.ImpactRadius);
 		Out.ImpactRadii.Add(Cfg.ImpactRadius);
 		break;
 	}
 	case EGolemHazardShape::BeamSweep:
 	{
-		BuildBeams(Cfg, -Cfg.BeamSweepAngle * 0.5f, Out.Beams);
+		if (Cfg.bBeamRiseFromGround)
+		{
+			const FVector GolemLoc = OwnerCharacter ? OwnerCharacter->GetActorLocation() : ResolveArenaCentre();
+			BuildBeamsToPoint(Cfg, ProjectToGround(FMath::Lerp(GolemLoc, ResolveTargetLocation(), FMath::Clamp(Cfg.BeamSweepStartFraction, 0.f, 1.f))), Out.Beams);
+		}
+		else
+			BuildBeams(Cfg, -Cfg.BeamSweepAngle * 0.5f, Out.Beams);
 		break;
 	}
 	case EGolemHazardShape::Bombardment:
@@ -649,7 +901,7 @@ void UGolemBossComponent::BuildTelegraph(const FGolemAttackConfig& Cfg, FGolemTe
 		{
 			Out.ImpactPoints.Add(RandomArenaPoint(Cfg.BombardmentSpread));
 			Out.ImpactRadii.Add(Cfg.ImpactRadius);
-			// Land time = Lead..(<Window); each boulder gets `Lead` of fall, none lands exactly at Window (never skipped).
+
 			Out.ImpactDelays.Add(Lead + (static_cast<float>(i) / static_cast<float>(Count)) * Spread);
 		}
 		break;
@@ -674,42 +926,80 @@ void UGolemBossComponent::DoStrike()
 		OnGolemStrike.Broadcast(S);
 	};
 
+	TArray<FVector> SocketPts;
+	const bool bSockets = ResolveSocketPoints(Cfg, SocketPts);
+
 	switch (Cfg.Shape)
 	{
 	case EGolemHazardShape::RadialSlam:
 	case EGolemHazardShape::ProjectileImpact:
 	{
-		const FVector C = CurrentTelegraph.ImpactPoints.Num() > 0 ? CurrentTelegraph.ImpactPoints[0] : ResolveArenaCentre();
-		ApplyRadialBurst(C, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+		const FVector C = bSockets ? SocketPts[0]
+			: (CurrentTelegraph.ImpactPoints.Num() > 0 ? CurrentTelegraph.ImpactPoints[0] : ResolveArenaCentre());
+		ApplyRadialBurst(C, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 		Broadcast(C, Cfg.ImpactRadius, 0, 1);
 		if (bDrawDebugHazards) DrawImpactDebug(C, Cfg.ImpactRadius, Cfg.bAirborneIsSafe);
 		break;
 	}
 	case EGolemHazardShape::GroundFissures:
 	{
-		ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
+
+		if (bSockets) CurrentTelegraph.ImpactPoints = SocketPts;
+
+		for (FVector& P : CurrentTelegraph.ImpactPoints)
+			P = ProjectToGround(ClampToArena(P, ArenaCrystalEdgeMargin));
+		ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 		for (int32 i = 0; i < CurrentTelegraph.ImpactPoints.Num(); ++i)
 			Broadcast(CurrentTelegraph.ImpactPoints[i], Cfg.ImpactRadius, i, CurrentTelegraph.ImpactPoints.Num());
+		if (bSlamPlantsArenaCrystals) PlantArenaCrystals();
 		break;
 	}
 	case EGolemHazardShape::SweepLine:
-		Broadcast(CurrentTelegraph.LineCentre, CurrentTelegraph.LineThickness, 0, 1); // wall's initial slam edge
+		Broadcast(CurrentTelegraph.LineCentre, CurrentTelegraph.LineThickness, 0, 1);
 		break;
 	case EGolemHazardShape::BeamSweep:
 	{
+		if (Cfg.bBeamRiseFromGround)
+		{
+			const FVector Tgt = ResolveTargetLocation();
+			const FVector GolemLoc = OwnerCharacter ? OwnerCharacter->GetActorLocation() : ResolveArenaCentre();
+			BeamRiseGround = ProjectToGround(FMath::Lerp(GolemLoc, Tgt, FMath::Clamp(Cfg.BeamSweepStartFraction, 0.f, 1.f)));
+			BeamRiseHigh   = Tgt + FVector(0.f, 0.f, Cfg.BeamRiseExtraHeight);
+			BuildBeamsToPoint(Cfg, BeamRiseGround, CurrentTelegraph.Beams);
+		}
+		else
+		{
+			BuildBeams(Cfg, 0.f, CurrentTelegraph.Beams);
+		}
+		SpawnBeamVFX(Cfg, CurrentTelegraph.Beams);
+		SpawnBeamMesh(Cfg, CurrentTelegraph.Beams);
+
+		if (Cfg.BeamFireVFX)
+		{
+			if (Cfg.BeamFireVFXDelay > 0.f)
+			{
+				UNiagaraSystem* const Sys = Cfg.BeamFireVFX;
+				if (UWorld* W = GetWorld())
+					W->GetTimerManager().SetTimer(BeamFireVFXTimerHandle, [this, Sys]() { SpawnBeamFireVFX(Sys); }, Cfg.BeamFireVFXDelay, false);
+			}
+			else
+			{
+				SpawnBeamFireVFX(Cfg.BeamFireVFX);
+			}
+		}
 		const FVector Origin = CurrentTelegraph.Beams.Num() > 0 ? CurrentTelegraph.Beams[0].Origin : ResolveArenaCentre();
-		Broadcast(Origin, Cfg.BeamWidth, 0, 1); // laser fire moment
+		Broadcast(Origin, Cfg.BeamWidth, 0, 1);
 		break;
 	}
 	case EGolemHazardShape::Bombardment:
 	{
-		if (ActiveDurationCache <= KINDA_SMALL_NUMBER) // no active window to schedule across -> all at once
+		if (ActiveDurationCache <= KINDA_SMALL_NUMBER)
 		{
 			const int32 Num = CurrentTelegraph.ImpactPoints.Num();
 			for (int32 i = 0; i < Num; ++i)
 			{
 				const FVector P = CurrentTelegraph.ImpactPoints[i];
-				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 				if (BombardImpactFired.IsValidIndex(i)) BombardImpactFired[i] = true;
 				if (BombardLaunched.IsValidIndex(i)) BombardLaunched[i] = true;
 				Broadcast(P, Cfg.ImpactRadius, i, Num);
@@ -730,11 +1020,11 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	const float Alpha = bForceFinal ? 1.f : FMath::Clamp(1.f - ActiveTimer / Dur, 0.f, 1.f);
 	const float ElapsedActive = Dur - FMath::Max(ActiveTimer, 0.f);
 
-	const float Interval = FMath::Max(0.02f, Cfg.DamageInterval); // use-site clamp (UPROPERTY ClampMin is UI-only)
+	const float Interval = FMath::Max(0.02f, Cfg.DamageInterval);
 	DamageTickAccum += DeltaTime;
 	bool bDamageTick = false;
 	if (DamageTickAccum >= Interval) { bDamageTick = true; DamageTickAccum -= Interval; }
-	if (bForceFinal) bDamageTick = true; // always land a final pass at the end position
+	if (bForceFinal) bDamageTick = true;
 
 	FGolemHazardState S;
 	S.AttackId = Cfg.AttackId;
@@ -750,7 +1040,7 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 		const float Outer = Alpha * Cfg.ShockwaveMaxRadius;
 		const float Inner = FMath::Max(0.f, Outer - Cfg.ShockwaveThickness);
 		if (bDamageTick)
-			ApplyRingBurst(C, Inner, Outer, Cfg.ShockwaveDamage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId);
+			ApplyRingBurst(C, Inner, Outer, Cfg.ShockwaveDamage, true, Cfg.KnockbackForce, Cfg.AttackId);
 		S.RingRadius = Outer;
 #if ENABLE_DRAW_DEBUG
 		if (bDrawDebugHazards) DrawFlatCircle(GetWorld(), C, Outer, FColor::Orange, -1.f, 10.f);
@@ -760,9 +1050,9 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	case EGolemHazardShape::GroundFissures:
 	{
 		if (bDamageTick)
-			ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, /*bAirborneIsSafe=*/true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
+			ApplyRadialBurst(ResolveArenaCentre(), GetArenaRadius(), Cfg.Damage, true, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 #if ENABLE_DRAW_DEBUG
-		if (bDrawDebugHazards) DrawFlatCircle(GetWorld(), ResolveArenaCentre(), GetArenaRadius(), FColor::Red, -1.f, 8.f);
+		if (bDrawDebugHazards) DrawFlatCircle(GetWorld(), ProjectToGround(ResolveArenaCentre()), GetArenaRadius(), FColor::Red, -1.f, 8.f);
 #endif
 		break;
 	}
@@ -770,12 +1060,14 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	{
 		const FVector Dir = CurrentTelegraph.LineDirection;
 		const FVector Start = ResolveArenaCentre() - Dir * GetArenaRadius();
-		const FVector Cur = Start + Dir * (Alpha * 2.f * GetArenaRadius());
+
+		const FVector Cur = ProjectToGround(Start + Dir * (Alpha * 2.f * GetArenaRadius()));
 		const FVector Perp = YawRotate(Dir, 90.f);
 		const FVector A = Cur + Perp * (Cfg.SweepLength * 0.5f);
 		const FVector B = Cur - Perp * (Cfg.SweepLength * 0.5f);
 		if (bDamageTick)
-			ApplyLineDamage(A, B, Cfg.SweepThickness, Cfg.Damage, /*bAirborneIsSafe=*/true, /*b3D=*/false, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
+
+			ApplyLineDamageOncePerVictim(A, B, Cfg.SweepThickness, Cfg.Damage, true, false, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude, Dir);
 		S.LineCentre = Cur;
 		S.LineDirection = Dir;
 #if ENABLE_DRAW_DEBUG
@@ -785,11 +1077,27 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 	}
 	case EGolemHazardShape::BeamSweep:
 	{
-		const float Rotate = FMath::Lerp(-Cfg.BeamSweepAngle * 0.5f, Cfg.BeamSweepAngle * 0.5f, Alpha);
-		BuildBeams(Cfg, Rotate, S.Beams);
+		if (Cfg.bBeamRiseFromGround)
+		{
+
+			const float Hold = FMath::Clamp(Cfg.BeamRiseHoldFraction, 0.f, 0.95f);
+			const float RiseAlpha = (Alpha <= Hold) ? 0.f : (Alpha - Hold) / FMath::Max(0.01f, 1.f - Hold);
+			BuildBeamsToPoint(Cfg, FMath::Lerp(BeamRiseGround, BeamRiseHigh, RiseAlpha), S.Beams);
+		}
+		else if (Cfg.BeamSweepAngle > KINDA_SMALL_NUMBER)
+		{
+			const float Rotate = FMath::Lerp(-Cfg.BeamSweepAngle * 0.5f, Cfg.BeamSweepAngle * 0.5f, Alpha);
+			BuildBeams(Cfg, Rotate, S.Beams);
+		}
+		else
+		{
+			S.Beams = CurrentTelegraph.Beams;
+		}
+		UpdateBeamVFX(S.Beams);
+		UpdateBeamMesh(S.Beams);
 		if (bDamageTick)
 			for (const FGolemBeamSegment& Beam : S.Beams)
-				ApplyLineDamage(Beam.Origin, Beam.End, Cfg.BeamWidth, Cfg.Damage, /*bAirborneIsSafe=*/false, /*b3D=*/true, Cfg.KnockbackForce, Cfg.AttackId);
+				ApplyLineDamage(Beam.Origin, Beam.End, Cfg.BeamWidth, Cfg.Damage, false, true, Cfg.KnockbackForce, Cfg.AttackId);
 #if ENABLE_DRAW_DEBUG
 		if (bDrawDebugHazards)
 			for (const FGolemBeamSegment& Beam : S.Beams)
@@ -806,7 +1114,6 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 			const float Lead = FMath::Clamp(Cfg.BombardmentWarnLead, 0.f, When);
 			const FVector P = CurrentTelegraph.ImpactPoints[i];
 
-			// Launch (fall start): spawn the boulder above its target so it lands on the strike.
 			if (BombardLaunched.IsValidIndex(i) && !BombardLaunched[i] && ElapsedActive >= (When - Lead))
 			{
 				BombardLaunched[i] = true;
@@ -817,16 +1124,14 @@ void UGolemBossComponent::TickHazard(float DeltaTime, bool bForceFinal)
 				L.TravelTime = FMath::Max(Lead, 0.05f);
 				L.Index = i; L.Count = Num;
 				OnGolemProjectileLaunch.Broadcast(L);
-				SpawnFallingRock(L.Origin, L.Target, L.TravelTime, 0.f); // straight fall
-
-				if (bSpawnTelegraphDecals) SpawnTelegraphDecal(P, Cfg.ImpactRadius, FMath::Max(Lead, 0.1f) + 0.3f);
+				AGolemFallingRock* Rock = SpawnFallingRock(L.Origin, L.Target, L.TravelTime, 0.f);
+				ApplyRockImpactDecal(Rock, P, Cfg.ImpactRadius, FMath::Max(Lead, 0.1f) + 0.3f);
 			}
 
-			// Impact.
 			if (BombardImpactFired.IsValidIndex(i) && !BombardImpactFired[i] && ElapsedActive >= When)
 			{
 				BombardImpactFired[i] = true;
-				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId);
+				ApplyRadialBurst(P, Cfg.ImpactRadius, Cfg.Damage, Cfg.bAirborneIsSafe, Cfg.KnockbackForce, Cfg.AttackId, Cfg.MinSafeAltitude);
 
 				FGolemStrikeEvent St;
 				St.AttackId = Cfg.AttackId; St.Shape = Cfg.Shape; St.Location = P;
@@ -867,48 +1172,58 @@ FVector UGolemBossComponent::GetThrowOrigin() const
 	return ResolveArenaCentre();
 }
 
-void UGolemBossComponent::SpawnTelegraphDecal(const FVector& Location, float RadiusXY, float LifeSpan) const
+UDecalComponent* UGolemBossComponent::SpawnTelegraphDecal(const FVector& Location, float RadiusXY, float LifeSpan) const
 {
-	if (!TelegraphDecalMaterial || RadiusXY <= 0.f) return;
+	if (!TelegraphDecalMaterial || RadiusXY <= 0.f) return nullptr;
 	UWorld* W = GetWorld();
-	if (!W) return;
+	if (!W) return nullptr;
 
-	// Box projecting straight down onto the floor (matches the project's ground-decal convention).
 	const FVector DecalSize(DecalProjectionDepth, RadiusXY, RadiusXY);
-	UGameplayStatics::SpawnDecalAtLocation(W, TelegraphDecalMaterial, DecalSize, Location, FRotator(-90.f, 0.f, 0.f), FMath::Max(LifeSpan, 0.1f));
+	return UGameplayStatics::SpawnDecalAtLocation(W, TelegraphDecalMaterial, DecalSize, Location, FRotator(-90.f, 0.f, 0.f), FMath::Max(LifeSpan, 0.1f));
 }
 
-void UGolemBossComponent::SpawnFallingRock(const FVector& Origin, const FVector& Target, float TravelTime, float ArcHeight)
+AGolemFallingRock* UGolemBossComponent::SpawnFallingRock(const FVector& Origin, const FVector& Target, float TravelTime, float ArcHeight)
 {
-	if (!bSpawnRockMeshes) return;
+	if (!bSpawnRockMeshes) return nullptr;
 	UWorld* W = GetWorld();
-	if (!W) return;
+	if (!W) return nullptr;
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	SpawnParams.Owner = OwnerCharacter;
 
-	if (RockActorClass) // advanced: designer's own rock actor handles its own movement
+	if (RockActorClass)
 	{
-		W->SpawnActor<AActor>(RockActorClass, Origin, (Target - Origin).Rotation(), SpawnParams);
-		return;
+		if (AActor* Spawned = W->SpawnActor<AActor>(RockActorClass, Origin, (Target - Origin).Rotation(), SpawnParams))
+			InFlightRocks.Add(Spawned);
+		return nullptr;
 	}
 
-	if (RockMeshes.Num() == 0) return;
-	UStaticMesh* Mesh = RockMeshes[FMath::RandRange(0, RockMeshes.Num() - 1)]; // each rock picks one at random
-	if (!Mesh) return;
+	if (RockMeshes.Num() == 0) return nullptr;
+	UStaticMesh* Mesh = RockMeshes[FMath::RandRange(0, RockMeshes.Num() - 1)];
+	if (!Mesh) return nullptr;
 
-	if (AGolemFallingRock* Rock = W->SpawnActor<AGolemFallingRock>(AGolemFallingRock::StaticClass(), Origin, FRotator::ZeroRotator, SpawnParams))
+	AGolemFallingRock* Rock = W->SpawnActor<AGolemFallingRock>(AGolemFallingRock::StaticClass(), Origin, FRotator::ZeroRotator, SpawnParams);
+	if (Rock)
 	{
 		Rock->Configure(Mesh, RockMeshScale, RockSpinSpeed);
 		Rock->Launch(Origin, Target, TravelTime, ArcHeight);
+		InFlightRocks.Add(Rock);
 	}
+	return Rock;
+}
+
+void UGolemBossComponent::ApplyRockImpactDecal(AGolemFallingRock* Rock, const FVector& Target, float Radius, float StaticLifeSpan)
+{
+	if (!bSpawnTelegraphDecals || !TelegraphDecalMaterial || Radius <= 0.f) return;
+	if (Rock) Rock->SetImpactDecal(TelegraphDecalMaterial, Radius, DecalProjectionDepth);
+	else SpawnTelegraphDecal(Target, Radius, StaticLifeSpan);
 }
 
 void UGolemBossComponent::SpawnHeldRock()
 {
 	HeldRock = nullptr;
-	if (!bSpawnRockMeshes || RockActorClass) return; // BP-rock path or off: the rock is spawned at release instead
+	if (!bSpawnRockMeshes || RockActorClass) return;
 	if (RockMeshes.Num() == 0 || !OwnerCharacter) return;
 
 	USkeletalMeshComponent* OwnerMesh = OwnerCharacter->GetMesh();
@@ -925,7 +1240,6 @@ void UGolemBossComponent::SpawnHeldRock()
 	AGolemFallingRock* Rock = W->SpawnActor<AGolemFallingRock>(AGolemFallingRock::StaticClass(), GetThrowOrigin(), FRotator::ZeroRotator, SpawnParams);
 	if (!Rock) return;
 
-	// Held in the hand: follows the throw anim until LaunchRockNow detaches and throws it.
 	Rock->Configure(Mesh, RockMeshScale, RockSpinSpeed);
 	Rock->AttachToComponent(OwnerMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, ThrowSocketName);
 	HeldRock = Rock;
@@ -942,7 +1256,7 @@ void UGolemBossComponent::BuildBeams(const FGolemAttackConfig& Cfg, float Rotate
 	for (int32 i = 0; i < Count; ++i)
 	{
 		const FVector Origin = Eyes[i % Eyes.Num()];
-		FVector Base = ResolveArenaCentre() - Origin;
+		FVector Base = ResolveTargetLocation() - Origin;
 		if (Base.IsNearlyZero()) Base = OwnerCharacter ? OwnerCharacter->GetActorForwardVector() : FVector::ForwardVector;
 		Base = Base.GetSafeNormal();
 
@@ -955,11 +1269,136 @@ void UGolemBossComponent::BuildBeams(const FGolemAttackConfig& Cfg, float Rotate
 		Beam.Direction = Dir;
 		Beam.Length = Cfg.BeamLength;
 		Beam.End = Origin + Dir * Cfg.BeamLength;
+		Beam.Width = Cfg.BeamWidth;
 		Out.Add(Beam);
 	}
 }
 
-/* ═══════════ Arena helpers ═══════════ */
+void UGolemBossComponent::BuildBeamsToPoint(const FGolemAttackConfig& Cfg, const FVector& EndPoint, TArray<FGolemBeamSegment>& Out) const
+{
+	Out.Reset();
+	TArray<FVector> Eyes;
+	GetEyeOrigins(Eyes);
+	if (Eyes.Num() == 0) return;
+
+	const int32 Count = FMath::Max(1, Cfg.BeamCount);
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FVector Origin = Eyes[i % Eyes.Num()];
+		FVector Dir = (EndPoint - Origin).GetSafeNormal();
+		if (Dir.IsNearlyZero()) Dir = OwnerCharacter ? OwnerCharacter->GetActorForwardVector() : FVector::ForwardVector;
+
+		FGolemBeamSegment Beam;
+		Beam.Origin = Origin;
+		Beam.Direction = Dir;
+		Beam.End = EndPoint;
+		Beam.Length = (EndPoint - Origin).Size();
+		Beam.Width = Cfg.BeamWidth;
+		Out.Add(Beam);
+	}
+}
+
+void UGolemBossComponent::SpawnBeamVFX(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams)
+{
+	ClearBeamVFX();
+	UWorld* const W = GetWorld();
+	if (!Cfg.BeamVFX || !W) return;
+
+	for (const FGolemBeamSegment& B : Beams)
+	{
+		UNiagaraComponent* Comp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			W, Cfg.BeamVFX, B.Origin, B.Direction.Rotation(), FVector(1.f), false, true);
+		if (!Comp) continue;
+		ApplyBeamParams(Comp, B);
+		BeamVFXComps.Add(Comp);
+	}
+}
+
+void UGolemBossComponent::UpdateBeamVFX(const TArray<FGolemBeamSegment>& Beams)
+{
+	const int32 N = FMath::Min(BeamVFXComps.Num(), Beams.Num());
+	for (int32 i = 0; i < N; ++i)
+	{
+		UNiagaraComponent* Comp = BeamVFXComps[i];
+		if (!IsValid(Comp)) continue;
+		ApplyBeamParams(Comp, Beams[i]);
+	}
+}
+
+void UGolemBossComponent::ClearBeamVFX()
+{
+	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(BeamFireVFXTimerHandle);
+	for (UNiagaraComponent* Comp : BeamVFXComps)
+		if (IsValid(Comp)) { Comp->Deactivate(); Comp->DestroyComponent(); }
+	BeamVFXComps.Reset();
+	ClearBeamMesh();
+}
+
+void UGolemBossComponent::SpawnBeamFireVFX(UNiagaraSystem* System)
+{
+	if (!System) return;
+
+	UNiagaraComponent* FireFX = nullptr;
+	if (APawn* P = UGameplayStatics::GetPlayerPawn(this, 0))
+		if (UCameraComponent* CamComp = P->FindComponentByClass<UCameraComponent>())
+			FireFX = UNiagaraFunctionLibrary::SpawnSystemAttached(System, CamComp, NAME_None,
+				FVector(120.f, 0.f, 0.f), FRotator::ZeroRotator, EAttachLocation::SnapToTarget, true);
+	if (!FireFX)
+		if (APlayerCameraManager* Cam = UGameplayStatics::GetPlayerCameraManager(this, 0))
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), System,
+				Cam->GetCameraLocation() + Cam->GetCameraRotation().Vector() * 120.f, Cam->GetCameraRotation(), FVector(1.f), true, true);
+}
+
+void UGolemBossComponent::SpawnBeamMesh(const FGolemAttackConfig& Cfg, const TArray<FGolemBeamSegment>& Beams)
+{
+	ClearBeamMesh();
+	if (!Cfg.bUseMeshBeam || !OwnerCharacter) return;
+
+	UStaticMesh* Mesh = Cfg.BeamMesh ? Cfg.BeamMesh.Get() : LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!Mesh) return;
+
+	for (int32 i = 0; i < Beams.Num(); ++i)
+	{
+		UStaticMeshComponent* MC = NewObject<UStaticMeshComponent>(OwnerCharacter);
+		if (!MC) continue;
+		MC->SetStaticMesh(Mesh);
+		if (Cfg.BeamMeshMaterial) MC->SetMaterial(0, Cfg.BeamMeshMaterial);
+		MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		MC->SetCastShadow(false);
+		MC->RegisterComponent();
+		BeamMeshComps.Add(MC);
+	}
+	UpdateBeamMesh(Beams);
+}
+
+void UGolemBossComponent::UpdateBeamMesh(const TArray<FGolemBeamSegment>& Beams)
+{
+	const int32 N = FMath::Min(BeamMeshComps.Num(), Beams.Num());
+	for (int32 i = 0; i < N; ++i)
+	{
+		UStaticMeshComponent* MC = BeamMeshComps[i];
+		if (!IsValid(MC)) continue;
+
+		const FVector Origin = Beams[i].Origin;
+		const FVector End = Beams[i].End;
+		const float Length = (End - Origin).Size();
+
+		const FVector MeshSize = MC->GetStaticMesh() ? MC->GetStaticMesh()->GetBoundingBox().GetSize() : FVector(100.f);
+		const float SX = MeshSize.X > 1.f ? Length / MeshSize.X : Length;
+		const float SYZ = MeshSize.Y > 1.f ? (Beams[i].Width * 2.f) / MeshSize.Y : (Beams[i].Width * 2.f);
+
+		MC->SetWorldLocation((Origin + End) * 0.5f);
+		MC->SetWorldRotation((End - Origin).Rotation());
+		MC->SetWorldScale3D(FVector(SX, SYZ, SYZ));
+	}
+}
+
+void UGolemBossComponent::ClearBeamMesh()
+{
+	for (UStaticMeshComponent* MC : BeamMeshComps)
+		if (IsValid(MC)) MC->DestroyComponent();
+	BeamMeshComps.Reset();
+}
 
 FVector UGolemBossComponent::GetArenaCentre_Implementation() const
 {
@@ -1006,7 +1445,48 @@ FVector UGolemBossComponent::RandomArenaPoint(float SpreadFraction) const
 	return FVector(C.X + FMath::Cos(Ang) * Rad, C.Y + FMath::Sin(Ang) * Rad, C.Z);
 }
 
-/* ═══════════ Damage core ═══════════ */
+FVector UGolemBossComponent::ProjectToGround(const FVector& P) const
+{
+	const UWorld* W = GetWorld();
+	if (!W) return P;
+
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GolemGround), false, OwnerCharacter);
+
+	auto TraceFloor = [&](const FVector& At, float& OutZ) -> bool
+	{
+		const FVector Start = At + FVector(0.f, 0.f, 20000.f);
+		const FVector End   = At - FVector(0.f, 0.f, 20000.f);
+		FHitResult Hit;
+		if (W->LineTraceSingleByObjectType(Hit, Start, End, ObjParams, Params)) { OutZ = Hit.ImpactPoint.Z; return true; }
+		if (W->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params)) { OutZ = Hit.ImpactPoint.Z; return true; }
+		return false;
+	};
+
+	float Z = 0.f;
+	if (TraceFloor(P, Z))                 return FVector(P.X, P.Y, Z);
+	if (TraceFloor(GetArenaCentre(), Z))  return FVector(P.X, P.Y, Z);
+	return P;
+}
+
+bool UGolemBossComponent::ResolveSocketPoints(const FGolemAttackConfig& Cfg, TArray<FVector>& Out) const
+{
+	Out.Reset();
+	if (Cfg.ImpactSocketNames.Num() == 0 || !OwnerCharacter) return false;
+
+	const USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+	if (!Mesh) return false;
+
+	for (const FName& S : Cfg.ImpactSocketNames)
+	{
+		if (S.IsNone()) continue;
+		if (!Mesh->DoesSocketExist(S) && Mesh->GetBoneIndex(S) == INDEX_NONE) continue;
+		Out.Add(ProjectToGround(Mesh->GetSocketLocation(S)));
+	}
+	return Out.Num() > 0;
+}
 
 void UGolemBossComponent::GatherTargets(FVector Center, float Radius, TArray<AActor*>& Out) const
 {
@@ -1042,12 +1522,18 @@ float UGolemBossComponent::CurrentDamageScale() const
 	return Phases.IsValidIndex(CurrentPhase) ? Phases[CurrentPhase].DamageScale : 1.f;
 }
 
-void UGolemBossComponent::DealDamage(AActor* Victim, float Damage, FVector FromLocation, float Knockback, FName AttackId)
+void UGolemBossComponent::DealDamage(AActor* Victim, float Damage, FVector FromLocation, float Knockback, FName AttackId, FVector KnockbackDirOverride)
 {
 	if (!Victim || !OwnerCharacter || Damage <= 0.f) return;
 
-	const float Final = Damage * CurrentDamageScale();
-	FVector Dir = Victim->GetActorLocation() - FromLocation;
+	float Final = Damage * CurrentDamageScale();
+
+	bool bNegated = false;
+	if (UCombatComponent* VictimCombat = Victim->FindComponentByClass<UCombatComponent>())
+		Final = VictimCombat->MitigateIncomingDamage(Final, OwnerCharacter, bNegated);
+	if (bNegated) return;
+
+	FVector Dir = KnockbackDirOverride.IsNearlyZero() ? (Victim->GetActorLocation() - FromLocation) : KnockbackDirOverride;
 	Dir.Z = 0.f;
 	Dir = Dir.GetSafeNormal();
 	if (Dir.IsNearlyZero()) Dir = OwnerCharacter->GetActorForwardVector();
@@ -1062,17 +1548,32 @@ void UGolemBossComponent::DealDamage(AActor* Victim, float Damage, FVector FromL
 	OnGolemDamageDealt.Broadcast(Victim, Final, AttackId, Victim->GetActorLocation());
 }
 
+void UGolemBossComponent::DealDamageToBoss(float Amount, AActor* Instigator)
+{
+	if (Amount <= 0.f || !OwnerHealth) return;
+
+	if (State == EGolemAttackState::Recovery && RecoveryDamageTakenMultiplier > 1.f)
+		Amount *= RecoveryDamageTakenMultiplier;
+
+	const bool bWasInvuln = OwnerHealth->IsInvulnerable();
+	OwnerHealth->SetInvulnerable(false);
+	OwnerHealth->TakeDamage(Amount);
+	OwnerHealth->SetInvulnerable(bWasInvuln);
+
+	if (Instigator && OwnerCharacter) OwnerCharacter->AddThreat(Instigator, Amount);
+}
+
 int32 UGolemBossComponent::ApplyRadialBurst(FVector Center, float Radius, float Damage, bool bAirborneIsSafe, float Knockback, FName AttackId, float MinSafeAltitude)
 {
 	TArray<AActor*> Targets;
 	GatherTargets(Center, Radius, Targets);
-	const float FloorZ = GetArenaCentre().Z;
+	const float FloorZ = ProjectToGround(GetArenaCentre()).Z;
 	int32 Hits = 0;
 	for (AActor* A : Targets)
 	{
 		if (FVector::DistSquared2D(A->GetActorLocation(), Center) > Radius * Radius) continue;
 		const bool bSafe = (MinSafeAltitude > 0.f)
-			? ((A->GetActorLocation().Z - FloorZ) >= MinSafeAltitude) // must FLY this high (air zone), not just jump
+			? ((A->GetActorLocation().Z - FloorZ) >= MinSafeAltitude)
 			: (bAirborneIsSafe && IsActorAirborne(A));
 		if (bSafe) continue;
 		DealDamage(A, Damage, Center, Knockback, AttackId);
@@ -1099,32 +1600,56 @@ int32 UGolemBossComponent::ApplyRingBurst(FVector Center, float InnerRadius, flo
 	return Hits;
 }
 
-int32 UGolemBossComponent::ApplyLineDamage(FVector A, FVector B, float HalfWidth, float Damage, bool bAirborneIsSafe, bool b3D, float Knockback, FName AttackId, float MinSafeAltitude)
+int32 UGolemBossComponent::ApplyLineDamage(FVector A, FVector B, float HalfWidth, float Damage, bool bAirborneIsSafe, bool b3D, float Knockback, FName AttackId, float MinSafeAltitude, FVector KnockbackDir)
 {
 	const FVector Mid = (A + B) * 0.5f;
 	const float GatherRadius = (FVector::Dist(A, B) * 0.5f) + HalfWidth + 50.f;
 	TArray<AActor*> Targets;
 	GatherTargets(Mid, GatherRadius, Targets);
 
-	const float FloorZ = GetArenaCentre().Z;
+	const float FloorZ = ProjectToGround(GetArenaCentre()).Z;
 	int32 Hits = 0;
 	for (AActor* Actor : Targets)
 	{
 		const FVector Loc = Actor->GetActorLocation();
 		const float D = b3D ? FMath::PointDistToSegment(Loc, A, B) : SegDist2D(Loc, A, B);
 		if (D > HalfWidth) continue;
-		// MinSafeAltitude > 0: only flying THAT high (an air zone) is safe — a plain jump can't clear it.
+
 		const bool bSafe = (MinSafeAltitude > 0.f)
 			? ((Loc.Z - FloorZ) >= MinSafeAltitude)
 			: (bAirborneIsSafe && IsActorAirborne(Actor));
 		if (bSafe) continue;
-		DealDamage(Actor, Damage, Loc, Knockback, AttackId);
+		DealDamage(Actor, Damage, Loc, Knockback, AttackId, KnockbackDir);
 		++Hits;
 	}
 	return Hits;
 }
 
-/* ═══════════ Air zones ═══════════ */
+int32 UGolemBossComponent::ApplyLineDamageOncePerVictim(FVector A, FVector B, float HalfWidth, float Damage, bool bAirborneIsSafe, bool b3D, float Knockback, FName AttackId, float MinSafeAltitude, FVector KnockbackDir)
+{
+	const FVector Mid = (A + B) * 0.5f;
+	const float GatherRadius = (FVector::Dist(A, B) * 0.5f) + HalfWidth + 50.f;
+	TArray<AActor*> Targets;
+	GatherTargets(Mid, GatherRadius, Targets);
+
+	const float FloorZ = ProjectToGround(GetArenaCentre()).Z;
+	int32 Hits = 0;
+	for (AActor* Actor : Targets)
+	{
+		if (HazardVictimsThisAttack.Contains(Actor)) continue;
+		const FVector Loc = Actor->GetActorLocation();
+		const float D = b3D ? FMath::PointDistToSegment(Loc, A, B) : SegDist2D(Loc, A, B);
+		if (D > HalfWidth) continue;
+		const bool bSafe = (MinSafeAltitude > 0.f)
+			? ((Loc.Z - FloorZ) >= MinSafeAltitude)
+			: (bAirborneIsSafe && IsActorAirborne(Actor));
+		if (bSafe) continue;
+		HazardVictimsThisAttack.Add(Actor);
+		DealDamage(Actor, Damage, Loc, Knockback, AttackId, KnockbackDir);
+		++Hits;
+	}
+	return Hits;
+}
 
 void UGolemBossComponent::OpenAirZone(FVector Location, float Radius, float Lifetime)
 {
@@ -1136,7 +1661,6 @@ void UGolemBossComponent::OpenAirZone(FVector Location, float Radius, float Life
 	Zone.Radius = Radius;
 	Zone.TimeRemaining = Lifetime;
 
-	// Reuse the project's existing glider air-zone (AWindColumn) — spawn it, don't reinvent it.
 	if (AirZoneActorClass && GetWorld())
 	{
 		FActorSpawnParameters SpawnParams;
@@ -1151,7 +1675,7 @@ void UGolemBossComponent::OpenAirZone(FVector Location, float Radius, float Life
 
 void UGolemBossComponent::ClearAirZones()
 {
-	// Drain first, broadcast after — a bound BP handler could re-enter and mutate ActiveAirZones mid-loop.
+
 	TArray<TPair<int32, FVector>> Closed;
 	for (int32 i = ActiveAirZones.Num() - 1; i >= 0; --i)
 	{
@@ -1188,11 +1712,19 @@ bool UGolemBossComponent::IsLocationInAirZone(FVector Location) const
 	return false;
 }
 
-/* ═══════════ Phases ═══════════ */
+bool UGolemBossComponent::HasAirZoneWithTime(float RequiredSeconds) const
+{
+	for (const FGolemAirZone& Z : ActiveAirZones)
+		if (Z.TimeRemaining >= RequiredSeconds)
+			return true;
+	return false;
+}
 
 void UGolemBossComponent::UpdatePhaseFromHealth()
 {
 	if (Phases.Num() == 0) return;
+
+	if (bToppled) return;
 
 	float Frac = 1.f;
 	if (OwnerHealth)
@@ -1201,7 +1733,7 @@ void UGolemBossComponent::UpdatePhaseFromHealth()
 		if (Max > 0.f) Frac = FMath::Clamp(OwnerHealth->GetHealth() / Max, 0.f, 1.f);
 	}
 
-	int32 Best = CurrentPhase; // forward-only (never revert on heal)
+	int32 Best = CurrentPhase;
 	for (int32 i = 0; i < Phases.Num(); ++i)
 		if (Frac <= Phases[i].HealthThreshold && i > Best)
 			Best = i;
@@ -1210,7 +1742,32 @@ void UGolemBossComponent::UpdatePhaseFromHealth()
 	{
 		const int32 Old = CurrentPhase;
 		CurrentPhase = Best;
-		OnGolemPhaseChanged.Broadcast(Old, CurrentPhase, Phases[CurrentPhase].PhaseName);
+		const FGolemPhaseConfig& Phase = Phases[CurrentPhase];
+
+		if (State != EGolemAttackState::Idle)
+		{
+			if (OwnerCharacter)
+				if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+					Anim->StopCurrentAction();
+			FinishAttack(true);
+		}
+
+		float TransitionDelay = FMath::Max(Phase.TransitionPause, 0.f);
+		if (Phase.TransitionMontage && OwnerCharacter)
+		{
+			if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
+				if (Anim->PlayActionMontage(Phase.TransitionMontage))
+					TransitionDelay += Phase.TransitionMontage->GetPlayLength();
+		}
+
+		const UWorld* W = GetWorld();
+		const float Now = W ? W->GetTimeSeconds() : 0.f;
+		NextAttackReadyTime = FMath::Max(NextAttackReadyTime, Now + TransitionDelay);
+
+		if (Phase.ForcedOpenerAttackId != NAME_None)
+			ForceAttack(Phase.ForcedOpenerAttackId);
+
+		OnGolemPhaseChanged.Broadcast(Old, CurrentPhase, Phase.PhaseName);
 	}
 }
 
@@ -1218,8 +1775,6 @@ float UGolemBossComponent::GetPhaseCooldownScale() const
 {
 	return Phases.IsValidIndex(CurrentPhase) ? Phases[CurrentPhase].CooldownScale : 1.f;
 }
-
-/* ═══════════ Weak points / topple ═══════════ */
 
 FGolemWeakPoint* UGolemBossComponent::FindWeakPoint(FName Id)
 {
@@ -1273,11 +1828,7 @@ bool UGolemBossComponent::HitWeakPoint(FName Id, float Damage, AActor* Instigato
 	if (WP->Kind == EGolemWeakPointKind::Head)
 	{
 		const float Crit = Damage * HeadCritMultiplier;
-		if (OwnerCharacter)
-		{
-			AController* Inst = Instigator ? Instigator->GetInstigatorController() : nullptr;
-			UGameplayStatics::ApplyDamage(OwnerCharacter, Crit, Inst, Instigator, UDamageType::StaticClass());
-		}
+		DealDamageToBoss(Crit, Instigator);
 		OnGolemWeakPointHit.Broadcast(Id, Crit, 0.f);
 		OnGolemCriticalHit.Broadcast(Crit, Id);
 		return true;
@@ -1293,6 +1844,69 @@ bool UGolemBossComponent::HitWeakPoint(FName Id, float Damage, AActor* Instigato
 		CheckTopple();
 	}
 	return true;
+}
+
+bool UGolemBossComponent::HitArm(FName ArmId, float Damage, AActor* Instigator)
+{
+	FGolemWeakPoint* WP = FindWeakPoint(ArmId);
+	if (!WP || WP->Kind != EGolemWeakPointKind::Arm || Damage <= 0.f) return false;
+
+	if (!bArmsAlwaysHittable && !WP->bVulnerable) return false;
+
+	float Mult = WP->bBroken ? FMath::Max(1.f, BrokenArmDamageMultiplier) : 1.f;
+	if (!WP->bVulnerable && !WP->bBroken) Mult *= FMath::Clamp(UnexposedArmDamageMultiplier, 0.f, 1.f);
+	const float Dealt = Damage * Mult;
+	DealDamageToBoss(Dealt, Instigator);
+
+	const float Remaining = WP->bBroken ? 0.f : (float)FMath::Max(0, ArmCrystalHitsToBreak - WP->CrystalHits);
+	OnGolemWeakPointHit.Broadcast(ArmId, Dealt, Remaining);
+
+	const bool bMayChip = WP->bVulnerable || !bArmCrystalsChipOnlyWhenExposed;
+	if (!WP->bBroken && bMayChip && ++WP->CrystalHits >= ArmCrystalHitsToBreak)
+	{
+		WP->bBroken = true;
+		WP->bVulnerable = false;
+		OnGolemWeakPointBroken.Broadcast(ArmId);
+		CheckTopple();
+	}
+	return true;
+}
+
+bool UGolemBossComponent::RouteBodyHit(float Damage, AActor* Instigator)
+{
+	if (Damage <= 0.f) return false;
+
+	if (Instigator && OwnerCharacter && !OwnerCharacter->GetCurrentTarget())
+		OwnerCharacter->OnPerceiveTarget(Instigator);
+
+	if (bToppled)
+	{
+		for (const FGolemWeakPoint& WP : WeakPoints)
+			if (WP.Kind == EGolemWeakPointKind::Head && WP.bVulnerable && !WP.bBroken)
+				if (HitWeakPoint(WP.Id, Damage, Instigator)) return true;
+	}
+
+	const FVector From = Instigator ? Instigator->GetActorLocation()
+		: (OwnerCharacter ? OwnerCharacter->GetActorLocation() : FVector::ZeroVector);
+	FName BestArm = NAME_None;
+	float BestDistSq = TNumericLimits<float>::Max();
+	for (const FGolemWeakPoint& WP : WeakPoints)
+	{
+		if (WP.Kind != EGolemWeakPointKind::Arm) continue;
+		const float DistSq = FVector::DistSquared(GetWeakPointLocation(WP.Id), From);
+		if (DistSq < BestDistSq) { BestDistSq = DistSq; BestArm = WP.Id; }
+	}
+
+	if (BestArm == NAME_None)
+	{
+		DealDamageToBoss(Damage * UnexposedArmDamageMultiplier, Instigator);
+		if (!bActivated && bAutoActivateOnTarget) ActivateBoss();
+		return true;
+	}
+
+	const bool bApplied = HitArm(BestArm, Damage, Instigator);
+	if (bApplied && !bActivated && bAutoActivateOnTarget) ActivateBoss();
+	return bApplied;
 }
 
 void UGolemBossComponent::ExposeArmWeakPoints(bool bExpose, FName AttackId)
@@ -1326,7 +1940,7 @@ void UGolemBossComponent::ForceTopple() { Topple(); }
 void UGolemBossComponent::Topple()
 {
 	if (bToppled) return;
-	bToppled = true; // set BEFORE FinishAttack so it won't re-arm the arm-expose linger
+	bToppled = true;
 
 	if (OwnerCharacter)
 		if (UAIAnimationComponent* Anim = OwnerCharacter->GetAIAnimation())
@@ -1334,7 +1948,6 @@ void UGolemBossComponent::Topple()
 	if (State != EGolemAttackState::Idle) FinishAttack(true);
 	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(ExposeLingerTimerHandle);
 
-	// Arms are spent; open the head crystal for the crit window.
 	for (FGolemWeakPoint& WP : WeakPoints)
 		if (WP.Kind == EGolemWeakPointKind::Head) WP.bVulnerable = true;
 
@@ -1342,6 +1955,8 @@ void UGolemBossComponent::Topple()
 		W->GetTimerManager().SetTimer(ToppleTimerHandle, this, &UGolemBossComponent::OnToppleElapsed, ToppleDuration, false);
 
 	OnGolemToppled.Broadcast(ToppleDuration);
+
+	if (bSlamPlantsArenaCrystals) SpawnBigCrystal();
 }
 
 void UGolemBossComponent::OnToppleElapsed() { EndTopple(); }
@@ -1352,6 +1967,9 @@ void UGolemBossComponent::EndTopple()
 	bToppled = false;
 	if (UWorld* W = GetWorld()) W->GetTimerManager().ClearTimer(ToppleTimerHandle);
 
+	EndBigCrystal();
+	ClearArenaCrystals();
+
 	for (FGolemWeakPoint& WP : WeakPoints)
 	{
 		if (WP.Kind == EGolemWeakPointKind::Head) WP.bVulnerable = false;
@@ -1360,17 +1978,207 @@ void UGolemBossComponent::EndTopple()
 			WP.CurrentHealth = WP.Health;
 			WP.bBroken = false;
 			WP.bVulnerable = false;
+			WP.CrystalHits = 0;
 		}
 	}
 
 	const UWorld* W = GetWorld();
 	const float Now = W ? W->GetTimeSeconds() : 0.f;
-	NextAttackReadyTime = Now + GlobalCooldown; // a beat before resuming attacks
+	NextAttackReadyTime = Now + GlobalCooldown;
 
 	OnGolemRecoverFromTopple.Broadcast();
 }
 
-/* ═══════════ Debug ═══════════ */
+void UGolemBossComponent::PlantArenaCrystals()
+{
+	ClearArenaCrystals();
+	UWorld* const W = GetWorld();
+	for (const FVector& P : CurrentTelegraph.ImpactPoints)
+	{
+		FGolemArenaCrystal C;
+		C.Id = NextArenaCrystalId++;
+		C.Location = P;
+		C.HitsRemaining = FMath::Max(1, ArenaCrystalHitsToBreak);
+		C.bDestroyed = false;
+
+		if (W && *ArenaCrystalActorClass)
+		{
+			FActorSpawnParameters SP;
+			SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			SP.Owner = OwnerCharacter;
+			if (AGolemCrystal* Actor = W->SpawnActor<AGolemCrystal>(ArenaCrystalActorClass, P, FRotator::ZeroRotator, SP))
+			{
+				Actor->InitAsArenaCrystal(this, C.Id);
+				C.SpawnedActor = Actor;
+			}
+		}
+
+		ArenaCrystals.Add(C);
+		OnGolemArenaCrystalSpawned.Broadcast(C.Id, C.Location);
+	}
+}
+
+void UGolemBossComponent::ClearArenaCrystals()
+{
+	if (ArenaCrystals.Num() == 0) return;
+	for (const FGolemArenaCrystal& C : ArenaCrystals)
+		ShatterCrystalActor(C.SpawnedActor);
+	ArenaCrystals.Reset();
+	OnGolemArenaCrystalsCleared.Broadcast();
+}
+
+bool UGolemBossComponent::AllArenaCrystalsDestroyed() const
+{
+	if (ArenaCrystals.Num() == 0) return false;
+	for (const FGolemArenaCrystal& C : ArenaCrystals)
+		if (!C.bDestroyed) return false;
+	return true;
+}
+
+bool UGolemBossComponent::HitArenaCrystal(int32 CrystalId, float PlayerDamage, AActor* Instigator)
+{
+	FGolemArenaCrystal* C = ArenaCrystals.FindByPredicate([CrystalId](const FGolemArenaCrystal& X){ return X.Id == CrystalId; });
+	if (!C || C->bDestroyed) return false;
+
+	C->HitsRemaining = FMath::Max(0, C->HitsRemaining - 1);
+	OnGolemArenaCrystalHit.Broadcast(C->Id, C->HitsRemaining);
+
+	if (C->HitsRemaining <= 0)
+	{
+
+		const int32 Id = C->Id;
+		const FVector Loc = C->Location;
+		C->bDestroyed = true;
+		ShatterCrystalActor(C->SpawnedActor);
+		C->SpawnedActor = nullptr;
+
+		DealDamageToBoss(FMath::Max(0.f, PlayerDamage) * ArenaCrystalBreakDamageMult, Instigator);
+		OnGolemArenaCrystalDestroyed.Broadcast(Id, Loc);
+
+		if (OwnerCharacter && !OwnerCharacter->IsDead() && AllArenaCrystalsDestroyed())
+		{
+			ArenaCrystals.Reset();
+			Topple();
+		}
+	}
+	else if (AGolemCrystal* Cr = Cast<AGolemCrystal>(C->SpawnedActor))
+	{
+		Cr->NotifyDamaged(C->HitsRemaining, FMath::Max(1, ArenaCrystalHitsToBreak));
+	}
+	return true;
+}
+
+void UGolemBossComponent::SpawnBigCrystal()
+{
+	bBigCrystalActive = true;
+	BigCrystalHitsRemaining = FMath::Max(1, BigCrystalHitsToBreak);
+
+	const FVector Loc = ProjectToGround(ResolveArenaCentre());
+
+	if (UWorld* const W = GetWorld())
+	{
+		if (IsValid(BigCrystalActor)) BigCrystalActor->Destroy();
+		BigCrystalActor = nullptr;
+		if (*BigCrystalActorClass)
+		{
+			FActorSpawnParameters SP;
+			SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			SP.Owner = OwnerCharacter;
+			if (AGolemCrystal* Actor = W->SpawnActor<AGolemCrystal>(BigCrystalActorClass, Loc, FRotator::ZeroRotator, SP))
+			{
+				Actor->InitAsBigCrystal(this);
+				BigCrystalActor = Actor;
+			}
+		}
+	}
+
+	OnGolemBigCrystalSpawned.Broadcast(Loc);
+}
+
+void UGolemBossComponent::EndBigCrystal()
+{
+	if (!bBigCrystalActive) return;
+	bBigCrystalActive = false;
+	BigCrystalHitsRemaining = 0;
+	ShatterCrystalActor(BigCrystalActor);
+	BigCrystalActor = nullptr;
+}
+
+bool UGolemBossComponent::HitBigCrystal(float PlayerDamage, AActor* Instigator)
+{
+	if (!bBigCrystalActive) return false;
+
+	BigCrystalHitsRemaining = FMath::Max(0, BigCrystalHitsRemaining - 1);
+	OnGolemBigCrystalHit.Broadcast(BigCrystalHitsRemaining);
+
+	if (BigCrystalHitsRemaining <= 0)
+	{
+		const float Chunk = OwnerHealth ? OwnerHealth->GetMaxHealth() * FMath::Clamp(BigCrystalHealthFraction, 0.f, 1.f) : 0.f;
+		DealDamageToBoss(Chunk, Instigator);
+		OnGolemBigCrystalBroken.Broadcast(Chunk);
+		EndBigCrystal();
+
+		if (UWorld* W = GetWorld())
+			W->GetTimerManager().SetTimer(ToppleTimerHandle, this, &UGolemBossComponent::OnToppleElapsed,
+				FMath::Max(0.5f, BigCrystalStunDuration), false);
+	}
+	else if (AGolemCrystal* Cr = Cast<AGolemCrystal>(BigCrystalActor))
+	{
+		Cr->NotifyDamaged(BigCrystalHitsRemaining, FMath::Max(1, BigCrystalHitsToBreak));
+	}
+	return true;
+}
+
+void UGolemBossComponent::ShowBossUIAndMusic()
+{
+	UWorld* const W = GetWorld();
+	if (!W) return;
+
+	if (!BossBar && *BossBarWidgetClass)
+	{
+		if (APlayerController* PC = W->GetFirstPlayerController())
+		{
+			BossBar = CreateWidget<UGolemBossBarWidget>(PC, BossBarWidgetClass);
+			if (BossBar)
+			{
+				BossBar->AddToViewport(BossBarZOrder);
+				BossBar->SetBossName(BossDisplayName);
+				if (OwnerHealth) BossBar->SetBossHealth(OwnerHealth->GetHealth(), OwnerHealth->GetMaxHealth());
+			}
+		}
+	}
+
+	if (CombatMusic)
+	{
+		if (CombatMusicComp) { CombatMusicComp->Stop(); CombatMusicComp = nullptr; }
+		CombatMusicComp = UGameplayStatics::CreateSound2D(this, CombatMusic, 1.f, 1.f, 0.f, nullptr, false, false);
+		if (CombatMusicComp)
+		{
+			if (CombatMusicFadeIn > 0.f) CombatMusicComp->FadeIn(CombatMusicFadeIn);
+			else                         CombatMusicComp->Play();
+		}
+	}
+}
+
+void UGolemBossComponent::HideBossUIAndMusic()
+{
+	if (BossBar)
+	{
+		BossBar->RemoveFromParent();
+		BossBar = nullptr;
+	}
+	if (CombatMusicComp)
+	{
+		if (CombatMusicFadeOut > 0.f) CombatMusicComp->FadeOut(CombatMusicFadeOut, 0.f);
+		else                          CombatMusicComp->Stop();
+		CombatMusicComp = nullptr;
+	}
+}
+
+void UGolemBossComponent::HandleBossHealthChanged(float NewHealth, float MaxHealth)
+{
+	if (BossBar) BossBar->SetBossHealth(NewHealth, MaxHealth);
+}
 
 void UGolemBossComponent::DrawTelegraphDebug(const FGolemTelegraph& T, float Lifetime) const
 {
@@ -1388,11 +2196,14 @@ void UGolemBossComponent::DrawTelegraphDebug(const FGolemTelegraph& T, float Lif
 			DrawFlatCircle(W, T.ImpactPoints[i], T.ImpactRadii.IsValidIndex(i) ? T.ImpactRadii[i] : 200.f, Warn, Lifetime, 6.f);
 		break;
 	case EGolemHazardShape::GroundFissures:
-		DrawFlatCircle(W, ResolveArenaCentre(), GetArenaRadius(), FColor::Red, Lifetime, 8.f);
+	{
+		const FVector GroundC = ProjectToGround(ResolveArenaCentre());
+		DrawFlatCircle(W, GroundC, GetArenaRadius(), FColor::Red, Lifetime, 8.f);
 		for (const FVector& P : T.ImpactPoints)
 			DrawDebugSphere(W, P, 70.f, 10, Warn, false, Lifetime);
-		DrawDebugString(W, ResolveArenaCentre() + FVector(0, 0, 180.f), TEXT("FISSURES - FLY!"), nullptr, FColor::Red, Lifetime);
+		DrawDebugString(W, GroundC + FVector(0, 0, 180.f), TEXT("FISSURES - FLY!"), nullptr, FColor::Red, Lifetime);
 		break;
+	}
 	case EGolemHazardShape::SweepLine:
 	{
 		const FVector Perp = YawRotate(T.LineDirection, 90.f);
@@ -1418,7 +2229,7 @@ void UGolemBossComponent::DrawImpactDebug(const FVector& Center, float Radius, b
 #if ENABLE_DRAW_DEBUG
 	const UWorld* W = GetWorld();
 	if (!W) return;
-	const FColor Col = bAirborneIsSafe ? FColor(0, 160, 255) : FColor::Orange; // blue = get airborne, orange = direct hit
+	const FColor Col = bAirborneIsSafe ? FColor(0, 160, 255) : FColor::Orange;
 	DrawFlatCircle(W, Center, Radius, Col, DebugImpactLinger, 7.f);
 	DrawDebugSphere(W, Center, FMath::Min(Radius, 120.f), 12, Col, false, DebugImpactLinger);
 #endif
@@ -1451,8 +2262,6 @@ void UGolemBossComponent::DrawLiveDebug(float Lifetime) const
 #endif
 }
 
-/* ═══════════ Misc ═══════════ */
-
 FName UGolemBossComponent::GetCurrentAttackId() const
 {
 	return Attacks.IsValidIndex(CurrentAttackIndex) ? Attacks[CurrentAttackIndex].AttackId : NAME_None;
@@ -1463,7 +2272,7 @@ FName UGolemBossComponent::GetPendingForcedAttackId() const
 	return Attacks.IsValidIndex(PendingForcedAttack) ? Attacks[PendingForcedAttack].AttackId : NAME_None;
 }
 
-void UGolemBossComponent::HandleOwnerDamaged(AActor* /*Instigator*/)
+void UGolemBossComponent::HandleOwnerDamaged(AActor* )
 {
 	if (!bActivated && bAutoActivateOnTarget) ActivateBoss();
 }
@@ -1472,8 +2281,10 @@ void UGolemBossComponent::HandleOwnerDied()
 {
 	if (State != EGolemAttackState::Idle) FinishAttack(true);
 	ClearAirZones();
+	EndBigCrystal();
+	ClearArenaCrystals();
 	bActivated = false;
-	bToppled = false; // no recover-from-topple should fire on the corpse
+	bToppled = false;
 	if (UWorld* W = GetWorld())
 	{
 		W->GetTimerManager().ClearTimer(ToppleTimerHandle);

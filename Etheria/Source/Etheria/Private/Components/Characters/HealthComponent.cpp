@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: "ArsStolas"
+ * Last Updated by: ArsStolas
  * Class: HealthComponent - Source
 */
 
@@ -27,6 +27,7 @@ void UHealthComponent::BeginPlay()
 	{
 		OwnerActor = Owner;
 		Owner->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::HandleTakeAnyDamage);
+		Owner->OnTakePointDamage.AddDynamic(this, &UHealthComponent::HandleTakePointDamage);
 
 		OwnerCharacter = Cast<ABaseCharacter>(Owner);
 		if (OwnerCharacter.IsValid())
@@ -44,13 +45,6 @@ void UHealthComponent::ResetHealth()
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 }
 
-/** 
- * TakeDamage
- * ----------
- * Fonction principale du composant qui applique réellement les dégâts
- * Met à jour la santé, déclenche OnHealthChanged et OnDeath si nécessaire
- * Peut être appelée manuellement depuis d'autres systèmes (DOT, sorts, pièges, etc.)
-*/
 void UHealthComponent::TakeDamage(float DamageAmount)
 {
 	UE_LOG(LogTemp, Verbose, TEXT("[HealthComponent] TakeDamage — Amount: %f | IsDead: %s"),
@@ -59,7 +53,7 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 
 	TriggerDamageOverlay();
 
-	Health = FMath::Clamp(Health - DamageAmount, 0.f, MaxHealth);
+	Health = FMath::Clamp(Health - DamageAmount, FMath::Min(MinHealth, MaxHealth), MaxHealth);
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
 	if (IsDead())
@@ -75,10 +69,6 @@ void UHealthComponent::TakeDamage(float DamageAmount)
 		SetTemporaryLifeState(EtheriaTags::State_Life_TakingDamage, DamageStateDuration);
 	}
 }
-
-// =============================================================
-// Damage Feedback - Overlay
-// =============================================================
 
 UMeshComponent* UHealthComponent::ResolveDamageOverlayMesh()
 {
@@ -98,7 +88,6 @@ UMeshComponent* UHealthComponent::ResolveDamageOverlayMesh()
 		return nullptr;
 	}
 
-	// 1) Explicit mesh reference (recommended)
 	if (UActorComponent* Comp = DamageOverlayMesh.GetComponent(Owner))
 	{
 		if (UMeshComponent* Mesh = Cast<UMeshComponent>(Comp))
@@ -108,14 +97,12 @@ UMeshComponent* UHealthComponent::ResolveDamageOverlayMesh()
 		}
 	}
 
-	// 2) OwnerCharacter mesh (if we are on a character)
 	if (OwnerCharacter.IsValid() && OwnerCharacter->GetMesh())
 	{
 		CachedDamageOverlayMesh = OwnerCharacter->GetMesh();
 		return OwnerCharacter->GetMesh();
 	}
 
-	// 3) First mesh component on owner
 	if (UMeshComponent* Mesh = Owner->FindComponentByClass<UMeshComponent>())
 	{
 		CachedDamageOverlayMesh = Mesh;
@@ -138,7 +125,6 @@ void UHealthComponent::TriggerDamageOverlay()
 		return;
 	}
 
-	// Apply overlay + restart the timer if we're hit multiple times quickly.
 	Mesh->SetOverlayMaterial(DamageOverlayMaterial);
 	bDamageOverlayActive = true;
 
@@ -231,16 +217,17 @@ bool UHealthComponent::IsDead() const
 	return Health <= 0.f;
 }
 
-/**
- * HandleTakeAnyDamage
- * -------------------
- * Callback interne automatiquement appelé par le système de dégâts natif d'Unreal
- * lorsqu'un acteur subit des dégâts via ApplyDamage() (Coup d'épée, balle, explosion, etc.)
- * Redirige simplement vers TakeDamage() pour appliquer la logique de santé du composant
-*/
 void UHealthComponent::HandleTakeAnyDamage(AActor* DamagedActor, const float Damage, const UDamageType* DamageType,
 	AController* InstigatedBy, AActor* DamageCauser)
 {
 	UE_LOG(LogTemp, Verbose, TEXT("[HealthComponent] HandleTakeAnyDamage called — Damage: %f"), Damage);
 	TakeDamage(Damage);
+}
+
+void UHealthComponent::HandleTakePointDamage(AActor* DamagedActor, float Damage, AController* InstigatedBy, FVector HitLocation,
+	UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const UDamageType* DamageType, AActor* DamageCauser)
+{
+
+	if (Damage > 0.f && !IsDead() && !bInvulnerable)
+		OnDamagedDirectional.Broadcast(ShotFromDirection, DamageCauser);
 }

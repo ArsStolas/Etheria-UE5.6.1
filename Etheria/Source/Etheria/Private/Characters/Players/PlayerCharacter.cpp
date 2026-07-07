@@ -335,6 +335,16 @@ void APlayerCharacter::SetRopeSystemEnabled(bool bEnabled)
     ApplyRopeSystemEnabled();
 }
 
+void APlayerCharacter::SetGlideEnabled(bool bEnabled)
+{
+    bEnableGlide = bEnabled;
+
+    if (!bEnableGlide && FlightComponent && FlightComponent->IsInMode(EFlightMode::Glide))
+    {
+        FlightComponent->StopMode();
+    }
+}
+
 void APlayerCharacter::ApplyRopeSystemEnabled()
 {
     if (!bEnableRopeSystem)
@@ -814,6 +824,7 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 
 void APlayerCharacter::ToggleGlideMode()
 {
+    if (!bEnableGlide) return;
     if (IsDialogMovementBlocked()) return;
     if (IsGrapplingAnimationLocked()) return;
 

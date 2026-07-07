@@ -17,6 +17,8 @@
 
 class UStaticMesh;
 class UStaticMeshComponent;
+class UMaterialInterface;
+class UDecalComponent;
 
 UCLASS()
 class ETHERIA_API AGolemFallingRock : public AActor
@@ -34,6 +36,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Golem")
 	void Launch(FVector Start, FVector End, float Duration, float ArcHeight);
 
+	/** Project a ground decal at the impact point (End) that GROWS from small to full Radius as the rock approaches. */
+	UFUNCTION(BlueprintCallable, Category = "Golem")
+	void SetImpactDecal(UMaterialInterface* Material, float Radius, float ProjectionDepth);
+
 protected:
 	virtual void Tick(float DeltaTime) override;
 
@@ -47,4 +53,8 @@ private:
 	float Arc = 0.f;
 	bool bFlying = false; // false = held (spin only), true = in flight (spin + travel)
 	FRotator SpinRate = FRotator::ZeroRotator;
+
+	UPROPERTY() TObjectPtr<UDecalComponent> ImpactDecal; // ground warning at End, grown as the rock approaches
+	float DecalFullRadius = 0.f;
+	float DecalDepth = 400.f;
 };

@@ -101,6 +101,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Rope")
     void SetRopeSystemEnabled(bool bEnabled);
 
+    UFUNCTION(BlueprintCallable, Category = "FlightMode|Glide")
+    void SetGlideEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintPure, Category = "FlightMode|Glide")
+    bool IsGlideEnabled() const { return bEnableGlide; }
+
     UFUNCTION(BlueprintPure, Category = "Grapple")
     bool IsInGrapplingAnimation() const { return bInGrapplingAnimation; }
 
@@ -220,6 +226,9 @@ protected:
     UInputAction* GliderAction;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Glider")
     UInputAction* DiveAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightMode|Glide")
+    bool bEnableGlide = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightMode|Dive")
     bool bEnableDive = true;
