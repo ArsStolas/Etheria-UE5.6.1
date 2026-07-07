@@ -16,6 +16,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "Components/Characters/CharacterStateComponent.h"
 #include "Components/Characters/HealthComponent.h"
+#include "Components/Characters/Player/Camera/PlayerCameraEffectsComponent.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
 #include "Components/Characters/Player/Rope/RopeAttachComponent.h"
 #include "Components/Characters/Player/Rope/RopeConstraintComponent.h"
@@ -49,6 +50,8 @@ APlayerCharacter::APlayerCharacter()
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
+
+    CameraEffectsComponent = CreateDefaultSubobject<UPlayerCameraEffectsComponent>(TEXT("BPC_CameraEffects"));
 
     // --- CHARACTER ROTATION ---
     bUseControllerRotationYaw = false;

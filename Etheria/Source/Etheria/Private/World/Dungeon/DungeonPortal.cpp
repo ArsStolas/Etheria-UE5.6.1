@@ -75,6 +75,10 @@ void ADungeonPortal::StartPortalInteraction(AActor* Target)
 		TravelComp->BeginPreloadFromPortal(destinationLevel, dungeonInstanceLocation, ReturnTransform, ReturnControlRot);
 	}
 
+	// Interaction just completed: capture the character's visible appearance and
+	// start the fade to black right away (held until the teleport finishes).
+	TravelComp->NotifyPortalInteractionStarted();
+
 	OnPortalSequenceStart(Target);
 }
 
