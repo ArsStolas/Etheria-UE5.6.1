@@ -34,6 +34,7 @@ class ULockTargetComponent;
 class ULockVisualComponent;
 class USwimComponent;
 class UDialogBuilderGraph;
+class UPlayerCameraEffectsComponent;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -97,6 +98,7 @@ public:
     FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
     FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
     FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+    FORCEINLINE UPlayerCameraEffectsComponent* GetCameraEffectsComponent() const { return CameraEffectsComponent; }
     
     UFUNCTION(BlueprintCallable, Category = "Rope")
     void SetRopeSystemEnabled(bool bEnabled);
@@ -132,6 +134,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     UCameraComponent* FollowCamera;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+    UPlayerCameraEffectsComponent* CameraEffectsComponent;
 
     // --- FLIGHT MODE ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode")

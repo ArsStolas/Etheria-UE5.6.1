@@ -11,11 +11,15 @@
 
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/TimelineComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
 
 UDungeonTravelComponent::UDungeonTravelComponent()
 {
@@ -25,6 +29,16 @@ UDungeonTravelComponent::UDungeonTravelComponent()
 void UDungeonTravelComponent::BeginPlay()
 {
 	Super::BeginPlay();
+}
+
+void UDungeonTravelComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(fadeTimerHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void UDungeonTravelComponent::SetEnterPortalActor(AActor* PortalActor)
@@ -105,6 +119,11 @@ void UDungeonTravelComponent::BeginPreloadFromPortal(TSoftObjectPtr<UWorld> Dung
 
 void UDungeonTravelComponent::CommitEnterDungeon(const FName SpawnTag)
 {
+	if (bTransitionInProgress)
+	{
+		return;
+	}
+
 	if (travelState != EDungeonTravelState::ReadyToEnter)
 	{
 		bPendingEnterCommit = true;
@@ -112,6 +131,19 @@ void UDungeonTravelComponent::CommitEnterDungeon(const FName SpawnTag)
 		return;
 	}
 
+	if (!streamingLevel || !streamingLevel->IsLevelLoaded())
+	{
+		return;
+	}
+
+	bTransitionInProgress = true;
+	bPendingTransitionIsEnter = true;
+	pendingTransitionSpawnTag = SpawnTag;
+	StartCommitSequence();
+}
+
+void UDungeonTravelComponent::PerformEnterDungeon(const FName SpawnTag)
+{
 	if (!streamingLevel || !streamingLevel->IsLevelLoaded())
 	{
 		return;
@@ -129,6 +161,13 @@ void UDungeonTravelComponent::CommitEnterDungeon(const FName SpawnTag)
 	SpawnTransform.AddToTranslation(FVector(0.f, 0.f, ComputeLiftZ()));
 	TeleportOwnerTo(SpawnTransform, SpawnTransform.Rotator());
 
+	// Kill any lingering departure dissolve timeline BEFORE the appear timeline starts,
+	// otherwise both write the same material parameters and the character can stay invisible.
+	if (bStopPortalTimelinesOnArrive)
+	{
+		StopPortalTimelines();
+	}
+
 	TryTriggerArriveInDungeonEvent();
 
 	travelState = EDungeonTravelState::InDungeon;
@@ -138,10 +177,29 @@ void UDungeonTravelComponent::CommitEnterDungeon(const FName SpawnTag)
 
 void UDungeonTravelComponent::CommitReturnToOrigin()
 {
+	if (bTransitionInProgress)
+	{
+		return;
+	}
+
+	bTransitionInProgress = true;
+	bPendingTransitionIsEnter = false;
+	pendingTransitionSpawnTag = NAME_None;
+	StartCommitSequence();
+}
+
+void UDungeonTravelComponent::PerformReturnToOrigin()
+{
 	FTransform ReturnTransform = returnData.ReturnTransform;
 	ReturnTransform.AddToTranslation(FVector(0.f, 0.f, ComputeLiftZ()));
 
 	TeleportOwnerTo(ReturnTransform, returnData.ReturnControlRotation);
+
+	// Kill lingering dissolve timelines on both portals before the appear timeline plays.
+	if (bStopPortalTimelinesOnArrive)
+	{
+		StopPortalTimelines();
+	}
 
 	// IMPORTANT:
 	// Fire arrival-back event on the ENTER portal (main world) so its BP Timeline can finish.
@@ -159,6 +217,236 @@ void UDungeonTravelComponent::CommitReturnToOrigin()
 	pendingSpawnTag = NAME_None;
 
 	exitPortalActor = nullptr;
+}
+
+// ------------------------------------------------------------------
+// Fade transition
+// ------------------------------------------------------------------
+void UDungeonTravelComponent::NotifyPortalInteractionStarted()
+{
+	// Idle means the preload failed or nothing is set up: never black out the screen
+	// for a travel that will not happen.
+	if (travelState == EDungeonTravelState::Idle)
+	{
+		return;
+	}
+
+	// Snapshot the character's visible appearance BEFORE any dissolve VFX runs.
+	CaptureOwnerAppearance();
+
+	if (bUseFadeTransition)
+	{
+		FadeToBlack();
+	}
+}
+
+void UDungeonTravelComponent::StartCommitSequence()
+{
+	if (bUseFadeTransition && GetCameraManager())
+	{
+		// The fade usually started at interaction time; wait for the remaining
+		// fade-out (if any), plus the black hold, before teleporting.
+		if (!bFadeOutStarted)
+		{
+			FadeToBlack();
+		}
+
+		const double Now = GetWorld()->GetTimeSeconds();
+		const double Delay = FMath::Max(fadeBlackAtTime - Now, 0.0) + fadeHoldDuration;
+
+		GetWorld()->GetTimerManager().SetTimer(
+			fadeTimerHandle,
+			this,
+			&UDungeonTravelComponent::OnFadeOutFinished,
+			FMath::Max(static_cast<float>(Delay), 0.02f),
+			false
+		);
+		return;
+	}
+
+	OnFadeOutFinished();
+}
+
+void UDungeonTravelComponent::OnFadeOutFinished()
+{
+	if (bPendingTransitionIsEnter)
+	{
+		PerformEnterDungeon(pendingTransitionSpawnTag);
+	}
+	else
+	{
+		PerformReturnToOrigin();
+	}
+
+	pendingTransitionSpawnTag = NAME_None;
+
+	// Verification delay, still fully black: streaming settles, the character
+	// appearance is restored, and the camera/spring arm finishes blending.
+	if (postTeleportSettleDelay > 0.f && GetWorld())
+	{
+		GetWorld()->GetTimerManager().SetTimer(
+			fadeTimerHandle,
+			this,
+			&UDungeonTravelComponent::FinishTransition,
+			postTeleportSettleDelay,
+			false
+		);
+	}
+	else
+	{
+		FinishTransition();
+	}
+}
+
+void UDungeonTravelComponent::FinishTransition()
+{
+	// Kill any dissolve timeline still running (departure OR arrival), then snap
+	// the character back to the exact appearance captured at interaction time.
+	if (bStopPortalTimelinesOnArrive)
+	{
+		StopPortalTimelines();
+	}
+
+	if (bEnsureVisibleAfterTravel)
+	{
+		RestoreOwnerAppearance();
+	}
+
+	if (bFadeOutStarted)
+	{
+		FadeFromBlack();
+	}
+
+	bFadeOutStarted = false;
+	bTransitionInProgress = false;
+}
+
+void UDungeonTravelComponent::FadeToBlack()
+{
+	if (APlayerCameraManager* CameraManager = GetCameraManager())
+	{
+		CameraManager->StartCameraFade(0.f, 1.f, FMath::Max(fadeOutDuration, 0.05f), fadeColor, bFadeAudio, /*bHoldWhenFinished*/ true);
+		bFadeOutStarted = true;
+		fadeBlackAtTime = GetWorld()->GetTimeSeconds() + FMath::Max(fadeOutDuration, 0.05f);
+	}
+}
+
+void UDungeonTravelComponent::FadeFromBlack() const
+{
+	if (APlayerCameraManager* CameraManager = GetCameraManager())
+	{
+		CameraManager->StartCameraFade(1.f, 0.f, FMath::Max(fadeInDuration, 0.05f), fadeColor, bFadeAudio, /*bHoldWhenFinished*/ false);
+	}
+}
+
+APlayerCameraManager* UDungeonTravelComponent::GetCameraManager() const
+{
+	const ACharacter* Character = Cast<ACharacter>(GetOwner());
+	const APlayerController* PC = Character ? Cast<APlayerController>(Character->GetController()) : nullptr;
+	return PC ? PC->PlayerCameraManager : nullptr;
+}
+
+// ------------------------------------------------------------------
+// Character appearance safety
+// ------------------------------------------------------------------
+void UDungeonTravelComponent::StopPortalTimelines() const
+{
+	const auto StopTimelinesOn = [](const TWeakObjectPtr<AActor>& PortalActor)
+	{
+		if (!PortalActor.IsValid())
+		{
+			return;
+		}
+
+		TArray<UTimelineComponent*> Timelines;
+		PortalActor->GetComponents<UTimelineComponent>(Timelines);
+		for (UTimelineComponent* Timeline : Timelines)
+		{
+			if (Timeline && Timeline->IsPlaying())
+			{
+				Timeline->Stop();
+			}
+		}
+	};
+
+	StopTimelinesOn(enterPortalActor);
+	StopTimelinesOn(exitPortalActor);
+}
+
+void UDungeonTravelComponent::CaptureOwnerAppearance()
+{
+	if (bAppearanceCaptured)
+	{
+		return;
+	}
+
+	const ACharacter* Character = Cast<ACharacter>(GetOwner());
+	const USkeletalMeshComponent* Mesh = Character ? Character->GetMesh() : nullptr;
+	if (!Mesh)
+	{
+		return;
+	}
+
+	capturedOverlayMaterial = Mesh->GetOverlayMaterial();
+
+	bCapturedDissolve = false;
+	bCapturedColorOpacity = false;
+
+	for (int32 Index = 0; Index < Mesh->GetNumMaterials(); ++Index)
+	{
+		const UMaterialInterface* Material = Mesh->GetMaterial(Index);
+		if (!Material)
+		{
+			continue;
+		}
+
+		float Value = 0.f;
+		if (!bCapturedDissolve && Material->GetScalarParameterValue(FMaterialParameterInfo(dissolveParamName), Value))
+		{
+			capturedDissolveValue = Value;
+			bCapturedDissolve = true;
+		}
+		if (!bCapturedColorOpacity && Material->GetScalarParameterValue(FMaterialParameterInfo(colorOpacityParamName), Value))
+		{
+			capturedColorOpacityValue = Value;
+			bCapturedColorOpacity = true;
+		}
+
+		if (bCapturedDissolve && bCapturedColorOpacity)
+		{
+			break;
+		}
+	}
+
+	bAppearanceCaptured = true;
+}
+
+void UDungeonTravelComponent::RestoreOwnerAppearance()
+{
+	ACharacter* Character = Cast<ACharacter>(GetOwner());
+	if (!Character)
+	{
+		return;
+	}
+
+	Character->SetActorHiddenInGame(false);
+
+	if (USkeletalMeshComponent* Mesh = Character->GetMesh())
+	{
+		Mesh->SetVisibility(true, true);
+		Mesh->SetScalarParameterValueOnMaterials(dissolveParamName, bCapturedDissolve ? capturedDissolveValue : visibleDissolveValue);
+		Mesh->SetScalarParameterValueOnMaterials(colorOpacityParamName, bCapturedColorOpacity ? capturedColorOpacityValue : visibleColorOpacityValue);
+
+		if (bAppearanceCaptured)
+		{
+			Mesh->SetOverlayMaterial(capturedOverlayMaterial);
+		}
+	}
+
+	bAppearanceCaptured = false;
+	bCapturedDissolve = false;
+	bCapturedColorOpacity = false;
+	capturedOverlayMaterial = nullptr;
 }
 
 void UDungeonTravelComponent::StartPollingPreload()
