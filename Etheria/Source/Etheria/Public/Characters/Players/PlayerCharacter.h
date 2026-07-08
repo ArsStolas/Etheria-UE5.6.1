@@ -33,6 +33,8 @@ class UInventoryComponent;
 class ULockTargetComponent;
 class ULockVisualComponent;
 class USwimComponent;
+class UDialogBuilderGraph;
+class UPlayerCameraEffectsComponent;
 
 // ============================================================
 // AXIS STATE STRUCT
@@ -61,6 +63,13 @@ struct FAxisPressState
     void OnPosStarted(double Time) { bPosPressed = true;  PosLastTime = Time; }
     void OnNegCompleted()          { bNegPressed = false; }
     void OnPosCompleted()          { bPosPressed = false; }
+    void Reset()
+    {
+        bNegPressed = false;
+        bPosPressed = false;
+        NegLastTime = -DBL_MAX;
+        PosLastTime = -DBL_MAX;
+    }
 };
 
 // ============================================================
@@ -89,9 +98,16 @@ public:
     FORCEINLINE USwimComponent* GetSwimComponent() const { return SwimComponent; }
     FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
     FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+    FORCEINLINE UPlayerCameraEffectsComponent* GetCameraEffectsComponent() const { return CameraEffectsComponent; }
     
     UFUNCTION(BlueprintCallable, Category = "Rope")
     void SetRopeSystemEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "FlightMode|Glide")
+    void SetGlideEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintPure, Category = "FlightMode|Glide")
+    bool IsGlideEnabled() const { return bEnableGlide; }
 
     UFUNCTION(BlueprintPure, Category = "Grapple")
     bool IsInGrapplingAnimation() const { return bInGrapplingAnimation; }
@@ -118,6 +134,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     UCameraComponent* FollowCamera;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+    UPlayerCameraEffectsComponent* CameraEffectsComponent;
 
     // --- FLIGHT MODE ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightMode")
@@ -212,6 +231,12 @@ protected:
     UInputAction* GliderAction;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Glider")
     UInputAction* DiveAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightMode|Glide")
+    bool bEnableGlide = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightMode|Dive")
+    bool bEnableDive = true;
 
     // --- INVENTORY ---
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|Inventory")
@@ -337,6 +362,10 @@ private:
 
     // --- Movement State ---
     bool IsGrapplingAnimationLocked() const;
+    const UDialogBuilderGraph* GetActiveDialog() const;
+    bool IsDialogInputBlocked() const;
+    bool IsDialogMovementBlocked() const;
+    void ClearGameplayInputState();
     void HandleMovementInput();
     void UpdateMovementState();
     void HandleAirborneState();

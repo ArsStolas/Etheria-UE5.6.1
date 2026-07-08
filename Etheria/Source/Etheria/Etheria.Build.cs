@@ -22,11 +22,13 @@ public class Etheria : ModuleRules
 			"GameplayTags",
 			//"GameplayStateTreeModule",
 			"CableComponent",
+			"EngineCameras",
 			"PhysicsCore",
 			"AnimGraphRuntime",
 			"LevelSequence",
 			"MovieScene",
 			"MovieSceneTracks",
+			"OrionRPG",
 			"Slate",
 			"SlateCore"
 		});
