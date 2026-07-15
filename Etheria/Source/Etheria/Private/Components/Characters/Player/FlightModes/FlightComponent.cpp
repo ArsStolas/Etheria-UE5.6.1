@@ -1,7 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
- * Last Updated by: Zhailendra
+ * Last Updated by: ArsStolas
  * Class: FlightComponent - Source
 */
 
@@ -32,7 +32,10 @@ void UFlightComponent::BeginPlay()
         GlideDescendRate,
         GlideInterpSpeed,
         GlideDescentInterpSpeed,
-        GlideMinimumHeight);
+        GlideMinimumHeight,
+        GlideWindStreamAcceleration,
+        GlideWindEscapeInputThreshold,
+        GlideWindEscapeHoldTime);
 
     DiveMode->ConfigureDiveTuning(
         DiveMaxSpeed,
@@ -83,7 +86,6 @@ void UFlightComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
         ? DiveMode->GetDiveDirection()
         : FVector2D::ZeroVector;
 
-    // Dive: vérifier contact sol
     if (CurrentMode == EFlightMode::Dive && Owner->IsGrounded())
     {
         StopMode();
@@ -91,7 +93,6 @@ void UFlightComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
         return;
     }
 
-    // Glide: vérifier marche au sol
     if (CurrentMode == EFlightMode::Glide && Owner->GetCharacterMovement()->IsWalking())
     {
         StopMode();
@@ -138,7 +139,6 @@ void UFlightComponent::StartDive()
     if (bTooCloseToGround)
         return;
 
-    // Exit previous flight mode, then enter dive.
     const EFlightMode PreviousMode = CurrentMode;
     if (ActiveMode)
     {
@@ -171,7 +171,6 @@ void UFlightComponent::StopMode()
     CurrentMode = EFlightMode::None;
     DiveDirection = FVector2D::ZeroVector;
 
-    // Broadcast l'événement correspondant
     if (PreviousMode == EFlightMode::Glide)
         OnGlideStop.Broadcast();
     else if (PreviousMode == EFlightMode::Dive)

@@ -1,6 +1,7 @@
 /**
  * Etheria's End Project, 2025
  * Created by: Zhailendra
+ * Last Updated by: ArsStolas
  * Class: AWindStreamZone - Source
  */
 
@@ -10,6 +11,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/Characters/Player/FlightModes/Dive/DiveMode.h"
 #include "Components/Characters/Player/FlightModes/FlightComponent.h"
+#include "Components/Characters/Player/FlightModes/Glide/GlideMode.h"
 #include "Components/SplineComponent.h"
 #include "DrawDebugHelpers.h"
 #include "NiagaraComponent.h"
@@ -98,7 +100,7 @@ void AWindStreamZone::Tick(float DeltaTime)
             continue;
         }
 
-        if (!IsPlayerInDiveMode(Player))
+        if (!IsPlayerInStreamFlightMode(Player))
         {
             PlayerWindUseTimes.FindOrAdd(Player) = 0.f;
             PlayerSplineDistances.Remove(Player);
@@ -579,7 +581,6 @@ void AWindStreamZone::OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp,
 
     if (!bAlreadyIn)
     {
-        // Detect travel direction immediately on entry so early frames do not fight the player.
         const float InitialSplineDistance = GetClosestSplineDistance(Player->GetActorLocation());
         PlayerSplineDistances.FindOrAdd(Player, InitialSplineDistance);
 
@@ -591,13 +592,10 @@ void AWindStreamZone::OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp,
         if (!SplineTangent.IsNearlyZero() && PlayerVelocity.SizeSquared() > 100.f * 100.f)
         {
             const float VelocityAlongSpline = FVector::DotProduct(PlayerVelocity.GetSafeNormal(), SplineTangent);
-            // Use a low threshold on entry so we commit immediately — avoids the
-            // 2–3 frame window where DirectionSign is 0 and the stream pushes back.
             DirectionSign = VelocityAlongSpline >= 0.f ? 1 : -1;
         }
         else
         {
-            // Default to forward if velocity is too low to determine direction.
             DirectionSign = 1;
         }
 
@@ -718,8 +716,6 @@ float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const 
         0.f,
         TotalLength);
 
-    // Travel direction is locked for the whole stream pass.
-    // This only initializes it if the player started diving while already inside.
     const FVector TrackedTangent = Spline->GetTangentAtDistanceAlongSpline(TrackedDistance, ESplineCoordinateSpace::World).GetSafeNormal();
     if (!TrackedTangent.IsNearlyZero())
     {
@@ -728,7 +724,6 @@ float AWindStreamZone::GetTrackedSplineDistance(APlayerCharacter* Player, const 
 
         if (DirectionSign == 0)
         {
-            // Resolve the direction quickly only while it has not been committed yet.
             if (FMath::Abs(TrackedDelta) > 0.5f)
             {
                 DirectionSign = TrackedDelta >= 0.f ? 1 : -1;
@@ -798,7 +793,7 @@ float AWindStreamZone::GetCurveStrength(float SplineDistance) const
     return FMath::GetMappedRangeValueClamped(FVector2D(8.f, 70.f), FVector2D(0.f, 1.f), AngleDegrees);
 }
 
-bool AWindStreamZone::IsPlayerInDiveMode(APlayerCharacter* Player) const
+bool AWindStreamZone::IsPlayerInStreamFlightMode(APlayerCharacter* Player) const
 {
     if (!Player)
     {
@@ -806,7 +801,8 @@ bool AWindStreamZone::IsPlayerInDiveMode(APlayerCharacter* Player) const
     }
 
     UFlightComponent* FlightComponent = Player->FindComponentByClass<UFlightComponent>();
-    return FlightComponent && FlightComponent->IsInMode(EFlightMode::Dive);
+    return FlightComponent
+        && (FlightComponent->IsInMode(EFlightMode::Dive) || FlightComponent->IsInMode(EFlightMode::Glide));
 }
 
 UDiveMode* AWindStreamZone::GetPlayerDiveMode(APlayerCharacter* Player) const
@@ -825,6 +821,22 @@ UDiveMode* AWindStreamZone::GetPlayerDiveMode(APlayerCharacter* Player) const
     return FlightComponent->GetDiveMode();
 }
 
+UGlideMode* AWindStreamZone::GetPlayerGlideMode(APlayerCharacter* Player) const
+{
+    if (!Player)
+    {
+        return nullptr;
+    }
+
+    UFlightComponent* FlightComponent = Player->FindComponentByClass<UFlightComponent>();
+    if (!FlightComponent || !FlightComponent->IsInMode(EFlightMode::Glide))
+    {
+        return nullptr;
+    }
+
+    return FlightComponent->GetGlideMode();
+}
+
 FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, float SplineDistance)
 {
     const FVector SplineDirection = Spline->GetTangentAtDistanceAlongSpline(SplineDistance, ESplineCoordinateSpace::World).GetSafeNormal();
@@ -833,7 +845,6 @@ FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, f
         return SplineDirection;
     }
 
-    // Usually initialized on entry; this fallback handles teleports or diving inside a stream.
     int32 DirectionSign = PlayerStreamDirectionSigns.FindRef(Player);
     if (DirectionSign == 0)
     {
@@ -842,12 +853,10 @@ FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, f
         {
             const float VelocityAlongSpline = FVector::DotProduct(PlayerVelocity.GetSafeNormal(), SplineDirection);
             DirectionSign = VelocityAlongSpline >= 0.f ? 1 : -1;
-            // Commit it so subsequent calls are consistent.
             PlayerStreamDirectionSigns.FindOrAdd(Player) = DirectionSign;
         }
         else
         {
-            // Cannot determine direction yet — don't apply stream influence this frame.
             return FVector::ZeroVector;
         }
     }
@@ -858,7 +867,8 @@ FVector AWindStreamZone::GetPreferredStreamDirection(APlayerCharacter* Player, f
 void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
 {
     UDiveMode* DiveMode = GetPlayerDiveMode(Player);
-    if (!DiveMode)
+    UGlideMode* GlideMode = DiveMode ? nullptr : GetPlayerGlideMode(Player);
+    if (!DiveMode && !GlideMode)
     {
         return;
     }
@@ -871,8 +881,6 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
     const float CurveStrength = GetCurveStrength(SplineDistance);
     const float Falloff = GetRadialFalloff(PlayerPos, SplineDistance);
 
-    // FIX: StreamDirection can now be ZeroVector when the direction is not yet
-    // committed — treat this the same as leaving the stream to avoid any push.
     if (Falloff <= 0.f || StreamDirection.IsNearlyZero())
     {
         PlayerWindUseTimes.FindOrAdd(Player) = 0.f;
@@ -908,7 +916,6 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
         ReferenceDirection = Player->GetActorForwardVector().GetSafeNormal();
     }
 
-    // Use the signed stream direction so reverse travel receives normal alignment.
     const float StreamAlignment = FMath::Abs(FVector::DotProduct(ReferenceDirection, StreamDirection));
     const bool bFullyUsingStream = StreamAlignment >= 0.55f;
     const float AlignmentAssist = bFullyUsingStream
@@ -934,8 +941,9 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
     const float SmoothedRampAlpha = FMath::InterpEaseInOut(0.f, 1.f, RampAlpha, 2.f);
     const float CurveGripScale = 1.f + CurveStrength * CurveGripBoost;
     const float CurveSpeedScale = 1.f - CurveStrength * CurveSpeedReduction;
-    const float StreamSpeedAtEntry = StreamSpeed * StreamEntrySpeedRatio;
-    const float RampedStreamSpeed = FMath::Lerp(StreamSpeedAtEntry, StreamSpeed * CurveSpeedScale, SmoothedRampAlpha);
+    const float ModeStreamSpeed = StreamSpeed * (GlideMode ? GliderStreamSpeedMultiplier : 1.f);
+    const float StreamSpeedAtEntry = ModeStreamSpeed * StreamEntrySpeedRatio;
+    const float RampedStreamSpeed = FMath::Lerp(StreamSpeedAtEntry, ModeStreamSpeed * CurveSpeedScale, SmoothedRampAlpha);
 
     const float EdgeCenteringStrength = CenteringStrength
         * EdgeAlpha
@@ -960,12 +968,19 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
     const float EffectiveInfluence = bFullyUsingStream
         ? FMath::Clamp(DirectionInfluence * CurveGripScale, 0.f, 1.f) * Falloff * FMath::Square(AlignmentAssist)
         : 0.f;
-    const float CurrentDiveSpeed = DiveMode->GetCurrentSpeed();
+    const float CurrentModeSpeed = DiveMode ? DiveMode->GetCurrentSpeed() : GlideMode->GetCurrentSpeed();
     const float TargetSpeed = bFullyUsingStream
-        ? FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, RampedStreamSpeed), AlignmentAssist)
-        : FMath::Lerp(CurrentDiveSpeed, FMath::Max(CurrentDiveSpeed, StreamSpeedAtEntry), CrossingAssistStrength);
+        ? FMath::Lerp(CurrentModeSpeed, FMath::Max(CurrentModeSpeed, RampedStreamSpeed), AlignmentAssist)
+        : FMath::Lerp(CurrentModeSpeed, FMath::Max(CurrentModeSpeed, StreamSpeedAtEntry), CrossingAssistStrength);
 
-    DiveMode->ApplyWindBoost(TargetSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
+    if (DiveMode)
+    {
+        DiveMode->ApplyWindBoost(TargetSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
+    }
+    else
+    {
+        GlideMode->ApplyWindBoost(TargetSpeed, StreamDirection, EffectiveInfluence, CenteringAccel);
+    }
 
     WIND_SCREEN(21, FColor::Cyan,
         TEXT("[WindStream] %s | Sign:%d | Assist %.2f | Ramp %.2f | Curve %.2f | Center %.0f"),
@@ -984,7 +999,7 @@ void AWindStreamZone::ApplyWindEffect(APlayerCharacter* Player, float DeltaTime)
         Falloff,
         StreamAlignment,
         DistanceToCore,
-        CurrentDiveSpeed,
+        CurrentModeSpeed,
         TargetSpeed,
         Player->GetHorizontalInput(),
         Player->GetVerticalInput(),
